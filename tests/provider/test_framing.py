@@ -1,6 +1,6 @@
 import pytest
 
-from poor_code.provider.framing import SseFraming
+from poor_code.provider.framing import NdjsonFraming
 
 
 async def _aiter(items):
@@ -9,28 +9,29 @@ async def _aiter(items):
 
 
 @pytest.mark.asyncio
-async def test_sse_framing_splits_data_lines():
-    raw = [
-        b'data: {"a":1}\n\n',
-        b'data: {"b":2}\n\n',
-        b"data: [DONE]\n\n",
-    ]
-    framing = SseFraming()
-    out = [chunk async for chunk in framing.frames(_aiter(raw))]
+async def test_ndjson_framing_yields_each_line():
+    raw = [b'{"a":1}\n', b'{"b":2}\n', b'{"c":3}\n']
+    out = [chunk async for chunk in NdjsonFraming().frames(_aiter(raw))]
+    assert out == [b'{"a":1}', b'{"b":2}', b'{"c":3}']
+
+
+@pytest.mark.asyncio
+async def test_ndjson_framing_handles_split_across_reads():
+    raw = [b'{"a":', b'1}\n{"b":2', b'}\n']
+    out = [chunk async for chunk in NdjsonFraming().frames(_aiter(raw))]
     assert out == [b'{"a":1}', b'{"b":2}']
 
 
 @pytest.mark.asyncio
-async def test_sse_framing_handles_split_across_reads():
-    raw = [b'data: {"a":', b'1}\n\n', b"data: [DONE]\n\n"]
-    framing = SseFraming()
-    out = [chunk async for chunk in framing.frames(_aiter(raw))]
-    assert out == [b'{"a":1}']
+async def test_ndjson_framing_skips_blank_lines():
+    raw = [b'\n{"a":1}\n\n{"b":2}\n\n']
+    out = [chunk async for chunk in NdjsonFraming().frames(_aiter(raw))]
+    assert out == [b'{"a":1}', b'{"b":2}']
 
 
 @pytest.mark.asyncio
-async def test_sse_framing_ignores_blank_and_comment_lines():
-    raw = [b": ping\n\n", b'data: {"a":1}\n\n', b"data: [DONE]\n\n"]
-    framing = SseFraming()
-    out = [chunk async for chunk in framing.frames(_aiter(raw))]
-    assert out == [b'{"a":1}']
+async def test_ndjson_framing_yields_trailing_unterminated_line():
+    """Some servers omit the final newline; we must still yield the last record."""
+    raw = [b'{"a":1}\n{"b":2}']
+    out = [chunk async for chunk in NdjsonFraming().frames(_aiter(raw))]
+    assert out == [b'{"a":1}', b'{"b":2}']

@@ -2,7 +2,7 @@
 
 stream() is an async generator of provider-neutral LLMEvents. One instance
 is reused across turns; each call to stream() opens a fresh HTTP request
-and a fresh parser instance (so per-stream state in OpenAIChat is isolated).
+and a fresh parser instance (so per-stream state in the Protocol is isolated).
 """
 from __future__ import annotations
 
@@ -26,8 +26,10 @@ class LLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> AsyncIterator[LLMEvent]:
+        body = self.route.protocol.build_body(
+            messages=messages, tools=tools, model=self.model
+        )
         parser = self.route.protocol.for_stream()  # fresh per-stream parser
-        body = parser.build_body(messages=messages, tools=tools, model=self.model)
         headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
         self.route.auth.apply(headers)
         url = self.base_url + self.route.endpoint

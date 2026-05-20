@@ -11,12 +11,12 @@ from poor_code.provider.auth import Auth
 from poor_code.provider.framing import Framing
 
 if TYPE_CHECKING:
-    from poor_code.provider.protocols.openai_chat import Protocol
+    from poor_code.provider.protocols.base import Protocol
 
 
 @dataclass(frozen=True)
 class Route:
     protocol: "Protocol"
-    endpoint: str       # URL path, e.g. "/v1/chat/completions"
+    endpoint: str       # URL path, e.g. "/api/chat"
     auth: Auth
     framing: Framing

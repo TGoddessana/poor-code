@@ -1,4 +1,4 @@
-"""Provider-neutral stream events. Every concrete Protocol (OpenAIChat,
+"""Provider-neutral stream events. Every concrete Protocol (OllamaChat,
 AnthropicMessages, ...) parses its native chunks into this union, so the
 Agent loop never sees provider shapes.
 """
