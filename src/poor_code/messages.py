@@ -41,3 +41,85 @@ class RunSlashCommand(Command):
     name: str
     args: tuple[str, ...] = ()
     cmd_id: str = field(default_factory=_new_id)
+
+
+# =========================================================================
+# Events — domain → UI
+# =========================================================================
+
+
+@dataclass(frozen=True)
+class Event:
+    """Marker base. Concrete events subclass this."""
+
+
+# --- Turn lifecycle ---
+
+
+@dataclass(frozen=True)
+class TurnStarted(Event):
+    cmd_id: str
+    turn_id: str = field(default_factory=_new_id)
+
+
+@dataclass(frozen=True)
+class TurnEnded(Event):
+    turn_id: str
+
+
+@dataclass(frozen=True)
+class TurnFailed(Event):
+    turn_id: str
+    error: str
+
+
+# --- Streaming output ---
+
+
+@dataclass(frozen=True)
+class AssistantTextDelta(Event):
+    """One chunk of streaming text. Reducer accumulates per turn."""
+    turn_id: str
+    text: str
+
+
+@dataclass(frozen=True)
+class AssistantMessageCompleted(Event):
+    turn_id: str
+    text: str
+
+
+# --- Tool calls ---
+
+
+@dataclass(frozen=True)
+class ToolCallStarted(Event):
+    turn_id: str
+    tool_call_id: str
+    tool_name: str
+    args: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolCallFinished(Event):
+    turn_id: str
+    tool_call_id: str
+    result: Any
+
+
+@dataclass(frozen=True)
+class ToolCallFailed(Event):
+    turn_id: str
+    tool_call_id: str
+    error: str
+
+
+# --- Telemetry ---
+
+
+@dataclass(frozen=True)
+class UsageUpdated(Event):
+    turn_id: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
