@@ -5,6 +5,7 @@ from textual.screen import Screen
 from textual.widgets import Static
 
 from poor_code.ui.widgets.banner import Banner
+from poor_code.ui.widgets.chat_log import ChatLog
 from poor_code.ui.widgets.prompt_box import PromptBox
 
 _TAGLINE = "small models, strong scaffolding."
@@ -23,4 +24,5 @@ class WelcomeScreen(Screen):
         yield Static(_TAGLINE, classes="tagline")
         yield Static(_TIPS, classes="tips")
         yield Static(f"cwd: {Path.cwd()}", classes="cwd")
+        yield ChatLog(id="chat-log")
         yield PromptBox()

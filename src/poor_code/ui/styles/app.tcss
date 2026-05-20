@@ -42,3 +42,30 @@ PromptBox Input {
     padding: 0;
     height: 1;
 }
+
+#chat-log {
+    height: 1fr;
+    margin-top: 1;
+}
+
+#chat-scroll {
+    height: 100%;
+}
+
+.user-msg {
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.assistant-msg {
+    color: $text;
+    margin-bottom: 1;
+}
+
+.tool-running { color: $warning; }
+.tool-done    { color: $success; }
+.tool-failed  { color: $error; }
+
+.turn-error {
+    color: $error;
+}
