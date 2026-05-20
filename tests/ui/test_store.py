@@ -93,3 +93,81 @@ def test_turn_failed_marks_failed_clears_processing_records_last_error():
     assert s.turns[0].error == "boom"
     assert s.last_error == "boom"
     assert s.is_processing is False
+
+
+from poor_code.messages import (
+    AssistantMessageCompleted,
+    AssistantTextDelta,
+    ToolCallFailed,
+    ToolCallFinished,
+    ToolCallStarted,
+    UsageUpdated,
+)
+from poor_code.ui.store import CwdChanged
+
+
+def _running_state(turn_id: str = "T1", cmd_id: str = "c1") -> AppState:
+    s = reduce(AppState(), PromptSubmitted(cmd_id=cmd_id, user_text="hi"))
+    return reduce(s, TurnStarted(cmd_id=cmd_id, turn_id=turn_id))
+
+
+def test_assistant_text_delta_accumulates():
+    s = _running_state()
+    s = reduce(s, AssistantTextDelta(turn_id="T1", text="hel"))
+    s = reduce(s, AssistantTextDelta(turn_id="T1", text="lo"))
+    assert s.turns[0].assistant_text == "hello"
+
+
+def test_assistant_message_completed_replaces_assistant_text():
+    s = _running_state()
+    s = reduce(s, AssistantTextDelta(turn_id="T1", text="partial"))
+    s = reduce(s, AssistantMessageCompleted(turn_id="T1", text="final answer"))
+    assert s.turns[0].assistant_text == "final answer"
+
+
+def test_tool_call_started_appends_running_tool_call():
+    s = _running_state()
+    s = reduce(s, ToolCallStarted(
+        turn_id="T1", tool_call_id="tc1", tool_name="bash", args={"cmd": "ls"}
+    ))
+    tc = s.turns[0].tool_calls[0]
+    assert tc.tool_call_id == "tc1" and tc.tool_name == "bash"
+    assert tc.args == {"cmd": "ls"} and tc.status == "running"
+
+
+def test_tool_call_finished_updates_status_and_result():
+    s = _running_state()
+    s = reduce(s, ToolCallStarted(
+        turn_id="T1", tool_call_id="tc1", tool_name="bash", args={}
+    ))
+    s = reduce(s, ToolCallFinished(turn_id="T1", tool_call_id="tc1", result="ok"))
+    tc = s.turns[0].tool_calls[0]
+    assert tc.status == "done" and tc.result == "ok"
+
+
+def test_tool_call_failed_updates_status_and_error():
+    s = _running_state()
+    s = reduce(s, ToolCallStarted(
+        turn_id="T1", tool_call_id="tc1", tool_name="bash", args={}
+    ))
+    s = reduce(s, ToolCallFailed(turn_id="T1", tool_call_id="tc1", error="bad"))
+    tc = s.turns[0].tool_calls[0]
+    assert tc.status == "failed" and tc.error == "bad"
+
+
+def test_usage_updated_accumulates():
+    s = _running_state()
+    s = reduce(s, UsageUpdated(turn_id="T1",
+                               input_tokens=10, output_tokens=20, cost_usd=0.5))
+    s = reduce(s, UsageUpdated(turn_id="T1",
+                               input_tokens=5, output_tokens=5, cost_usd=0.25))
+    assert s.usage.input_tokens == 15
+    assert s.usage.output_tokens == 25
+    assert s.usage.cost_usd == 0.75
+
+
+def test_cwd_changed_updates_cwd_only():
+    s = AppState(cwd="/old")
+    s2 = reduce(s, CwdChanged(cwd="/new"))
+    assert s2.cwd == "/new"
+    assert s2.turns == s.turns  # untouched

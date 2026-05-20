@@ -8,7 +8,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal
 
-from poor_code.messages import Event, TurnEnded, TurnFailed, TurnStarted
+from poor_code.messages import (
+    AssistantMessageCompleted,
+    AssistantTextDelta,
+    Event,
+    ToolCallFailed,
+    ToolCallFinished,
+    ToolCallStarted,
+    TurnEnded,
+    TurnFailed,
+    TurnStarted,
+    UsageUpdated,
+)
 
 
 # =========================================================================
@@ -70,6 +81,11 @@ class PromptSubmitted(UIAction):
     user_text: str
 
 
+@dataclass(frozen=True)
+class CwdChanged(UIAction):
+    cwd: str
+
+
 Action = Event | UIAction
 
 
@@ -100,6 +116,36 @@ def _find_turn_by_id(state: AppState, turn_id: str) -> int | None:
         if t.turn_id == turn_id:
             return i
     return None
+
+
+def _update_tool_call(
+    state: AppState, turn_id: str, tool_call_id: str, **changes: Any
+) -> AppState:
+    i = _find_turn_by_id(state, turn_id)
+    if i is None:
+        return state
+    turn = state.turns[i]
+    for j, tc in enumerate(turn.tool_calls):
+        if tc.tool_call_id == tool_call_id:
+            new_tc = replace(tc, **changes)
+            new_tcs = turn.tool_calls[:j] + (new_tc,) + turn.tool_calls[j + 1 :]
+            return replace(
+                state, turns=_update_turn_at(state.turns, i, tool_calls=new_tcs)
+            )
+    return state
+
+
+def _append_tool_call(
+    state: AppState, turn_id: str, tc: ToolCallView
+) -> AppState:
+    i = _find_turn_by_id(state, turn_id)
+    if i is None:
+        return state
+    turn = state.turns[i]
+    return replace(
+        state,
+        turns=_update_turn_at(state.turns, i, tool_calls=turn.tool_calls + (tc,)),
+    )
 
 
 # --- reducer ---
@@ -143,6 +189,45 @@ def reduce(state: AppState, action: Action) -> AppState:
                 is_processing=False,
                 last_error=err,
             )
+
+        case AssistantTextDelta(turn_id=tid, text=chunk):
+            i = _find_turn_by_id(state, tid)
+            if i is None:
+                return state
+            new_text = state.turns[i].assistant_text + chunk
+            return replace(
+                state, turns=_update_turn_at(state.turns, i, assistant_text=new_text)
+            )
+
+        case AssistantMessageCompleted(turn_id=tid, text=text):
+            i = _find_turn_by_id(state, tid)
+            if i is None:
+                return state
+            return replace(
+                state, turns=_update_turn_at(state.turns, i, assistant_text=text)
+            )
+
+        case ToolCallStarted(turn_id=tid, tool_call_id=tcid, tool_name=name, args=args):
+            return _append_tool_call(
+                state, tid,
+                ToolCallView(tool_call_id=tcid, tool_name=name, args=args, status="running"),
+            )
+
+        case ToolCallFinished(turn_id=tid, tool_call_id=tcid, result=r):
+            return _update_tool_call(state, tid, tcid, status="done", result=r)
+
+        case ToolCallFailed(turn_id=tid, tool_call_id=tcid, error=err):
+            return _update_tool_call(state, tid, tcid, status="failed", error=err)
+
+        case UsageUpdated(input_tokens=i_in, output_tokens=i_out, cost_usd=c):
+            return replace(state, usage=UsageState(
+                input_tokens=state.usage.input_tokens + i_in,
+                output_tokens=state.usage.output_tokens + i_out,
+                cost_usd=state.usage.cost_usd + c,
+            ))
+
+        case CwdChanged(cwd=cwd):
+            return replace(state, cwd=cwd)
 
         case _:
             return state
