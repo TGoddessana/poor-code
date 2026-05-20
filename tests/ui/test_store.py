@@ -1,8 +1,9 @@
 import dataclasses
+from dataclasses import dataclass
 
 import pytest
 
-from poor_code.ui.store import AppState, ToolCallView, TurnView, UsageState
+from poor_code.ui.store import Action, AppState, ToolCallView, TurnView, UIAction, UsageState, reduce
 
 
 def test_app_state_defaults():
@@ -37,3 +38,13 @@ def test_view_dataclasses_are_frozen():
         s.is_processing = True  # type: ignore[misc]
     with pytest.raises(dataclasses.FrozenInstanceError):
         UsageState().input_tokens = 5  # type: ignore[misc]
+
+
+def test_reducer_returns_same_state_for_unknown_action():
+    @dataclass(frozen=True)
+    class _Unknown(UIAction):
+        pass
+
+    s = AppState(cwd="/x")
+    out = reduce(s, _Unknown())  # type: ignore[arg-type]
+    assert out is s  # identity, not just equality

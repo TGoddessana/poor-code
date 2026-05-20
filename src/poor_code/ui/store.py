@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal
 
+from poor_code.messages import Event
+
 
 # =========================================================================
 # View state — what the UI renders. All frozen.
@@ -49,3 +51,28 @@ class AppState:
     usage: UsageState = field(default_factory=UsageState)
     last_error: str | None = None
     cwd: str = ""
+
+
+# =========================================================================
+# UIAction — UI-internal signals. Domain cannot import from this module
+# (enforced by lint rule, see spec D8).
+# =========================================================================
+
+
+@dataclass(frozen=True)
+class UIAction:
+    """Marker base. Concrete UI actions subclass this."""
+
+
+Action = Event | UIAction
+
+
+# =========================================================================
+# Reducer — pure function. Cases added incrementally in later tasks.
+# =========================================================================
+
+
+def reduce(state: AppState, action: Action) -> AppState:
+    match action:
+        case _:
+            return state
