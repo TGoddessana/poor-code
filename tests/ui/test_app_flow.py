@@ -3,33 +3,22 @@ import asyncio
 from textual.widgets import Input
 
 from poor_code.app import PoorCodeApp
-from poor_code.messages import (
-    AssistantMessageCompleted,
-    AssistantTextDelta,
-    TurnEnded,
-    TurnFailed,
-    TurnStarted,
-    UsageUpdated,
-)
+from poor_code.domain.agent import Agent
+from poor_code.domain.tool.registry import ToolRegistry
+from poor_code.provider.events import FinishedReason, TextDelta
+from tests.provider.fakes import FakeLLMClient
+
+
+def _agent_text(text: str) -> Agent:
+    return Agent(llm=FakeLLMClient.text_only(text), tools=ToolRegistry([]))
 
 
 async def test_submit_routes_through_agent_and_updates_store():
-    # ScriptedAgent reads the incoming cmd to set correlation IDs correctly.
-    class ScriptedAgent:
-        async def run(self, cmd, cancel):
-            yield TurnStarted(cmd_id=cmd.cmd_id, turn_id="T1")
-            yield AssistantTextDelta(turn_id="T1", text="hi ")
-            yield AssistantTextDelta(turn_id="T1", text="there")
-            yield AssistantMessageCompleted(turn_id="T1", text="hi there")
-            yield UsageUpdated(turn_id="T1", input_tokens=2, output_tokens=2, cost_usd=0.0)
-            yield TurnEnded(turn_id="T1")
-
-    async with PoorCodeApp(agent=ScriptedAgent()).run_test() as pilot:
+    async with PoorCodeApp(agent=_agent_text("hi there")).run_test() as pilot:
         await pilot.pause(); await pilot.pause()
         pilot.app.screen.query_one(Input).focus()
         await pilot.press("p", "i", "n", "g")
         await pilot.press("enter")
-        # Drain worker; ScriptedAgent has no sleeps but the event loop needs to tick
         for _ in range(20):
             await pilot.pause()
 
@@ -37,39 +26,30 @@ async def test_submit_routes_through_agent_and_updates_store():
         assert len(state.turns) == 1
         turn = state.turns[0]
         assert turn.user_text == "ping"
-        assert turn.turn_id == "T1"
         assert turn.status == "done"
         assert turn.assistant_text == "hi there"
         assert state.is_processing is False
-        assert state.usage.input_tokens == 2
-        assert state.usage.output_tokens == 2
 
 
 async def test_cancel_during_turn_marks_failed():
-    """Ctrl+C while processing sets _cancel; SlowAgent observes and stops."""
+    """Build a FakeLLMClient that yields slowly so we can cancel mid-stream."""
 
-    class SlowAgent:
-        async def run(self, cmd, cancel):
-            yield TurnStarted(cmd_id=cmd.cmd_id, turn_id="T1")
+    class _SlowLLM:
+        async def stream(self, messages, tools):
             for _ in range(50):
-                if cancel.is_set():
-                    yield TurnFailed(turn_id="T1", error="cancelled")
-                    return
-                yield AssistantTextDelta(turn_id="T1", text=".")
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.05)
+                yield TextDelta(text=".")
+            yield FinishedReason(reason="stop")
 
-    async with PoorCodeApp(agent=SlowAgent()).run_test() as pilot:
+    agent = Agent(llm=_SlowLLM(), tools=ToolRegistry([]))
+    async with PoorCodeApp(agent=agent).run_test() as pilot:
         await pilot.pause(); await pilot.pause()
         pilot.app.screen.query_one(Input).focus()
         await pilot.press("x")
         await pilot.press("enter")
-        # Short explicit delay: enough for worker to start, not enough to finish
         await pilot.pause(delay=0.05)
-        # Confirm we are processing
         assert pilot.app.store.state.is_processing is True
-        # Trigger cancel
         pilot.app.action_cancel_or_quit()
-        # Wait for agent to observe cancel and emit TurnFailed (at most one 0.1s sleep)
         for _ in range(20):
             await pilot.pause(delay=0.05)
         state = pilot.app.store.state
