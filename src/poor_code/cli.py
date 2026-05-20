@@ -1,34 +1,40 @@
 """poor-code entrypoint.
 
-Builds the real Agent (LLMClient + ToolRegistry) and hands it to the
-Textual app. Fails fast at startup if OLLAMA_API_KEY is missing.
+Builds the app with whatever credentials are saved on disk. If none, the agent
+starts with a NoAuthLLM stub that fails the first turn with a hint to /login.
 """
 from __future__ import annotations
-
-import os
-import sys
 
 from poor_code.app import PoorCodeApp
 from poor_code.domain.agent import Agent
 from poor_code.domain.tool.read import ReadTool
 from poor_code.domain.tool.registry import ToolRegistry
-from poor_code.provider.auth import MissingApiKey
+from poor_code.infra import auth_store
 from poor_code.provider.providers import ollama_cloud
+from poor_code.slash.commands.login import LoginCommand
+from poor_code.slash.registry import SlashRegistry
 
 
-DEFAULT_MODEL = os.environ.get("POOR_CODE_MODEL", "qwen2.5-coder:7b")
+class NoAuthLLM:
+    """Placeholder LLM used until the user runs /login.
+
+    Raises on stream() so the Agent's exception handler emits a TurnFailed
+    with a message that points the user at the right command.
+    """
+
+    async def stream(self, messages, tools):  # type: ignore[no-untyped-def]
+        raise RuntimeError("no provider configured — type /login to set one up")
+        yield  # pragma: no cover — unreachable, makes this an async generator
+
+
+def _initial_llm():
+    creds = auth_store.get("ollama_cloud")
+    if creds and creds.get("api_key") and creds.get("model"):
+        return ollama_cloud.client(model=creds["model"], api_key=creds["api_key"])
+    return NoAuthLLM()
 
 
 def main() -> None:
-    try:
-        llm = ollama_cloud.client(model=DEFAULT_MODEL)
-    except MissingApiKey as e:
-        print(f"error: {e}", file=sys.stderr)
-        print(
-            "Set OLLAMA_API_KEY in your environment, or override the model with POOR_CODE_MODEL.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-    tools = ToolRegistry([ReadTool()])
-    PoorCodeApp(agent=Agent(llm=llm, tools=tools)).run()
+    agent = Agent(llm=_initial_llm(), tools=ToolRegistry([ReadTool()]))
+    slash = SlashRegistry([LoginCommand()])
+    PoorCodeApp(agent=agent, slash=slash).run()

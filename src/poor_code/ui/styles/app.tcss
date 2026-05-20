@@ -69,3 +69,36 @@ PromptBox Input {
 .turn-error {
     color: $error;
 }
+
+LoginScreen {
+    align: center middle;
+}
+
+#login-box {
+    width: 60;
+    height: auto;
+    padding: 1 2;
+    border: round $accent;
+    background: $surface;
+}
+
+.login-title {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.login-label {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+#login-buttons {
+    height: auto;
+    margin-top: 1;
+    align-horizontal: right;
+}
+
+#login-buttons Button {
+    margin-left: 1;
+}
