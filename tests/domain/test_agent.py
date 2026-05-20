@@ -60,3 +60,135 @@ async def test_history_accumulates_across_turns():
         {"role": "assistant", "content": "one"},
         {"role": "user", "content": "B"},
     ]
+
+
+from poor_code.domain.tool.base import ExecuteResult
+from poor_code.domain.tool.read import ReadParams
+from poor_code.messages import ToolCallFinished, ToolCallStarted as MsgToolCallStarted
+from poor_code.provider.events import (
+    FinishedReason,
+    TextDelta,
+    ToolCallEnded,
+    ToolCallInputDelta,
+    ToolCallStarted as ProviderToolCallStarted,
+)
+
+
+class _FakeReadTool:
+    id = "read"
+    description = "fake"
+    params = ReadParams
+
+    def __init__(self, output: str = "FILE CONTENT") -> None:
+        self.output = output
+        self.calls: list[ReadParams] = []
+
+    async def execute(self, args, ctx):
+        self.calls.append(args)
+        return ExecuteResult(title="t", output=self.output)
+
+
+@pytest.mark.asyncio
+async def test_tool_call_executed_then_followup_text():
+    tool = _FakeReadTool(output="hello world")
+    rounds = [
+        [
+            ProviderToolCallStarted(call_id="c1", name="read"),
+            ToolCallInputDelta(call_id="c1", json_delta='{"path":"a.txt"}'),
+            ToolCallEnded(call_id="c1"),
+            FinishedReason(reason="tool_calls"),
+        ],
+        [
+            TextDelta(text="done."),
+            FinishedReason(reason="stop"),
+        ],
+    ]
+    agent = Agent(llm=FakeLLMClient(rounds), tools=ToolRegistry([tool]))
+    events = await _collect(agent, SendPrompt(text="read a.txt"), asyncio.Event())
+    types = [type(e).__name__ for e in events]
+    assert types == [
+        "TurnStarted",
+        "ToolCallStarted",
+        "ToolCallFinished",
+        "AssistantTextDelta",
+        "AssistantMessageCompleted",
+        "TurnEnded",
+    ]
+    assert tool.calls[0].path == "a.txt"
+    # tool message + second user-less turn made it into history
+    roles = [m["role"] for m in agent.history]
+    assert roles == ["user", "assistant", "tool", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_tool_execute_error_yields_failed_and_recovers():
+    class _Boom:
+        id = "read"
+        description = "fake"
+        params = ReadParams
+        async def execute(self, args, ctx):
+            raise RuntimeError("disk full")
+    rounds = [
+        [
+            ProviderToolCallStarted(call_id="c1", name="read"),
+            ToolCallInputDelta(call_id="c1", json_delta='{"path":"a.txt"}'),
+            ToolCallEnded(call_id="c1"),
+            FinishedReason(reason="tool_calls"),
+        ],
+        [
+            TextDelta(text="sorry"),
+            FinishedReason(reason="stop"),
+        ],
+    ]
+    agent = Agent(llm=FakeLLMClient(rounds), tools=ToolRegistry([_Boom()]))
+    events = await _collect(agent, SendPrompt(text="x"), asyncio.Event())
+    types = [type(e).__name__ for e in events]
+    assert "ToolCallFailed" in types
+    assert types[-1] == "TurnEnded"
+    # tool error fed back to LLM
+    tool_msg = next(m for m in agent.history if m["role"] == "tool")
+    assert "disk full" in tool_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_name_fails_gracefully():
+    rounds = [
+        [
+            ProviderToolCallStarted(call_id="c1", name="no_such_tool"),
+            ToolCallInputDelta(call_id="c1", json_delta='{}'),
+            ToolCallEnded(call_id="c1"),
+            FinishedReason(reason="tool_calls"),
+        ],
+        [
+            TextDelta(text="ok"),
+            FinishedReason(reason="stop"),
+        ],
+    ]
+    agent = Agent(llm=FakeLLMClient(rounds), tools=ToolRegistry([]))
+    events = await _collect(agent, SendPrompt(text="x"), asyncio.Event())
+    types = [type(e).__name__ for e in events]
+    assert "ToolCallFailed" in types
+    assert types[-1] == "TurnEnded"
+
+
+@pytest.mark.asyncio
+async def test_invalid_args_json_fails_gracefully():
+    tool = _FakeReadTool()
+    rounds = [
+        [
+            ProviderToolCallStarted(call_id="c1", name="read"),
+            ToolCallInputDelta(call_id="c1", json_delta='{not json'),
+            ToolCallEnded(call_id="c1"),
+            FinishedReason(reason="tool_calls"),
+        ],
+        [
+            TextDelta(text="ok"),
+            FinishedReason(reason="stop"),
+        ],
+    ]
+    agent = Agent(llm=FakeLLMClient(rounds), tools=ToolRegistry([tool]))
+    events = await _collect(agent, SendPrompt(text="x"), asyncio.Event())
+    types = [type(e).__name__ for e in events]
+    assert "ToolCallFailed" in types
+    assert types[-1] == "TurnEnded"
+    assert tool.calls == []  # never reached

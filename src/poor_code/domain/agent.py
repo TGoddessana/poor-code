@@ -143,18 +143,62 @@ class Agent:
     async def _execute_tool_call(
         self, turn_id: str, call: _PendingCall, ctx: ToolContext
     ) -> AsyncIterator[Event]:
-        """Implemented in Task 15. For now, mark all calls failed so the
-        loop terminates cleanly under text-only tests.
-        """
-        yield ToolCallFailed(
-            turn_id=turn_id,
-            tool_call_id=call.call_id,
-            error="tool execution not implemented",
+        tool = self.tools.get(call.name)
+        if tool is None:
+            err = f"unknown tool: {call.name}"
+            yield ToolCallStarted(
+                turn_id=turn_id, tool_call_id=call.call_id,
+                tool_name=call.name, args={},
+            )
+            yield ToolCallFailed(
+                turn_id=turn_id, tool_call_id=call.call_id, error=err,
+            )
+            self.history.append({
+                "role": "tool", "tool_call_id": call.call_id,
+                "content": f"ERROR: {err}",
+            })
+            return
+
+        try:
+            args = tool.params.model_validate_json(call.args_json or "{}")
+        except Exception as e:
+            err = f"invalid arguments: {e}"
+            yield ToolCallStarted(
+                turn_id=turn_id, tool_call_id=call.call_id,
+                tool_name=call.name, args={},
+            )
+            yield ToolCallFailed(
+                turn_id=turn_id, tool_call_id=call.call_id, error=err,
+            )
+            self.history.append({
+                "role": "tool", "tool_call_id": call.call_id,
+                "content": f"ERROR: {err}",
+            })
+            return
+
+        yield ToolCallStarted(
+            turn_id=turn_id, tool_call_id=call.call_id,
+            tool_name=call.name, args=args.model_dump(),
+        )
+        try:
+            result = await tool.execute(args, ctx)
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            yield ToolCallFailed(
+                turn_id=turn_id, tool_call_id=call.call_id, error=err,
+            )
+            self.history.append({
+                "role": "tool", "tool_call_id": call.call_id,
+                "content": f"ERROR: {err}",
+            })
+            return
+
+        yield ToolCallFinished(
+            turn_id=turn_id, tool_call_id=call.call_id, result=result.output,
         )
         self.history.append({
-            "role": "tool",
-            "tool_call_id": call.call_id,
-            "content": "ERROR: tool execution not implemented",
+            "role": "tool", "tool_call_id": call.call_id,
+            "content": result.output,
         })
 
     @staticmethod
