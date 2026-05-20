@@ -35,3 +35,95 @@ def test_build_body_omits_tools_when_empty():
     proto = OpenAIChat()
     body = proto.build_body(messages=[], tools=[], model="m")
     assert "tools" not in body
+
+
+def test_parse_text_delta():
+    proto = OpenAIChat()
+    events = list(
+        proto.parse_chunk(
+            {"choices": [{"delta": {"content": "hi"}, "finish_reason": None}]}
+        )
+    )
+    from poor_code.provider.events import TextDelta
+    assert events == [TextDelta(text="hi")]
+
+
+def test_parse_tool_call_start_emits_started_then_input_delta():
+    proto = OpenAIChat()
+    events = list(
+        proto.parse_chunk(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "function": {"name": "read", "arguments": ""},
+                                }
+                            ]
+                        },
+                        "finish_reason": None,
+                    }
+                ]
+            }
+        )
+    )
+    from poor_code.provider.events import ToolCallStarted
+    assert events == [ToolCallStarted(call_id="call_1", name="read")]
+
+
+def test_parse_tool_call_argument_delta():
+    proto = OpenAIChat()
+    # First chunk registers the call so parser knows index→call_id.
+    list(proto.parse_chunk({
+        "choices": [{
+            "delta": {"tool_calls": [{
+                "index": 0, "id": "call_1",
+                "function": {"name": "read", "arguments": ""},
+            }]},
+            "finish_reason": None,
+        }]
+    }))
+    events = list(proto.parse_chunk({
+        "choices": [{
+            "delta": {"tool_calls": [{
+                "index": 0,
+                "function": {"arguments": '{"path":"a"}'},
+            }]},
+            "finish_reason": None,
+        }]
+    }))
+    from poor_code.provider.events import ToolCallInputDelta
+    assert events == [ToolCallInputDelta(call_id="call_1", json_delta='{"path":"a"}')]
+
+
+def test_parse_finish_emits_ended_for_open_calls_then_finished_reason():
+    proto = OpenAIChat()
+    list(proto.parse_chunk({
+        "choices": [{
+            "delta": {"tool_calls": [{
+                "index": 0, "id": "call_1",
+                "function": {"name": "read", "arguments": ""},
+            }]},
+            "finish_reason": None,
+        }]
+    }))
+    events = list(proto.parse_chunk({
+        "choices": [{"delta": {}, "finish_reason": "tool_calls"}]
+    }))
+    from poor_code.provider.events import FinishedReason, ToolCallEnded
+    assert events == [
+        ToolCallEnded(call_id="call_1"),
+        FinishedReason(reason="tool_calls"),
+    ]
+
+
+def test_parse_finish_stop_with_no_open_calls():
+    proto = OpenAIChat()
+    events = list(proto.parse_chunk(
+        {"choices": [{"delta": {}, "finish_reason": "stop"}]}
+    ))
+    from poor_code.provider.events import FinishedReason
+    assert events == [FinishedReason(reason="stop")]
