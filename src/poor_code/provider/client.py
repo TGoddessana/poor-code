@@ -36,7 +36,13 @@ class LLMClient:
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as http:
             async with http.stream("POST", url, headers=headers, json=body) as resp:
-                resp.raise_for_status()
+                if resp.is_error:
+                    await resp.aread()
+                    detail = (resp.text or "").strip()
+                    msg = f"HTTP {resp.status_code} from {url}"
+                    if detail:
+                        msg += f": {detail[:500]}"
+                    raise httpx.HTTPStatusError(msg, request=resp.request, response=resp)
                 async for payload in self.route.framing.frames(resp.aiter_bytes()):
                     try:
                         chunk = json.loads(payload)

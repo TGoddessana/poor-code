@@ -118,3 +118,21 @@ async def test_stream_http_error_raises():
     )
     with pytest.raises(httpx.HTTPStatusError):
         [_ async for _ in _make_client().stream(messages=[], tools=[])]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_stream_http_error_includes_response_body_in_message():
+    """A 404 with a real reason in the body must surface that text, not just
+    the bare '404'. Otherwise the user sees a cryptic HTTPStatusError that
+    hides the actual cause (model name typo, expired key, etc.)."""
+    respx.post("https://example.test/api/chat").mock(
+        return_value=httpx.Response(
+            404,
+            json={"error": "model 'nemotron3:33b' not found"},
+        )
+    )
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        [_ async for _ in _make_client().stream(messages=[], tools=[])]
+    assert "model 'nemotron3:33b' not found" in str(exc.value)
+    assert "404" in str(exc.value)
