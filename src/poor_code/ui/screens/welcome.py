@@ -4,8 +4,8 @@ from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import Static
 
-from poor_code.widgets.banner import Banner
-from poor_code.widgets.prompt_box import PromptBox
+from poor_code.ui.widgets.banner import Banner
+from poor_code.ui.widgets.prompt_box import PromptBox
 
 _TAGLINE = "small models, strong scaffolding."
 

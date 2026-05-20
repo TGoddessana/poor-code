@@ -1,10 +1,10 @@
 from textual.app import App
 
-from poor_code.screens.welcome import WelcomeScreen
+from poor_code.ui.screens.welcome import WelcomeScreen
 
 
 class PoorCodeApp(App):
-    CSS_PATH = "styles/app.tcss"
+    CSS_PATH = "ui/styles/app.tcss"
     BINDINGS = [("ctrl+q", "quit", "Quit")]
 
     def on_mount(self) -> None:
