@@ -192,3 +192,36 @@ async def test_invalid_args_json_fails_gracefully():
     assert "ToolCallFailed" in types
     assert types[-1] == "TurnEnded"
     assert tool.calls == []  # never reached
+
+
+@pytest.mark.asyncio
+async def test_max_iterations_terminates_with_turn_ended():
+    """Tool-call → tool-call → ... 10 rounds scripted. Loop is capped at 8."""
+    from poor_code.domain.agent import MAX_ITERATIONS
+
+    rounds = []
+    for i in range(MAX_ITERATIONS + 2):
+        cid = f"c{i}"
+        rounds.append([
+            ProviderToolCallStarted(call_id=cid, name="read"),
+            ToolCallInputDelta(call_id=cid, json_delta='{"path":"a.txt"}'),
+            ToolCallEnded(call_id=cid),
+            FinishedReason(reason="tool_calls"),
+        ])
+    tool = _FakeReadTool()
+    agent = Agent(llm=FakeLLMClient(rounds), tools=ToolRegistry([tool]))
+    events = await _collect(agent, SendPrompt(text="loop"), asyncio.Event())
+    # Did not crash, terminated with TurnEnded after exactly MAX_ITERATIONS LLM calls
+    assert events[-1].__class__.__name__ == "TurnEnded"
+    assert len(agent.llm.calls) == MAX_ITERATIONS
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_first_iteration_yields_turn_failed():
+    cancel = asyncio.Event()
+    cancel.set()
+    agent = Agent(llm=FakeLLMClient([]), tools=ToolRegistry([]))
+    events = await _collect(agent, SendPrompt(text="x"), cancel)
+    types = [type(e).__name__ for e in events]
+    assert types[-1] == "TurnFailed"
+    assert events[-1].error == "cancelled"
