@@ -1,0 +1,44 @@
+Screen {
+    background: $surface;
+    color: $text;
+    padding: 1 2;
+}
+
+.banner {
+    color: $accent;
+    text-style: bold;
+    width: auto;
+    height: auto;
+    margin-bottom: 1;
+}
+
+.tagline {
+    color: $text-muted;
+    text-style: italic;
+    margin-bottom: 1;
+}
+
+.tips {
+    color: $text;
+    margin-bottom: 1;
+}
+
+.cwd {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+PromptBox {
+    dock: bottom;
+    height: 3;
+    border: round $accent;
+    margin: 1 0;
+    padding: 0 1;
+}
+
+PromptBox Input {
+    background: transparent;
+    border: none;
+    padding: 0;
+    height: 1;
+}
