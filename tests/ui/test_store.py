@@ -48,3 +48,48 @@ def test_reducer_returns_same_state_for_unknown_action():
     s = AppState(cwd="/x")
     out = reduce(s, _Unknown())  # type: ignore[arg-type]
     assert out is s  # identity, not just equality
+
+
+from poor_code.messages import TurnEnded, TurnFailed, TurnStarted
+from poor_code.ui.store import PromptSubmitted
+
+
+def test_prompt_submitted_appends_pending_turn_and_sets_processing():
+    s = AppState()
+    s2 = reduce(s, PromptSubmitted(cmd_id="c1", user_text="hi"))
+    assert len(s2.turns) == 1
+    t = s2.turns[0]
+    assert t.cmd_id == "c1" and t.user_text == "hi"
+    assert t.turn_id is None and t.status == "pending"
+    assert s2.is_processing is True
+
+
+def test_turn_started_promotes_pending_turn_with_turn_id_and_running_status():
+    s = reduce(AppState(), PromptSubmitted(cmd_id="c1", user_text="hi"))
+    s = reduce(s, TurnStarted(cmd_id="c1", turn_id="T1"))
+    assert s.turns[0].turn_id == "T1"
+    assert s.turns[0].status == "running"
+
+
+def test_turn_started_with_unknown_cmd_id_is_noop():
+    s = reduce(AppState(), PromptSubmitted(cmd_id="c1", user_text="hi"))
+    out = reduce(s, TurnStarted(cmd_id="UNKNOWN", turn_id="T1"))
+    assert out is s
+
+
+def test_turn_ended_marks_done_and_clears_processing():
+    s = reduce(AppState(), PromptSubmitted(cmd_id="c1", user_text="hi"))
+    s = reduce(s, TurnStarted(cmd_id="c1", turn_id="T1"))
+    s = reduce(s, TurnEnded(turn_id="T1"))
+    assert s.turns[0].status == "done"
+    assert s.is_processing is False
+
+
+def test_turn_failed_marks_failed_clears_processing_records_last_error():
+    s = reduce(AppState(), PromptSubmitted(cmd_id="c1", user_text="hi"))
+    s = reduce(s, TurnStarted(cmd_id="c1", turn_id="T1"))
+    s = reduce(s, TurnFailed(turn_id="T1", error="boom"))
+    assert s.turns[0].status == "failed"
+    assert s.turns[0].error == "boom"
+    assert s.last_error == "boom"
+    assert s.is_processing is False

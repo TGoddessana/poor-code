@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal
 
-from poor_code.messages import Event
+from poor_code.messages import Event, TurnEnded, TurnFailed, TurnStarted
 
 
 # =========================================================================
@@ -64,6 +64,12 @@ class UIAction:
     """Marker base. Concrete UI actions subclass this."""
 
 
+@dataclass(frozen=True)
+class PromptSubmitted(UIAction):
+    cmd_id: str
+    user_text: str
+
+
 Action = Event | UIAction
 
 
@@ -72,7 +78,71 @@ Action = Event | UIAction
 # =========================================================================
 
 
+# --- internal helpers ---
+
+
+def _update_turn_at(
+    turns: tuple[TurnView, ...], index: int, **changes: Any
+) -> tuple[TurnView, ...]:
+    new = replace(turns[index], **changes)
+    return turns[:index] + (new,) + turns[index + 1 :]
+
+
+def _find_turn_by_cmd(state: AppState, cmd_id: str) -> int | None:
+    for i, t in enumerate(state.turns):
+        if t.cmd_id == cmd_id:
+            return i
+    return None
+
+
+def _find_turn_by_id(state: AppState, turn_id: str) -> int | None:
+    for i, t in enumerate(state.turns):
+        if t.turn_id == turn_id:
+            return i
+    return None
+
+
+# --- reducer ---
+
+
 def reduce(state: AppState, action: Action) -> AppState:
     match action:
+        case PromptSubmitted(cmd_id=cid, user_text=text):
+            new_turn = TurnView(
+                turn_id=None, cmd_id=cid, user_text=text, status="pending"
+            )
+            return replace(
+                state, turns=state.turns + (new_turn,), is_processing=True
+            )
+
+        case TurnStarted(cmd_id=cid, turn_id=tid):
+            i = _find_turn_by_cmd(state, cid)
+            if i is None:
+                return state
+            return replace(
+                state, turns=_update_turn_at(state.turns, i, turn_id=tid, status="running")
+            )
+
+        case TurnEnded(turn_id=tid):
+            i = _find_turn_by_id(state, tid)
+            if i is None:
+                return state
+            return replace(
+                state,
+                turns=_update_turn_at(state.turns, i, status="done"),
+                is_processing=False,
+            )
+
+        case TurnFailed(turn_id=tid, error=err):
+            i = _find_turn_by_id(state, tid)
+            if i is None:
+                return state
+            return replace(
+                state,
+                turns=_update_turn_at(state.turns, i, status="failed", error=err),
+                is_processing=False,
+                last_error=err,
+            )
+
         case _:
             return state
