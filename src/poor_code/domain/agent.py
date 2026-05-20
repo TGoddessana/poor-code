@@ -1,26 +1,168 @@
-"""Agent Protocol.
+"""Agent — the inner loop. Calls the LLM, executes tools, feeds results
+back, until the model produces a final assistant message (no tool_calls)
+or MAX_ITERATIONS is reached.
 
-The body of this module — real Agent class, inner loop, hooks wiring — is
-deferred per spec until the first real Provider lands. Here we define ONLY
-the Protocol that the UI side depends on, so PoorCodeApp can be typed and
-test doubles (EchoAgent, FakeAgent) can be substituted freely.
+There is no Agent Protocol: tests substitute at the LLMClient boundary
+via FakeLLMClient, not at the Agent boundary.
 """
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator, Protocol, runtime_checkable
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, AsyncIterator, Protocol, runtime_checkable
 
-from poor_code.messages import Command, Event
+from poor_code.domain.tool.base import ToolContext, allow_all
+from poor_code.domain.tool.registry import ToolRegistry
+from poor_code.messages import (
+    AssistantMessageCompleted,
+    AssistantTextDelta,
+    Command,
+    Event,
+    RunSlashCommand,
+    SendPrompt,
+    ToolCallFailed,
+    ToolCallFinished,
+    ToolCallStarted,
+    TurnEnded,
+    TurnFailed,
+    TurnStarted,
+)
+from poor_code.provider.events import (
+    FinishedReason,
+    LLMEvent,
+    TextDelta,
+    ToolCallEnded,
+    ToolCallInputDelta,
+    ToolCallStarted as ProviderToolCallStarted,
+)
+
+
+MAX_ITERATIONS = 8
 
 
 @runtime_checkable
-class Agent(Protocol):
-    async def run(
-        self, cmd: Command, cancel: asyncio.Event
-    ) -> AsyncIterator[Event]:
-        """Process a Command, yield Events until the turn ends or is cancelled.
+class _LLMClientLike(Protocol):
+    async def stream(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> AsyncIterator[LLMEvent]: ...
 
-        Implementations MUST be cooperative w.r.t. `cancel.is_set()` and yield
-        a terminal Event (TurnEnded or TurnFailed) before returning.
+
+@dataclass
+class _PendingCall:
+    call_id: str
+    name: str
+    args_json: str = ""
+
+
+class Agent:
+    def __init__(self, llm: _LLMClientLike, tools: ToolRegistry) -> None:
+        self.llm = llm
+        self.tools = tools
+        self.history: list[dict[str, Any]] = []
+
+    async def run(self, cmd: Command, cancel: asyncio.Event) -> AsyncIterator[Event]:
+        turn_id = uuid.uuid4().hex
+        cmd_id = getattr(cmd, "cmd_id", "")
+
+        user_text = self._cmd_to_text(cmd)
+        if user_text is None:
+            yield TurnFailed(turn_id=turn_id, error=f"unsupported command: {type(cmd).__name__}")
+            return
+
+        self.history.append({"role": "user", "content": user_text})
+        yield TurnStarted(cmd_id=cmd_id, turn_id=turn_id)
+
+        ctx = ToolContext(
+            turn_id=turn_id, cancel=cancel, cwd=Path.cwd(), ask=allow_all
+        )
+
+        for _iteration in range(MAX_ITERATIONS):
+            if cancel.is_set():
+                yield TurnFailed(turn_id=turn_id, error="cancelled")
+                return
+
+            assistant_text = ""
+            pending: dict[str, _PendingCall] = {}
+            call_order: list[str] = []
+
+            try:
+                async for ev in self.llm.stream(
+                    messages=self.history, tools=self.tools.schemas()
+                ):
+                    if cancel.is_set():
+                        yield TurnFailed(turn_id=turn_id, error="cancelled")
+                        return
+                    match ev:
+                        case TextDelta(text=t):
+                            assistant_text += t
+                            yield AssistantTextDelta(turn_id=turn_id, text=t)
+                        case ProviderToolCallStarted(call_id=cid, name=name):
+                            pending[cid] = _PendingCall(call_id=cid, name=name)
+                            call_order.append(cid)
+                        case ToolCallInputDelta(call_id=cid, json_delta=delta):
+                            if cid in pending:
+                                pending[cid].args_json += delta
+                        case ToolCallEnded():
+                            pass  # finalization handled at FinishedReason
+                        case FinishedReason():
+                            break
+            except Exception as e:
+                yield TurnFailed(turn_id=turn_id, error=f"{type(e).__name__}: {e}")
+                return
+
+            assistant_msg: dict[str, Any] = {"role": "assistant", "content": assistant_text}
+            if call_order:
+                assistant_msg["tool_calls"] = [
+                    {
+                        "id": cid,
+                        "type": "function",
+                        "function": {
+                            "name": pending[cid].name,
+                            "arguments": pending[cid].args_json or "{}",
+                        },
+                    }
+                    for cid in call_order
+                ]
+            self.history.append(assistant_msg)
+
+            if not call_order:
+                yield AssistantMessageCompleted(turn_id=turn_id, text=assistant_text)
+                yield TurnEnded(turn_id=turn_id)
+                return
+
+            # Execute tool calls in order, feed results back, loop again.
+            for cid in call_order:
+                async for ev in self._execute_tool_call(turn_id, pending[cid], ctx):
+                    yield ev
+
+        # Max iterations exhausted.
+        yield TurnEnded(turn_id=turn_id)
+
+    async def _execute_tool_call(
+        self, turn_id: str, call: _PendingCall, ctx: ToolContext
+    ) -> AsyncIterator[Event]:
+        """Implemented in Task 15. For now, mark all calls failed so the
+        loop terminates cleanly under text-only tests.
         """
-        ...
+        yield ToolCallFailed(
+            turn_id=turn_id,
+            tool_call_id=call.call_id,
+            error="tool execution not implemented",
+        )
+        self.history.append({
+            "role": "tool",
+            "tool_call_id": call.call_id,
+            "content": "ERROR: tool execution not implemented",
+        })
+
+    @staticmethod
+    def _cmd_to_text(cmd: Command) -> str | None:
+        match cmd:
+            case SendPrompt(text=t):
+                return t
+            case RunSlashCommand(name=n, args=a):
+                return f"/{n} {' '.join(a)}".strip()
+            case _:
+                return None
