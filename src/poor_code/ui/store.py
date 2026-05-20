@@ -231,3 +231,39 @@ def reduce(state: AppState, action: Action) -> AppState:
 
         case _:
             return state
+
+
+# =========================================================================
+# Store — single source of truth for UI state. Single asyncio loop.
+# =========================================================================
+
+
+class Store:
+    """Holds current AppState; dispatch(action) → reducer → notify listeners."""
+
+    def __init__(self, initial: AppState) -> None:
+        self._state = initial
+        self._listeners: list[Callable[[AppState], None]] = []
+
+    @property
+    def state(self) -> AppState:
+        return self._state
+
+    def dispatch(self, action: Action) -> None:
+        new = reduce(self._state, action)
+        if new is self._state:
+            return
+        self._state = new
+        for listener in list(self._listeners):
+            listener(new)
+
+    def subscribe(
+        self, listener: Callable[[AppState], None]
+    ) -> Callable[[], None]:
+        self._listeners.append(listener)
+
+        def unsub() -> None:
+            if listener in self._listeners:
+                self._listeners.remove(listener)
+
+        return unsub

@@ -171,3 +171,48 @@ def test_cwd_changed_updates_cwd_only():
     s2 = reduce(s, CwdChanged(cwd="/new"))
     assert s2.cwd == "/new"
     assert s2.turns == s.turns  # untouched
+
+
+from poor_code.ui.store import Store
+
+
+def test_store_starts_with_initial_state():
+    init = AppState(cwd="/x")
+    assert Store(init).state is init
+
+
+def test_store_dispatch_runs_reducer_and_updates_state():
+    s = Store(AppState())
+    s.dispatch(PromptSubmitted(cmd_id="c1", user_text="hi"))
+    assert s.state.is_processing is True
+    assert len(s.state.turns) == 1
+
+
+def test_store_subscribe_fires_on_state_change():
+    s = Store(AppState())
+    seen: list[AppState] = []
+    s.subscribe(seen.append)
+    s.dispatch(PromptSubmitted(cmd_id="c1", user_text="hi"))
+    assert len(seen) == 1
+    assert seen[0] is s.state
+
+
+def test_store_subscribe_does_not_fire_when_state_unchanged():
+    @dataclass(frozen=True)
+    class _NoOp(UIAction):
+        pass
+
+    s = Store(AppState())
+    seen: list[AppState] = []
+    s.subscribe(seen.append)
+    s.dispatch(_NoOp())  # type: ignore[arg-type]
+    assert seen == []
+
+
+def test_store_unsubscribe_stops_callbacks():
+    s = Store(AppState())
+    seen: list[AppState] = []
+    unsub = s.subscribe(seen.append)
+    unsub()
+    s.dispatch(PromptSubmitted(cmd_id="c1", user_text="hi"))
+    assert seen == []
