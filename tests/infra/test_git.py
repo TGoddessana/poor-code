@@ -3,8 +3,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from poor_code.infra.git import SubprocessGit
 
 

@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 GIT_TIMEOUT_SECONDS = 5.0
 
 
+@runtime_checkable
 class _GitLike(Protocol):
     async def is_repo(self, cwd: Path) -> bool: ...
     async def status(self, cwd: Path) -> str: ...
@@ -60,5 +61,9 @@ async def _run(cmd: list[str], cwd: Path) -> tuple[bool, str]:
         proc.kill()
         await proc.wait()
         return False, ""
+    except BaseException:
+        proc.kill()
+        await proc.wait()
+        raise
 
     return proc.returncode == 0, stdout.decode("utf-8", errors="replace")
