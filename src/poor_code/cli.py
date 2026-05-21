@@ -10,6 +10,11 @@ from poor_code.domain.agent import Agent
 from poor_code.domain.tool.read import ReadTool
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.infra import auth_store
+from poor_code.infra.context_loader import ContextLoader
+from poor_code.infra.prompt_builder import PromptBuilder
+from poor_code.infra.settings import SettingsLoader
+from poor_code.infra.system_prompt import SystemPromptComposer
+from poor_code.infra.turn_assembler import TurnAssembler
 from poor_code.provider.providers import ollama_cloud
 from poor_code.slash.commands.login import LoginCommand
 from poor_code.slash.registry import SlashRegistry
@@ -34,7 +39,24 @@ def _initial_llm():
     return NoAuthLLM()
 
 
+def _build_assembler() -> TurnAssembler:
+    return TurnAssembler(
+        settings_loader=SettingsLoader(),
+        context_loader=ContextLoader(),
+        prompt_composer=SystemPromptComposer(),
+        prompt_builder=PromptBuilder(),
+    )
+
+
+def _build_agent() -> Agent:
+    return Agent(
+        llm=_initial_llm(),
+        tools=ToolRegistry([ReadTool()]),
+        assembler=_build_assembler(),
+    )
+
+
 def main() -> None:
-    agent = Agent(llm=_initial_llm(), tools=ToolRegistry([ReadTool()]))
+    agent = _build_agent()
     slash = SlashRegistry([LoginCommand()])
     PoorCodeApp(agent=agent, slash=slash).run()
