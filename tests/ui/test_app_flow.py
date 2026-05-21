@@ -5,12 +5,28 @@ from textual.widgets import Input
 from poor_code.app import PoorCodeApp
 from poor_code.domain.agent import Agent
 from poor_code.domain.tool.registry import ToolRegistry
+from poor_code.infra.prompt_builder import PromptBuilder
+from poor_code.infra.turn_assembler import TurnAssembler
 from poor_code.provider.events import FinishedReason, TextDelta
+from tests.infra.fakes import FakeContextLoader, FakeSettingsLoader, FakeSystemPromptComposer
 from tests.provider.fakes import FakeLLMClient
 
 
+def _default_assembler() -> TurnAssembler:
+    return TurnAssembler(
+        settings_loader=FakeSettingsLoader(),
+        context_loader=FakeContextLoader(),
+        prompt_composer=FakeSystemPromptComposer(),
+        prompt_builder=PromptBuilder(),
+    )
+
+
 def _agent_text(text: str) -> Agent:
-    return Agent(llm=FakeLLMClient.text_only(text), tools=ToolRegistry([]))
+    return Agent(
+        llm=FakeLLMClient.text_only(text),
+        tools=ToolRegistry([]),
+        assembler=_default_assembler(),
+    )
 
 
 async def test_submit_routes_through_agent_and_updates_store():
@@ -41,7 +57,7 @@ async def test_cancel_during_turn_marks_failed():
                 yield TextDelta(text=".")
             yield FinishedReason(reason="stop")
 
-    agent = Agent(llm=_SlowLLM(), tools=ToolRegistry([]))
+    agent = Agent(llm=_SlowLLM(), tools=ToolRegistry([]), assembler=_default_assembler())
     async with PoorCodeApp(agent=agent).run_test() as pilot:
         await pilot.pause(); await pilot.pause()
         pilot.app.screen.query_one(Input).focus()

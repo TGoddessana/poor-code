@@ -29,6 +29,7 @@ from poor_code.messages import (
     TurnFailed,
     TurnStarted,
 )
+from poor_code.infra.turn_assembler import TurnAssembler
 from poor_code.provider.events import (
     FinishedReason,
     LLMEvent,
@@ -57,9 +58,15 @@ class _PendingCall:
 
 
 class Agent:
-    def __init__(self, llm: _LLMClientLike, tools: ToolRegistry) -> None:
+    def __init__(
+        self,
+        llm: _LLMClientLike,
+        tools: ToolRegistry,
+        assembler: TurnAssembler,
+    ) -> None:
         self.llm = llm
         self.tools = tools
+        self.assembler = assembler
         self.history: list[dict[str, Any]] = []
 
     async def run(self, cmd: Command, cancel: asyncio.Event) -> AsyncIterator[Event]:
@@ -88,8 +95,9 @@ class Agent:
             call_order: list[str] = []
 
             try:
+                api_messages = await self.assembler.build(self.history, ctx.cwd)
                 async for ev in self.llm.stream(
-                    messages=self.history, tools=self.tools.schemas()
+                    messages=api_messages, tools=self.tools.schemas()
                 ):
                     if cancel.is_set():
                         yield TurnFailed(turn_id=turn_id, error="cancelled")
