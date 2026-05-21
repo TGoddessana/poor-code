@@ -3,8 +3,6 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-import pytest
-
 from poor_code.infra.context_loader import ContextLoader, LoadedContext
 
 
@@ -57,6 +55,20 @@ async def test_global_only(tmp_path):
 
     assert "GLOBAL CONTENT" in result.user_block
     assert result.sources == (home / ".poor-code" / "POORCODE.md",)
+
+
+async def test_project_only(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    (project).mkdir()
+    (project / "POORCODE.md").write_text("PROJECT CONTENT")
+
+    loader = ContextLoader(home_dir=home, git=_FakeGit(is_repo=False), now=_fixed_now)
+    result = await loader.load(cwd=project)
+
+    assert "PROJECT CONTENT" in result.user_block
+    assert result.sources == (project / "POORCODE.md",)
 
 
 async def test_global_then_project_order(tmp_path):
