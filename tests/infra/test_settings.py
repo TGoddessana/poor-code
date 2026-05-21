@@ -43,6 +43,7 @@ async def test_only_project(tmp_path):
     loader = SettingsLoader(home_dir=home)
     result = await loader.load(cwd=project)
     assert result.effective == {"a": 1}
+    assert result.sources == (project / ".poor-code" / "settings.json",)
 
 
 async def test_project_wins_on_overlap(tmp_path):
@@ -66,6 +67,7 @@ async def test_empty_file_treated_as_empty_dict(tmp_path):
     loader = SettingsLoader(home_dir=home)
     result = await loader.load(cwd=project)
     assert result.effective == {}
+    assert len(result.sources) == 1
 
 
 async def test_malformed_json_raises_value_error(tmp_path):

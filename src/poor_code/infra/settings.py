@@ -7,6 +7,8 @@ JSON raises ValueError with a human-readable path; PermissionError bubbles.
 from __future__ import annotations
 
 import json
+import types
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,7 +17,7 @@ from typing import Any
 @dataclass(frozen=True)
 class Settings:
     sources: tuple[Path, ...]
-    effective: dict[str, Any]
+    effective: Mapping[str, Any]
 
 
 class SettingsLoader:
@@ -36,13 +38,13 @@ class SettingsLoader:
             sources.append(path)
             merged.update(data)
 
-        return Settings(sources=tuple(sources), effective=merged)
+        return Settings(sources=tuple(sources), effective=types.MappingProxyType(merged))
 
 
 def _load_one(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
-    text = path.read_text()  # PermissionError bubbles
+    text = path.read_text(encoding="utf-8")
     if not text.strip():
         return {}
     try:
