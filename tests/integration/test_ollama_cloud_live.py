@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.mark.asyncio
 async def test_one_round_trip():
-    llm = ollama_cloud.client(
+    llm = ollama_cloud.configure(
         model=os.environ["POOR_CODE_TEST_MODEL"],
         api_key=os.environ["OLLAMA_API_KEY"],
     )

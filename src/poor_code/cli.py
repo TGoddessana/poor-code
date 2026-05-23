@@ -35,7 +35,7 @@ class NoAuthLLM:
 def _initial_llm():
     creds = auth_store.get("ollama_cloud")
     if creds and creds.get("api_key") and creds.get("model"):
-        return ollama_cloud.client(model=creds["model"], api_key=creds["api_key"])
+        return ollama_cloud.configure(model=creds["model"], api_key=creds["api_key"])
     return NoAuthLLM()
 
 

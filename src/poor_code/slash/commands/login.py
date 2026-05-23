@@ -15,7 +15,7 @@ from poor_code.ui.screens.login import LoginResult, LoginScreen
 
 def _build_llm(provider: str, *, model: str, api_key: str):
     if provider == "ollama_cloud":
-        return ollama_cloud.client(model=model, api_key=api_key)
+        return ollama_cloud.configure(model=model, api_key=api_key)
     raise ValueError(f"unknown provider: {provider}")
 
 
