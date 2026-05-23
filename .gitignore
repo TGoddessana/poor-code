@@ -13,3 +13,6 @@ wheels/
 .vscode/
 .idea/
 .env
+
+# internal docs
+docs/
