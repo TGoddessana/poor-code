@@ -1,37 +1,63 @@
+"""SseFraming: extracts JSON payloads from an SSE byte stream."""
+from __future__ import annotations
+
+import json
 import pytest
-
-from poor_code.provider.framing import NdjsonFraming
-
-
-async def _aiter(items):
-    for x in items:
-        yield x
+from poor_code.provider.framing import SseFraming
 
 
-@pytest.mark.asyncio
-async def test_ndjson_framing_yields_each_line():
-    raw = [b'{"a":1}\n', b'{"b":2}\n', b'{"c":3}\n']
-    out = [chunk async for chunk in NdjsonFraming().frames(_aiter(raw))]
-    assert out == [b'{"a":1}', b'{"b":2}', b'{"c":3}']
+async def _collect(chunks: list[bytes]) -> list[bytes]:
+    async def _gen():
+        for c in chunks:
+            yield c
+    return [frame async for frame in SseFraming().frames(_gen())]
 
 
 @pytest.mark.asyncio
-async def test_ndjson_framing_handles_split_across_reads():
-    raw = [b'{"a":', b'1}\n{"b":2', b'}\n']
-    out = [chunk async for chunk in NdjsonFraming().frames(_aiter(raw))]
-    assert out == [b'{"a":1}', b'{"b":2}']
+async def test_strips_data_prefix():
+    payload = json.dumps({"choices": [{"delta": {"content": "hi"}}]}).encode()
+    result = await _collect([b"data: " + payload + b"\n\n"])
+    assert result == [payload]
 
 
 @pytest.mark.asyncio
-async def test_ndjson_framing_skips_blank_lines():
-    raw = [b'\n{"a":1}\n\n{"b":2}\n\n']
-    out = [chunk async for chunk in NdjsonFraming().frames(_aiter(raw))]
-    assert out == [b'{"a":1}', b'{"b":2}']
+async def test_skips_done_sentinel():
+    payload = json.dumps({"choices": [{"delta": {}, "finish_reason": "stop"}]}).encode()
+    result = await _collect([
+        b"data: " + payload + b"\n\n",
+        b"data: [DONE]\n\n",
+    ])
+    assert result == [payload]
 
 
 @pytest.mark.asyncio
-async def test_ndjson_framing_yields_trailing_unterminated_line():
-    """Some servers omit the final newline; we must still yield the last record."""
-    raw = [b'{"a":1}\n{"b":2}']
-    out = [chunk async for chunk in NdjsonFraming().frames(_aiter(raw))]
-    assert out == [b'{"a":1}', b'{"b":2}']
+async def test_skips_empty_lines():
+    payload = json.dumps({"choices": [{"delta": {"content": "x"}}]}).encode()
+    result = await _collect([b"\n", b"data: " + payload + b"\n", b"\n"])
+    assert result == [payload]
+
+
+@pytest.mark.asyncio
+async def test_skips_comment_lines():
+    payload = json.dumps({"choices": [{"delta": {"content": "x"}}]}).encode()
+    result = await _collect([b": ping\n", b"data: " + payload + b"\n\n"])
+    assert result == [payload]
+
+
+@pytest.mark.asyncio
+async def test_handles_chunked_delivery():
+    """A single SSE line split across multiple HTTP chunks."""
+    payload = json.dumps({"choices": [{"delta": {"content": "hi"}}]}).encode()
+    full_line = b"data: " + payload + b"\n\n"
+    mid = len(full_line) // 2
+    result = await _collect([full_line[:mid], full_line[mid:]])
+    assert result == [payload]
+
+
+@pytest.mark.asyncio
+async def test_multiple_events_in_one_chunk():
+    p1 = json.dumps({"choices": [{"delta": {"content": "a"}}]}).encode()
+    p2 = json.dumps({"choices": [{"delta": {"content": "b"}}]}).encode()
+    combined = b"data: " + p1 + b"\n\ndata: " + p2 + b"\n\n"
+    result = await _collect([combined])
+    assert result == [p1, p2]

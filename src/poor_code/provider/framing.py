@@ -1,8 +1,8 @@
-"""Newline-delimited JSON framing.
+"""Server-Sent Events (SSE) framing.
 
-Consumes raw byte chunks from an httpx stream and yields one JSON record per
-newline. Blank lines are skipped. A trailing record without a final newline
-is still yielded when the stream ends — some servers omit it.
+Consumes raw byte chunks from an HTTP stream and yields one JSON payload per
+SSE event line (strips the `data: ` prefix). The `[DONE]` sentinel and blank
+lines are skipped.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ class Framing(Protocol):
     async def frames(self, byte_stream: AsyncIterator[bytes]) -> AsyncIterator[bytes]: ...
 
 
-class NdjsonFraming:
+class SseFraming:
     async def frames(
         self, byte_stream: AsyncIterator[bytes]
     ) -> AsyncIterator[bytes]:
@@ -22,9 +22,13 @@ class NdjsonFraming:
             buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
-                line = line.strip()
-                if line:
-                    yield line
-        tail = buf.strip()
-        if tail:
-            yield tail
+                line = line.rstrip(b"\r")
+                if line.startswith(b"data: "):
+                    payload = line[6:]
+                    if payload != b"[DONE]":
+                        yield payload
+        tail = buf.rstrip(b"\r")
+        if tail.startswith(b"data: "):
+            payload = tail[6:]
+            if payload != b"[DONE]":
+                yield payload
