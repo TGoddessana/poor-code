@@ -3,7 +3,7 @@ import json
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widget import Widget
-from textual.widgets import Static
+from textual.widgets import Markdown, Static
 
 from poor_code.ui.store import AppState, ToolCallView
 
@@ -75,11 +75,58 @@ class ToolCallEntry(Widget):
         return json.dumps(value, ensure_ascii=False)
 
 
-class ChatLog(Widget):
-    """Renders state.turns. Naive remount on each state change.
+class TurnBlock(Widget):
+    """A single turn in the chat log. Composes children via compose()."""
 
-    Diff-aware updates are deferred; performance is fine for hundreds of turns.
-    """
+    def __init__(self, turn) -> None:
+        super().__init__(classes="turn-block")
+        self._turn = turn
+
+    def compose(self) -> ComposeResult:
+        turn = self._turn
+        yield Static(f"> {turn.user_text}", classes="user-msg")
+        if turn.assistant_text:
+            yield Markdown(turn.assistant_text, classes="assistant-msg")
+        for tc in turn.tool_calls:
+            yield ToolCallEntry(tc)
+        if turn.status == "failed" and turn.error:
+            yield Static(f"  error: {turn.error}", classes="turn-error")
+
+    def refresh_from(self, turn) -> None:
+        """Update children in-place (only for the last turn during streaming)."""
+        self._turn = turn
+
+        md_list = list(self.query(".assistant-msg"))
+        if turn.assistant_text:
+            if md_list:
+                md_list[0].update(turn.assistant_text)
+            else:
+                self.mount(Markdown(turn.assistant_text, classes="assistant-msg"))
+        elif md_list:
+            md_list[0].remove()
+
+        existing_tools = list(self.query(ToolCallEntry))
+        for i, tc in enumerate(turn.tool_calls):
+            if i < len(existing_tools):
+                existing_tools[i].refresh_from(tc)
+            else:
+                self.mount(ToolCallEntry(tc))
+        for w in existing_tools[len(turn.tool_calls):]:
+            w.remove()
+
+        err_list = list(self.query(".turn-error"))
+        if turn.status == "failed" and turn.error:
+            if err_list:
+                err_list[0].update(f"  error: {turn.error}")
+            else:
+                self.mount(Static(f"  error: {turn.error}", classes="turn-error"))
+        else:
+            for w in err_list:
+                w.remove()
+
+
+class ChatLog(Widget):
+    """Renders state.turns. Diff-aware: only mounts new turns; updates last turn in-place."""
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="chat-scroll")
@@ -89,15 +136,18 @@ class ChatLog(Widget):
 
     def _on_state_change(self, state: AppState) -> None:
         scroll = self.query_one("#chat-scroll", VerticalScroll)
-        scroll.remove_children()
-        for turn in state.turns:
-            scroll.mount(Static(f"> {turn.user_text}", classes="user-msg"))
-            if turn.assistant_text:
-                scroll.mount(Static(turn.assistant_text, classes="assistant-msg"))
-            for tc in turn.tool_calls:
-                marker = {"running": "…", "done": "✓", "failed": "✗"}[tc.status]
-                scroll.mount(Static(
-                    f"  {marker} {tc.tool_name}", classes=f"tool-{tc.status}"
-                ))
-            if turn.status == "failed" and turn.error:
-                scroll.mount(Static(f"  error: {turn.error}", classes="turn-error"))
+        self._sync_turns(scroll, state.turns)
+        scroll.scroll_end(animate=False)
+
+    def _sync_turns(self, scroll: VerticalScroll, turns: tuple) -> None:
+        existing = list(scroll.query(TurnBlock))
+
+        if len(turns) < len(existing):
+            scroll.remove_children()
+            existing = []
+
+        for turn in turns[len(existing):]:
+            scroll.mount(TurnBlock(turn))
+
+        if turns and existing and turns[-1].status in ("running", "pending"):
+            existing[-1].refresh_from(turns[-1])
