@@ -12,3 +12,4 @@ wheels/
 # IDE's
 .vscode/
 .idea/
+.env
