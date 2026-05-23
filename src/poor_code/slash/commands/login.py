@@ -6,17 +6,24 @@ SlashContext.set_llm so the next turn uses the new credentials.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from poor_code.infra import auth_store
+from poor_code.provider.client import LLMClient
 from poor_code.provider.providers import ollama_cloud
 from poor_code.slash.base import SlashContext
 from poor_code.ui.screens.login import LoginResult, LoginScreen
 
+_PROVIDERS: dict[str, Callable[..., LLMClient]] = {
+    "ollama_cloud": ollama_cloud.configure,
+}
 
-def _build_llm(provider: str, *, model: str, api_key: str):
-    if provider == "ollama_cloud":
-        return ollama_cloud.configure(model=model, api_key=api_key)
-    raise ValueError(f"unknown provider: {provider}")
+
+def _build_llm(provider: str, *, model: str, api_key: str) -> LLMClient:
+    factory = _PROVIDERS.get(provider)
+    if factory is None:
+        raise ValueError(f"unknown provider: {provider!r}")
+    return factory(model=model, api_key=api_key)
 
 
 @dataclass
