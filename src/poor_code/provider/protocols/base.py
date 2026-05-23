@@ -1,6 +1,6 @@
 """Provider-neutral Protocol typing.
 
-Every concrete protocol (OllamaChat, AnthropicMessages, ...) implements this
+Every concrete protocol (OpenAICompatibleChat, AnthropicMessages, ...) implements this
 shape. Lives in its own module so `route.py` can depend on the typing without
 importing a specific protocol implementation.
 """
