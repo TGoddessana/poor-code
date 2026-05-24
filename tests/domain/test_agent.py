@@ -325,3 +325,67 @@ async def test_assembler_receives_history_per_turn():
 
     assert len(fake_assembler.calls) == 2
     assert fake_assembler.calls[1]["history"][0] == {"role": "user", "content": "one"}
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_tool_execute_yields_tool_call_failed_then_turn_failed():
+    from poor_code.domain.tool.base import ExecuteResult
+    from poor_code.domain.tool.read import ReadParams
+    from poor_code.messages import ToolCallFailed as MsgToolCallFailed, TurnFailed as MsgTurnFailed
+
+    class _SlowTool:
+        id = "read"
+        description = "fake"
+        params = ReadParams
+        started: bool = False
+
+        async def execute(self, args, ctx):
+            _SlowTool.started = True
+            await asyncio.sleep(10)
+            return ExecuteResult(title="t", output="done")
+
+    cancel = asyncio.Event()
+    rounds = [
+        [
+            ProviderToolCallStarted(call_id="c1", name="read"),
+            ToolCallInputDelta(call_id="c1", json_delta='{"path":"a.txt"}'),
+            ToolCallEnded(call_id="c1"),
+            FinishedReason(reason="tool_calls"),
+        ],
+    ]
+    agent = Agent(
+        llm=FakeLLMClient(rounds),
+        tools=ToolRegistry([_SlowTool()]),
+        assembler=_real_assembler_for_tests(),
+    )
+
+    collected: list = []
+
+    async def run():
+        async for ev in agent.run(SendPrompt(text="x"), cancel):
+            collected.append(ev)
+
+    run_task = asyncio.create_task(run())
+
+    # tool이 시작될 때까지 대기 후 취소
+    for _ in range(200):
+        await asyncio.sleep(0.01)
+        if _SlowTool.started:
+            break
+    cancel.set()
+
+    await asyncio.wait_for(run_task, timeout=2.0)
+
+    types = [type(e).__name__ for e in collected]
+    assert "ToolCallFailed" in types
+    assert "TurnFailed" in types
+
+    tc_failed = next(e for e in collected if isinstance(e, MsgToolCallFailed))
+    assert tc_failed.error == "cancelled"
+    assert tc_failed.tool_call_id == "c1"
+
+    turn_failed = next(e for e in collected if isinstance(e, MsgTurnFailed))
+    assert turn_failed.error == "cancelled"
+
+    # ToolCallFailed이 TurnFailed보다 먼저 와야 함
+    assert types.index("ToolCallFailed") < types.index("TurnFailed")

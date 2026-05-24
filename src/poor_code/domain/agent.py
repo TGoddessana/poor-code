@@ -188,8 +188,24 @@ class Agent:
             turn_id=turn_id, tool_call_id=call.call_id,
             tool_name=call.name, args=args.model_dump(),
         )
+
+        task = asyncio.create_task(tool.execute(args, ctx))
+        while not task.done():
+            if ctx.cancel.is_set():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                yield ToolCallFailed(
+                    turn_id=turn_id, tool_call_id=call.call_id, error="cancelled",
+                )
+                yield TurnFailed(turn_id=turn_id, error="cancelled")
+                return
+            await asyncio.sleep(0.05)
+
         try:
-            result = await tool.execute(args, ctx)
+            result = task.result()
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             yield ToolCallFailed(
