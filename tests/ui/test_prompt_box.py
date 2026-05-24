@@ -153,3 +153,44 @@ async def test_escape_hides_popup_preserves_input():
         suggest = pilot.app.screen.query_one("#slash-suggest", OptionList)
         assert suggest.display is False
         assert pilot.app.screen.query_one(Input).value == "/lo"
+
+
+async def test_enter_while_processing_does_not_clear_input():
+    app = _app_with()
+    async with app.run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+
+        from poor_code.ui.store import PromptSubmitted
+        pilot.app.store.dispatch(PromptSubmitted(cmd_id="x", user_text="hello"))
+        assert pilot.app.app_state.is_processing is True
+
+        inp = pilot.app.screen.query_one(Input)
+        inp.focus()
+        inp.value = "new message"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # 제출 차단 시 입력값이 그대로 유지됨
+        assert inp.value == "new message"
+
+
+async def test_placeholder_changes_when_processing():
+    app = _app_with()
+    async with app.run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+
+        inp = pilot.app.screen.query_one(Input)
+        original = inp.placeholder
+
+        from poor_code.ui.store import PromptSubmitted
+        pilot.app.store.dispatch(PromptSubmitted(cmd_id="x", user_text="hello"))
+        await pilot.pause()
+
+        assert inp.placeholder == "Ctrl+C로 취소"
+
+        from poor_code.messages import TurnStarted, TurnEnded
+        pilot.app.store.dispatch(TurnStarted(cmd_id="x", turn_id="t1"))
+        pilot.app.store.dispatch(TurnEnded(turn_id="t1"))
+        await pilot.pause()
+
+        assert inp.placeholder == original

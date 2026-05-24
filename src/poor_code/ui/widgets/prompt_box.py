@@ -9,6 +9,7 @@ from textual.widgets import Input, OptionList
 from textual.widgets.option_list import Option
 
 from poor_code.slash.base import SlashCommand, usage_hint
+from poor_code.ui.store import AppState
 
 _HINT_COL_WIDTH = 24
 
@@ -17,6 +18,17 @@ class PromptBox(Container):
     def __init__(self) -> None:
         super().__init__()
         self._filtered: list[SlashCommand] = []
+
+    def on_mount(self) -> None:
+        self._original_placeholder = self.query_one(Input).placeholder
+        self.watch(self.app, "app_state", self._on_state_change)
+
+    def _on_state_change(self, state: AppState) -> None:
+        inp = self.query_one(Input)
+        if state.is_processing:
+            inp.placeholder = "Ctrl+C로 취소"
+        else:
+            inp.placeholder = self._original_placeholder
 
     def compose(self) -> ComposeResult:
         yield OptionList(id="slash-suggest")
@@ -64,6 +76,8 @@ class PromptBox(Container):
 
     @on(Input.Submitted)
     def _on_submit(self, event: Input.Submitted) -> None:
+        if self.app.app_state.is_processing:
+            return
         if not self._popup_open():
             text = event.value
             self._clear_input()
