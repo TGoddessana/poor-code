@@ -104,3 +104,38 @@ async def test_submit_slash_routes_through_dispatcher_not_agent():
         assert cmd.seen[0].values == {}
         # No agent turn should have started.
         assert len(pilot.app.store.state.turns) == 0
+
+
+from poor_code.provider.providers import ollama_cloud
+
+
+async def test_on_mount_dispatches_provider_for_llmclient():
+    agent = Agent(
+        llm=ollama_cloud.configure(model="gpt-oss:120b", api_key="k"),
+        tools=ToolRegistry([]),
+        assembler=_default_assembler(),
+    )
+    async with PoorCodeApp(agent=agent).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        state = pilot.app.store.state
+        assert state.provider_name == "ollama cloud"
+        assert state.model == "gpt-oss:120b"
+
+
+async def test_on_mount_dispatches_none_for_non_llmclient():
+    async with PoorCodeApp(agent=_agent_text("x")).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        state = pilot.app.store.state
+        assert state.provider_name is None
+        assert state.model is None
+
+
+async def test_set_llm_dispatches_new_provider_and_model():
+    async with PoorCodeApp(agent=_agent_text("x")).run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        new_llm = ollama_cloud.configure(model="gpt-oss:20b", api_key="k2")
+        pilot.app.set_llm(new_llm)
+        await pilot.pause()
+        state = pilot.app.store.state
+        assert state.provider_name == "ollama cloud"
+        assert state.model == "gpt-oss:20b"

@@ -9,9 +9,10 @@ from textual.reactive import reactive
 
 from poor_code.domain.agent import Agent
 from poor_code.messages import SendPrompt
+from poor_code.provider.client import LLMClient
 from poor_code.slash.dispatcher import SlashDispatcher
 from poor_code.ui.screens.chat import ChatScreen
-from poor_code.ui.store import AppState, PromptSubmitted, Store
+from poor_code.ui.store import AppState, ProviderChanged, PromptSubmitted, Store
 
 
 class PoorCodeApp(App):
@@ -33,7 +34,16 @@ class PoorCodeApp(App):
     def on_mount(self) -> None:
         self.store.subscribe(lambda s: setattr(self, "app_state", s))
         self.app_state = self.store.state
+        self._dispatch_provider(self.agent.llm)
         self.push_screen(ChatScreen())
+
+    def _dispatch_provider(self, llm: Any) -> None:
+        if isinstance(llm, LLMClient):
+            self.store.dispatch(
+                ProviderChanged(provider_name=llm.provider_name or None, model=llm.model)
+            )
+        else:
+            self.store.dispatch(ProviderChanged(provider_name=None, model=None))
 
     def submit(self, text: str) -> None:
         text = text.strip()
@@ -52,6 +62,7 @@ class PoorCodeApp(App):
 
     def set_llm(self, llm: Any) -> None:
         self.agent.llm = llm
+        self._dispatch_provider(llm)
 
     def action_cancel_or_quit(self) -> None:
         if self.app_state.is_processing:
