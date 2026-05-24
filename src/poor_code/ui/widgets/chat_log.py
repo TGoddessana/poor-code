@@ -6,6 +6,7 @@ from textual.widget import Widget
 from textual.widgets import Markdown, Static
 
 from poor_code.ui.store import AppState, ToolCallView
+from poor_code.ui.widgets.banner import Banner
 
 
 class ToolCallEntry(Widget):
@@ -129,7 +130,7 @@ class ChatLog(Widget):
     """Renders state.turns. Diff-aware: only mounts new turns; updates last turn in-place."""
 
     def compose(self) -> ComposeResult:
-        yield VerticalScroll(id="chat-scroll")
+        yield VerticalScroll(Banner(), id="chat-scroll")
 
     def on_mount(self) -> None:
         self.watch(self.app, "app_state", self._on_state_change)

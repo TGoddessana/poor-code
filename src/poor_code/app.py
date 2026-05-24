@@ -10,7 +10,7 @@ from textual.reactive import reactive
 from poor_code.domain.agent import Agent
 from poor_code.messages import SendPrompt
 from poor_code.slash.dispatcher import SlashDispatcher
-from poor_code.ui.screens.welcome import WelcomeScreen
+from poor_code.ui.screens.chat import ChatScreen
 from poor_code.ui.store import AppState, PromptSubmitted, Store
 
 
@@ -33,7 +33,7 @@ class PoorCodeApp(App):
     def on_mount(self) -> None:
         self.store.subscribe(lambda s: setattr(self, "app_state", s))
         self.app_state = self.store.state
-        self.push_screen(WelcomeScreen())
+        self.push_screen(ChatScreen())
 
     def submit(self, text: str) -> None:
         text = text.strip()
