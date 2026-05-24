@@ -1,10 +1,14 @@
-from textual.widgets import Static
+from pathlib import Path
 
-_BANNER = r""" ____                  ____          _
-|  _ \ ___   ___  _ __/ ___|___   __| | ___
-| |_) / _ \ / _ \| '__| |   / _ \ / _` |/ _ \
-|  __/ (_) | (_) | |  | |__| (_) | (_| |  __/
-|_|   \___/ \___/|_|   \____\___/ \__,_|\___|"""
+from textual.widgets import Static
+from textwrap import dedent
+
+from poor_code import __version__
+
+_BANNER = dedent(rf""" 
+   (\_/)   Poor-Code v{__version__}
+   ( •_•)  cwd: {Path.cwd()}
+   / >🥄""").rstrip()
 
 
 class Banner(Static):
