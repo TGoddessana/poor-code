@@ -62,6 +62,8 @@ class AppState:
     usage: UsageState = field(default_factory=UsageState)
     last_error: str | None = None
     cwd: str = ""
+    provider_name: str | None = None
+    model: str | None = None
 
 
 # =========================================================================
@@ -84,6 +86,12 @@ class PromptSubmitted(UIAction):
 @dataclass(frozen=True)
 class CwdChanged(UIAction):
     cwd: str
+
+
+@dataclass(frozen=True)
+class ProviderChanged(UIAction):
+    provider_name: str | None
+    model: str | None
 
 
 Action = Event | UIAction
@@ -228,6 +236,9 @@ def reduce(state: AppState, action: Action) -> AppState:
 
         case CwdChanged(cwd=cwd):
             return replace(state, cwd=cwd)
+
+        case ProviderChanged(provider_name=p, model=m):
+            return replace(state, provider_name=p, model=m)
 
         case _:
             return state

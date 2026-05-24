@@ -216,3 +216,26 @@ def test_store_unsubscribe_stops_callbacks():
     unsub()
     s.dispatch(PromptSubmitted(cmd_id="c1", user_text="hi"))
     assert seen == []
+
+
+from poor_code.ui.store import ProviderChanged
+
+
+def test_app_state_has_provider_and_model_defaults():
+    s = AppState()
+    assert s.provider_name is None
+    assert s.model is None
+
+
+def test_provider_changed_sets_fields():
+    s = AppState()
+    s2 = reduce(s, ProviderChanged(provider_name="ollama cloud", model="gpt-oss:120b"))
+    assert s2.provider_name == "ollama cloud"
+    assert s2.model == "gpt-oss:120b"
+
+
+def test_provider_changed_to_none_clears_fields():
+    s = AppState(provider_name="x", model="y")
+    s2 = reduce(s, ProviderChanged(provider_name=None, model=None))
+    assert s2.provider_name is None
+    assert s2.model is None
