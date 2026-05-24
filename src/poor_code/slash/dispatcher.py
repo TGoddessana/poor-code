@@ -11,8 +11,8 @@ from poor_code.slash.registry import SlashRegistry
 
 
 class SlashDispatcher:
-    def __init__(self, registry: SlashRegistry) -> None:
-        self._registry = registry
+    def __init__(self, registry: SlashRegistry | None = None) -> None:
+        self._registry = registry or SlashRegistry([])
 
     @property
     def registry(self) -> SlashRegistry:

@@ -10,7 +10,6 @@ from textual.reactive import reactive
 from poor_code.domain.agent import Agent
 from poor_code.messages import SendPrompt
 from poor_code.slash.dispatcher import SlashDispatcher
-from poor_code.slash.registry import SlashRegistry
 from poor_code.ui.screens.welcome import WelcomeScreen
 from poor_code.ui.store import AppState, PromptSubmitted, Store
 
@@ -28,7 +27,7 @@ class PoorCodeApp(App):
         super().__init__()
         self.store = Store(AppState(cwd=str(Path.cwd())))
         self.agent = agent
-        self.slash = slash or SlashDispatcher(SlashRegistry([]))
+        self.slash = slash or SlashDispatcher()
         self._cancel = asyncio.Event()
 
     def on_mount(self) -> None:
