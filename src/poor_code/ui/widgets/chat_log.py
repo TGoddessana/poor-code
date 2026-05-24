@@ -19,13 +19,13 @@ class ToolCallEntry(Widget):
     ToolCallEntry > .tool-detail {
         display: none;
     }
-    ToolCallEntry:not(.collapsed) > .tool-detail {
+    ToolCallEntry.expanded > .tool-detail {
         display: block;
     }
     """
 
     def __init__(self, tc: ToolCallView) -> None:
-        super().__init__(classes="tool-entry collapsed")
+        super().__init__(classes="tool-entry")
         self._tc = tc
 
     def compose(self) -> ComposeResult:
@@ -43,11 +43,11 @@ class ToolCallEntry(Widget):
         yield Static("\n".join(detail_parts), classes="tool-detail")
 
     def on_click(self) -> None:
-        self.toggle_class("collapsed")
+        self.toggle_class("expanded")
 
     def on_key(self, event) -> None:
         if event.key == "enter" or event.key == "space":
-            self.toggle_class("collapsed")
+            self.toggle_class("expanded")
             event.prevent_default()
             event.stop()
 
