@@ -39,10 +39,6 @@ PromptBox Input {
     margin-bottom: 0;
 }
 
-#slash-suggest.visible {
-    display: block;
-}
-
 #chat-log {
     height: 1fr;
     margin-top: 1;

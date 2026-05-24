@@ -66,18 +66,18 @@ class PromptBox(Container):
     def _on_submit(self, event: Input.Submitted) -> None:
         if not self._popup_open():
             text = event.value
-            self.query_one(Input).value = ""
+            self._clear_input()
             self.app.submit(text)
             return
         cmd = self._highlighted_command()
         if cmd is None:
             text = event.value
-            self.query_one(Input).value = ""
+            self._clear_input()
             self._hide()
             self.app.submit(text)
             return
-        if cmd.args == ():
-            self.query_one(Input).value = ""
+        if not cmd.args:
+            self._clear_input()
             self._hide()
             self.app.submit(f"/{cmd.name}")
         else:
@@ -115,6 +115,9 @@ class PromptBox(Container):
         suggest = self._suggest()
         suggest.clear_options()
         suggest.display = False
+
+    def _clear_input(self) -> None:
+        self.query_one(Input).value = ""
 
     def _highlighted_command(self) -> SlashCommand | None:
         idx = self._suggest().highlighted
