@@ -9,6 +9,8 @@ from textual.widgets import Markdown, Static
 from poor_code.ui.store import AppState, ToolCallView
 from poor_code.ui.widgets.banner import Banner
 
+SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
 
 class ThinkingMascot(Widget):
     """마지막 TurnBlock 안에 마운트되어 에이전트 상태를 표정으로 표현."""
@@ -66,10 +68,12 @@ class ToolCallEntry(Widget):
     def __init__(self, tc: ToolCallView) -> None:
         super().__init__(classes="tool-entry")
         self._tc = tc
+        self._timer = None
+        self._spin_index = 0
 
     def compose(self) -> ComposeResult:
-        marker = {"running": "…", "done": "✓", "failed": "✗"}[self._tc.status]
-        preview = self._format_preview(self._tc.args)
+        marker = self._marker()
+        preview = self._format_preview(self._tc.tool_name, self._tc.args)
         yield Static(
             f"  {marker} {self._tc.tool_name} {preview}",
             classes=f"tool-summary tool-{self._tc.status}",
@@ -81,6 +85,13 @@ class ToolCallEntry(Widget):
             detail_parts.append(f"    error: {self._tc.error}")
         yield Static("\n".join(detail_parts), classes="tool-detail")
 
+    def on_mount(self) -> None:
+        if self._tc.status == "running":
+            self._start_spinner()
+
+    def on_unmount(self) -> None:
+        self._stop_spinner()
+
     def on_click(self) -> None:
         self.toggle_class("expanded")
 
@@ -91,21 +102,53 @@ class ToolCallEntry(Widget):
             event.stop()
 
     def refresh_from(self, tc: ToolCallView) -> None:
-        """Update display when the underlying ToolCallView changes."""
         if tc == self._tc:
             return
+        was_running = self._tc.status == "running"
         self._tc = tc
+        if was_running and tc.status != "running":
+            self._stop_spinner()
         self.remove_children()
         for child in self.compose():
             self.mount(child)
+        if tc.status == "running" and self._timer is None:
+            self._start_spinner()
+
+    def _marker(self) -> str:
+        if self._tc.status == "running":
+            return SPINNER_FRAMES[self._spin_index]
+        return {"done": "✓", "failed": "✗"}.get(self._tc.status, "…")
+
+    def _start_spinner(self) -> None:
+        if self._timer is None:
+            self._timer = self.set_interval(0.1, self._tick)
+
+    def _stop_spinner(self) -> None:
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+
+    def _tick(self) -> None:
+        self._spin_index = (self._spin_index + 1) % len(SPINNER_FRAMES)
+        summaries = list(self.query(".tool-summary"))
+        if summaries:
+            preview = self._format_preview(self._tc.tool_name, self._tc.args)
+            summaries[0].update(f"  {SPINNER_FRAMES[self._spin_index]} {self._tc.tool_name} {preview}")
 
     @staticmethod
-    def _format_preview(args: dict) -> str:
-        parts = [f"{k}={v!r}" for k, v in args.items()]
-        preview = ", ".join(parts)
-        if len(preview) > 80:
-            preview = preview[:77] + "..."
-        return preview
+    def _format_preview(tool_name: str, args: dict) -> str:
+        match tool_name:
+            case "read":
+                return args.get("path", "")
+            case "bash":
+                cmd = args.get("command", "")
+                return (cmd[:60] + "...") if len(cmd) > 60 else cmd
+            case "write" | "edit":
+                return args.get("path", "")
+            case _:
+                parts = [f"{k}={v!r}" for k, v in args.items()]
+                preview = ", ".join(parts)
+                return preview[:77] + "..." if len(preview) > 80 else preview
 
     @staticmethod
     def _format_value(value: object) -> str:
