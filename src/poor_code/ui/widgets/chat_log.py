@@ -1,4 +1,5 @@
 import json
+from typing import Literal
 
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
@@ -7,6 +8,43 @@ from textual.widgets import Markdown, Static
 
 from poor_code.ui.store import AppState, ToolCallView
 from poor_code.ui.widgets.banner import Banner
+
+
+class ThinkingMascot(Widget):
+    """마지막 TurnBlock 안에 마운트되어 에이전트 상태를 표정으로 표현."""
+
+    DEFAULT_CSS = """
+    ThinkingMascot {
+        height: auto;
+        margin-bottom: 1;
+    }
+    """
+
+    PENDING_FRAMES = [" ( ˘_˘)", "(¬_¬) ", "(-_-) ", "(-_-) zZ", "(O_O)!", "(°o°) "]
+    RUNNING_FRAMES = ["(ó_ò) ", "(ง •_•)ง", "(°▽°) "]
+
+    def __init__(self, mode: Literal["pending", "running"]) -> None:
+        super().__init__(classes="thinking-mascot")
+        self._mode = mode
+        self._frames = self.PENDING_FRAMES if mode == "pending" else self.RUNNING_FRAMES
+        self._index = 0
+        self._timer = None
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._frames[0], classes="mascot-frame")
+
+    def on_mount(self) -> None:
+        interval = 0.7 if self._mode == "pending" else 0.4
+        self._timer = self.set_interval(interval, self._tick)
+
+    def on_unmount(self) -> None:
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+
+    def _tick(self) -> None:
+        self._index = (self._index + 1) % len(self._frames)
+        self.query_one(".mascot-frame", Static).update(self._frames[self._index])
 
 
 class ToolCallEntry(Widget):
@@ -97,6 +135,7 @@ class TurnBlock(Widget):
         """Update children in-place (only for the last turn during streaming)."""
         self._turn = turn
 
+        # --- assistant text ---
         md_list = list(self.query(".assistant-msg"))
         if turn.assistant_text:
             if md_list:
@@ -106,6 +145,7 @@ class TurnBlock(Widget):
         elif md_list:
             md_list[0].remove()
 
+        # --- tool calls ---
         existing_tools = list(self.query(ToolCallEntry))
         for i, tc in enumerate(turn.tool_calls):
             if i < len(existing_tools):
@@ -115,6 +155,26 @@ class TurnBlock(Widget):
         for w in existing_tools[len(turn.tool_calls):]:
             w.remove()
 
+        # --- ThinkingMascot: tool calls 뒤에 마운트 (항상 맨 아래) ---
+        mascots = list(self.query(ThinkingMascot))
+        desired_mode: Literal["pending", "running"] | None = None
+        if turn.status in ("pending", "running") and not turn.assistant_text:
+            if turn.status == "running" and turn.tool_calls:
+                desired_mode = "running"
+            else:
+                desired_mode = "pending"
+
+        if desired_mode is None:
+            for m in mascots:
+                m.remove()
+        elif not mascots:
+            self.mount(ThinkingMascot(desired_mode))
+        elif mascots[0]._mode != desired_mode:
+            mascots[0].remove()
+            self.mount(ThinkingMascot(desired_mode))
+        # else: same mode already mounted — leave it
+
+        # --- error ---
         err_list = list(self.query(".turn-error"))
         if turn.status == "failed" and turn.error:
             if err_list:
@@ -152,5 +212,9 @@ class ChatLog(Widget):
         for turn in turns[len(existing):]:
             scroll.mount(TurnBlock(turn))
 
-        if turns and existing and turns[-1].status in ("running", "pending"):
-            existing[-1].refresh_from(turns[-1])
+        if turns and existing:
+            last_turn = turns[-1]
+            last_block = existing[-1]
+            if (last_block._turn.status != last_turn.status
+                    or last_turn.status in ("running", "pending")):
+                last_block.refresh_from(last_turn)
