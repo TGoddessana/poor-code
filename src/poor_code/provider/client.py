@@ -16,10 +16,17 @@ from poor_code.provider.route import Route
 
 
 class LLMClient:
-    def __init__(self, route: Route, base_url: str, model: str) -> None:
+    def __init__(
+        self,
+        route: Route,
+        base_url: str,
+        model: str,
+        provider_name: str = "",
+    ) -> None:
         self.route = route
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.provider_name = provider_name
 
     async def stream(
         self,

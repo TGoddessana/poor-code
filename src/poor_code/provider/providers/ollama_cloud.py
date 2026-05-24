@@ -12,4 +12,6 @@ BASE_URL = "https://ollama.com"
 
 
 def configure(model: str, api_key: str, base_url: str = BASE_URL) -> LLMClient:
-    return openai_compatible.configure(model=model, api_key=api_key, base_url=base_url)
+    return openai_compatible.configure(
+        model=model, api_key=api_key, base_url=base_url, provider_name="ollama cloud"
+    )

@@ -20,3 +20,8 @@ def test_configure_sets_bearer_auth():
     headers: dict[str, str] = {}
     client.route.auth.apply(headers)
     assert headers["Authorization"] == "Bearer abc"
+
+
+def test_configure_sets_provider_display_name():
+    client = ollama_cloud.configure(model="gpt-oss:120b", api_key="k")
+    assert client.provider_name == "ollama cloud"

@@ -12,11 +12,15 @@ from poor_code.provider.protocols.openai_chat import OpenAICompatibleChat
 from poor_code.provider.route import Route
 
 
-def configure(model: str, api_key: str, base_url: str) -> LLMClient:
+def configure(
+    model: str, api_key: str, base_url: str, provider_name: str = ""
+) -> LLMClient:
     route = Route(
         protocol=OpenAICompatibleChat(),
         endpoint="/v1/chat/completions",
         auth=BearerAuth(token=api_key),
         framing=SseFraming(),
     )
-    return LLMClient(route=route, base_url=base_url, model=model)
+    return LLMClient(
+        route=route, base_url=base_url, model=model, provider_name=provider_name
+    )
