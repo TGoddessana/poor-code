@@ -10,7 +10,7 @@ from poor_code.slash.registry import DuplicateSlashName, SlashRegistry
 class _Fake:
     name: str
     description: str = "fake"
-    def execute(self, ctx, args):  # pragma: no cover
+    def execute(self, ctx, parsed):  # pragma: no cover
         pass
 
 

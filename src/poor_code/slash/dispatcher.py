@@ -34,5 +34,7 @@ class SlashDispatcher:
                 severity="warning",
             )
             return True
-        self._registry.get(name).execute(ctx, parsed)
+        cmd = self._registry.get(name)
+        assert cmd is not None  # parse() raises UnknownCommand otherwise
+        cmd.execute(ctx, parsed)
         return True
