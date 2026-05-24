@@ -66,6 +66,16 @@ PromptBox Input {
 .tool-done    { color: $success; }
 .tool-failed  { color: $error; }
 
+.tool-summary {
+    color: $text-muted;
+}
+
+.tool-detail {
+    color: $text-muted;
+    margin: 0 0 0 4;
+    padding-left: 2;
+}
+
 .turn-error {
     color: $error;
 }
