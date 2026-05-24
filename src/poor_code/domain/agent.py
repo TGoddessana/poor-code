@@ -141,9 +141,14 @@ class Agent:
                 return
 
             # Execute tool calls in order, feed results back, loop again.
+            turn_ended = False
             for cid in call_order:
                 async for ev in self._execute_tool_call(turn_id, pending[cid], ctx):
                     yield ev
+                    if isinstance(ev, TurnFailed):
+                        turn_ended = True
+                if turn_ended:
+                    return
 
         # Max iterations exhausted.
         yield TurnEnded(turn_id=turn_id)
