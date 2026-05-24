@@ -129,6 +129,8 @@ class TurnBlock(Widget):
 class ChatLog(Widget):
     """Renders state.turns. Diff-aware: only mounts new turns; updates last turn in-place."""
 
+    DEFAULT_CSS = "ChatLog { height: 1fr; }"
+
     def compose(self) -> ComposeResult:
         yield VerticalScroll(Banner(), id="chat-scroll")
 
