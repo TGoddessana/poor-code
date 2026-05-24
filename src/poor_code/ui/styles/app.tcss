@@ -12,17 +12,6 @@ Screen {
     margin-bottom: 1;
 }
 
-.tagline {
-    color: $text-muted;
-    text-style: italic;
-    margin-bottom: 1;
-}
-
-.tips {
-    color: $text;
-    margin-bottom: 1;
-}
-
 .cwd {
     color: $text-muted;
     margin-bottom: 1;
@@ -30,7 +19,7 @@ Screen {
 
 PromptBox {
     dock: bottom;
-    height: 3;
+    height: auto;
     border: round $accent;
     margin: 1 0;
     padding: 0 1;
@@ -41,6 +30,17 @@ PromptBox Input {
     border: none;
     padding: 0;
     height: 1;
+}
+
+#slash-suggest {
+    max-height: 10;
+    background: $surface;
+    display: none;
+    margin-bottom: 0;
+}
+
+#slash-suggest.visible {
+    display: block;
 }
 
 #chat-log {
