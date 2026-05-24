@@ -8,7 +8,8 @@ from textual.app import App
 from textual.reactive import reactive
 
 from poor_code.domain.agent import Agent
-from poor_code.messages import Command, RunSlashCommand, SendPrompt
+from poor_code.messages import SendPrompt
+from poor_code.slash.dispatcher import SlashDispatcher
 from poor_code.slash.registry import SlashRegistry
 from poor_code.ui.screens.welcome import WelcomeScreen
 from poor_code.ui.store import AppState, PromptSubmitted, Store
@@ -21,14 +22,13 @@ class PoorCodeApp(App):
         ("ctrl+c", "cancel_or_quit", "Cancel/Quit"),
     ]
 
-    # Bridge from Store → Textual watcher system. Widgets observe this.
     app_state: reactive[AppState] = reactive(AppState(), layout=False)
 
-    def __init__(self, agent: Agent, slash: SlashRegistry | None = None) -> None:
+    def __init__(self, agent: Agent, slash: SlashDispatcher | None = None) -> None:
         super().__init__()
         self.store = Store(AppState(cwd=str(Path.cwd())))
         self.agent = agent
-        self.slash = slash or SlashRegistry([])
+        self.slash = slash or SlashDispatcher(SlashRegistry([]))
         self._cancel = asyncio.Event()
 
     def on_mount(self) -> None:
@@ -36,33 +36,20 @@ class PoorCodeApp(App):
         self.app_state = self.store.state
         self.push_screen(WelcomeScreen())
 
-    # --- public single entry point for widgets ---
-
     def submit(self, text: str) -> None:
         text = text.strip()
         if not text:
             return
-        if text.startswith("/"):
-            parts = text[1:].split()
-            if parts and (handler := self.slash.get(parts[0])) is not None:
-                handler.execute(self, tuple(parts[1:]))
-                return
-        cmd = self._route(text)
+        if self.slash.dispatch(text, ctx=self):
+            return
+        cmd = SendPrompt(text)
         self.store.dispatch(PromptSubmitted(cmd_id=cmd.cmd_id, user_text=text))
         self._cancel = asyncio.Event()
         self.run_worker(self._run_turn(cmd), group="turn", exclusive=True)
 
-    def _route(self, text: str) -> Command:
-        if text.startswith("/"):
-            name, *args = text[1:].split()
-            return RunSlashCommand(name=name, args=tuple(args))
-        return SendPrompt(text)
-
-    async def _run_turn(self, cmd: Command) -> None:
+    async def _run_turn(self, cmd: SendPrompt) -> None:
         async for event in self.agent.run(cmd, self._cancel):
             self.store.dispatch(event)
-
-    # --- SlashContext implementation ---
 
     def set_llm(self, llm: Any) -> None:
         self.agent.llm = llm

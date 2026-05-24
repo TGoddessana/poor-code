@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass, field
 
 from textual.widgets import Input
 
@@ -8,6 +9,9 @@ from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.infra.prompt_builder import PromptBuilder
 from poor_code.infra.turn_assembler import TurnAssembler
 from poor_code.provider.events import FinishedReason, TextDelta
+from poor_code.slash.base import ParsedArgs
+from poor_code.slash.dispatcher import SlashDispatcher
+from poor_code.slash.registry import SlashRegistry
 from tests.infra.fakes import FakeContextLoader, FakeSettingsLoader, FakeSystemPromptComposer
 from tests.provider.fakes import FakeLLMClient
 
@@ -72,3 +76,31 @@ async def test_cancel_during_turn_marks_failed():
         assert state.is_processing is False
         assert state.turns[0].status == "failed"
         assert state.last_error == "cancelled"
+
+
+@dataclass
+class _CallCounter:
+    name: str = "ping"
+    description: str = "test"
+    args: tuple = ()
+    seen: list[ParsedArgs] = field(default_factory=list)
+
+    def execute(self, ctx, parsed): self.seen.append(parsed)
+
+
+async def test_submit_slash_routes_through_dispatcher_not_agent():
+    cmd = _CallCounter()
+    slash = SlashDispatcher(SlashRegistry([cmd]))
+    app = PoorCodeApp(agent=_agent_text("should-not-run"), slash=slash)
+    async with app.run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        pilot.app.screen.query_one(Input).focus()
+        await pilot.press("/", "p", "i", "n", "g")
+        await pilot.press("enter")
+        for _ in range(10):
+            await pilot.pause()
+
+        assert len(cmd.seen) == 1
+        assert cmd.seen[0].values == {}
+        # No agent turn should have started.
+        assert len(pilot.app.store.state.turns) == 0

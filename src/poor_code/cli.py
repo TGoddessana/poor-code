@@ -7,8 +7,11 @@ from __future__ import annotations
 
 from poor_code.app import PoorCodeApp
 from poor_code.domain.agent import Agent
+from poor_code.domain.tool.bash import BashTool
+from poor_code.domain.tool.edit import EditTool
 from poor_code.domain.tool.read import ReadTool
 from poor_code.domain.tool.registry import ToolRegistry
+from poor_code.domain.tool.write import WriteTool
 from poor_code.infra import auth_store
 from poor_code.infra.context_loader import ContextLoader
 from poor_code.infra.prompt_builder import PromptBuilder
@@ -17,6 +20,7 @@ from poor_code.infra.system_prompt import SystemPromptComposer
 from poor_code.infra.turn_assembler import TurnAssembler
 from poor_code.provider.providers import ollama_cloud
 from poor_code.slash.commands.login import LoginCommand
+from poor_code.slash.dispatcher import SlashDispatcher
 from poor_code.slash.registry import SlashRegistry
 
 
@@ -51,12 +55,12 @@ def _build_assembler() -> TurnAssembler:
 def _build_agent() -> Agent:
     return Agent(
         llm=_initial_llm(),
-        tools=ToolRegistry([ReadTool()]),
+        tools=ToolRegistry([ReadTool(), WriteTool(), EditTool(), BashTool()]),
         assembler=_build_assembler(),
     )
 
 
 def main() -> None:
     agent = _build_agent()
-    slash = SlashRegistry([LoginCommand()])
+    slash = SlashDispatcher(SlashRegistry([LoginCommand()]))
     PoorCodeApp(agent=agent, slash=slash).run()
