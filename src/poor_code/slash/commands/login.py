@@ -5,13 +5,13 @@ SlashContext.set_llm so the next turn uses the new credentials.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from poor_code.infra import auth_store
 from poor_code.provider.client import LLMClient
 from poor_code.provider.providers import ollama_cloud
-from poor_code.slash.base import SlashContext
+from poor_code.slash.base import Arg, ParsedArgs, SlashContext
 from poor_code.ui.screens.login import LoginResult, LoginScreen
 
 _PROVIDERS: dict[str, Callable[..., LLMClient]] = {
@@ -30,8 +30,9 @@ def _build_llm(provider: str, *, model: str, api_key: str) -> LLMClient:
 class LoginCommand:
     name: str = "login"
     description: str = "Configure an LLM provider"
+    args: tuple[Arg, ...] = field(default_factory=tuple)
 
-    def execute(self, ctx: SlashContext, args: tuple[str, ...]) -> None:
+    def execute(self, ctx: SlashContext, parsed: ParsedArgs) -> None:
         def on_done(result: LoginResult) -> None:
             if result is None:
                 return
