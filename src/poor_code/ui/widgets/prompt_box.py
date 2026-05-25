@@ -21,9 +21,13 @@ class PromptBox(Container):
 
     def on_mount(self) -> None:
         self._original_placeholder = self.query_one(Input).placeholder
+        self._cached_is_processing: bool | None = None
         self.watch(self.app, "app_state", self._on_state_change)
 
     def _on_state_change(self, state: AppState) -> None:
+        if state.is_processing == self._cached_is_processing:
+            return
+        self._cached_is_processing = state.is_processing
         inp = self.query_one(Input)
         if state.is_processing:
             inp.placeholder = "Ctrl+C로 취소"
