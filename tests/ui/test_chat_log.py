@@ -90,6 +90,36 @@ def _running_turn(
 # -------------------------------------------------------------------------
 
 
+async def test_chat_log_streams_text_deltas_via_append():
+    """Pushing successively-longer TextSegment states must update the
+    StreamingMarkdown source without remounting the widget. We assert
+    widget identity is stable across deltas (block list growing, not
+    being replaced) and the final source matches."""
+    async with _Host().run_test() as pilot:
+        await pilot.pause()
+        pilot.app.push(AppState(turns=(
+            _running_turn("T1", "c1", "hi?", text="Hel"),
+        )))
+        for _ in range(3):
+            await pilot.pause()
+        md = pilot.app.query_one(StreamingMarkdown)
+        md_id = id(md)
+
+        for accumulated in ("Hello", "Hello world", "Hello world!"):
+            pilot.app.push(AppState(turns=(
+                _running_turn("T1", "c1", "hi?", text=accumulated),
+            )))
+            for _ in range(3):
+                await pilot.pause()
+
+        md_now = pilot.app.query_one(StreamingMarkdown)
+        assert id(md_now) == md_id, "streaming should not remount the widget"
+        await md_now.stop_stream()
+        for _ in range(3):
+            await pilot.pause()
+        assert md_now.source == "Hello world!"
+
+
 async def test_turn_block_uses_streaming_markdown_for_text_segments():
     """Text segments must mount StreamingMarkdown — vanilla Markdown loses
     the append-streaming fast path."""

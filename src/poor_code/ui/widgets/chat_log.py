@@ -219,8 +219,8 @@ class TurnBlock(Widget):
         for i, seg in enumerate(turn.segments):
             if i < len(existing_segs):
                 w = existing_segs[i]
-                if isinstance(seg, TextSegment) and isinstance(w, Markdown):
-                    w.update(seg.text)
+                if isinstance(seg, TextSegment) and isinstance(w, StreamingMarkdown):
+                    self.app.call_later(w.write_delta, seg.text)
                 elif isinstance(seg, ToolCallView) and isinstance(w, ToolCallEntry):
                     w.refresh_from(seg)
                 else:
