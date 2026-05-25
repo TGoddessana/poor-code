@@ -237,9 +237,21 @@ def reduce(state: AppState, action: Action) -> AppState:
             i = _find_turn_by_id(state, tid)
             if i is None:
                 return state
+            turn = state.turns[i]
+            duration = (
+                time.monotonic() - turn.started_at
+                if turn.started_at is not None
+                else None
+            )
             return replace(
                 state,
-                turns=_update_turn_at(state.turns, i, status="failed", error=err),
+                turns=_update_turn_at(
+                    state.turns, i,
+                    status="failed",
+                    error=err,
+                    duration_sec=duration,
+                    model=state.model,
+                ),
                 is_processing=False,
                 last_error=err,
             )

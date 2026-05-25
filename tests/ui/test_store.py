@@ -1,4 +1,5 @@
 import dataclasses
+import time
 from dataclasses import dataclass
 
 import pytest
@@ -349,3 +350,45 @@ def test_usage_updated_accumulates_and_sets_last_turn_tokens():
     assert s2.usage.output_tokens == 130
     assert s2.usage.cost_usd == pytest.approx(0.006)
     assert s2.last_turn_tokens == 280
+
+
+def test_turn_failed_captures_duration_and_model_when_started():
+    """Spec §11: failed turn must show duration captured to the failure point.
+    Duration is computed from started_at to current monotonic time, model
+    is the current state.model (config's model)."""
+    started = time.monotonic() - 1.5  # pretend turn started 1.5s ago
+    s = AppState(
+        model="gpt-4o",
+        turns=(
+            TurnView(
+                turn_id="t1", cmd_id="c1", user_text="hi",
+                status="running", started_at=started,
+            ),
+        ),
+    )
+    s2 = reduce(s, TurnFailed(turn_id="t1", error="boom"))
+    t = s2.turns[0]
+    assert t.status == "failed"
+    assert t.error == "boom"
+    assert t.model == "gpt-4o"
+    assert t.duration_sec is not None
+    assert t.duration_sec >= 1.5  # at least 1.5s elapsed
+
+
+def test_turn_failed_without_started_at_leaves_duration_none():
+    """If a turn fails before started_at was ever set (e.g., immediate
+    rejection in agent.run before TurnStarted), duration stays None."""
+    s = AppState(
+        model="gpt-4o",
+        turns=(
+            TurnView(
+                turn_id="t1", cmd_id="c1", user_text="hi",
+                status="pending", started_at=None,
+            ),
+        ),
+    )
+    s2 = reduce(s, TurnFailed(turn_id="t1", error="boom"))
+    t = s2.turns[0]
+    assert t.status == "failed"
+    assert t.duration_sec is None
+    assert t.model == "gpt-4o"  # still snapshots current model

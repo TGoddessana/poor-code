@@ -530,3 +530,14 @@ async def test_state_change_does_not_auto_scroll_to_end():
             f"scroll auto-jumped from {top_y} to {scroll.scroll_y} — auto-scroll "
             "should be removed"
         )
+
+
+def test_format_turn_footer_failed_without_duration_returns_empty():
+    """When duration_sec is None (turn failed before started_at was set),
+    we return empty — there's nothing meaningful to show."""
+    t = TurnView(
+        turn_id="t1", cmd_id="c1", user_text="hi",
+        status="failed", duration_sec=None, model="gpt-4o",
+        error="boom",
+    )
+    assert _format_turn_footer(t, fallback_model="ignored") == ""
