@@ -17,6 +17,7 @@ from textual.widgets import Markdown, Static
 from poor_code.ui.store import AppState, TextSegment, ToolCallView, TurnView
 from poor_code.ui.widgets.chat_log import (
     ChatLog,
+    SPINNER_FRAMES,
     ToolCallEntry,
     TurnBlock,
 )
@@ -364,6 +365,46 @@ async def test_intermediate_thinking_text_visible_between_tools():
             "second thinking text missing"
         assert any("architecture is X" in t for t in mds), \
             "final answer missing"
+
+
+class _EntryApp(App):
+    def compose(self) -> ComposeResult:
+        tc = ToolCallView(
+            tool_call_id="t1",
+            tool_name="bash",
+            args={"command": "ls"},
+            status="running",
+        )
+        yield ToolCallEntry(tc)
+
+
+async def test_spinner_initial_frame_is_first():
+    async with _EntryApp().run_test() as pilot:
+        await pilot.pause()
+        entry = pilot.app.query_one(ToolCallEntry)
+        summary = str(entry.query_one(".tool-summary", Static).content)
+        assert SPINNER_FRAMES[0] in summary
+
+
+async def test_spinner_tick_advances_frame():
+    async with _EntryApp().run_test() as pilot:
+        await pilot.pause()
+        entry = pilot.app.query_one(ToolCallEntry)
+        entry._tick()
+        await pilot.pause()
+        summary = str(entry.query_one(".tool-summary", Static).content)
+        assert SPINNER_FRAMES[1] in summary
+
+
+async def test_spinner_tick_wraps():
+    async with _EntryApp().run_test() as pilot:
+        await pilot.pause()
+        entry = pilot.app.query_one(ToolCallEntry)
+        for _ in range(len(SPINNER_FRAMES)):
+            entry._tick()
+        await pilot.pause()
+        summary = str(entry.query_one(".tool-summary", Static).content)
+        assert SPINNER_FRAMES[0] in summary
 
 
 async def test_state_change_does_not_auto_scroll_to_end():
