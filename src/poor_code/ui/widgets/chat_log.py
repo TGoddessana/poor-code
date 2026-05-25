@@ -163,11 +163,10 @@ class TurnBlock(Widget):
             yield self._make_segment_widget(seg)
         if turn.status == "failed" and turn.error:
             yield Static(f"  error: {turn.error}", classes="turn-error")
-        yield Static(
-            _format_turn_footer(turn, fallback_model=self._current_model()),
-            classes="turn-footer",
-            id="turn-footer",
-        )
+        footer_text = _format_turn_footer(turn, fallback_model=self._current_model())
+        footer = Static(footer_text, classes="turn-footer", id="turn-footer")
+        footer.display = bool(footer_text)
+        yield footer
 
     def on_mount(self) -> None:
         if self._turn.status == "running":
@@ -189,9 +188,11 @@ class TurnBlock(Widget):
     def _tick_footer(self) -> None:
         footers = list(self.query("#turn-footer"))
         if footers:
-            footers[0].update(
-                _format_turn_footer(self._turn, fallback_model=self._current_model())
+            text = _format_turn_footer(
+                self._turn, fallback_model=self._current_model()
             )
+            footers[0].update(text)
+            footers[0].display = bool(text)
 
     def _current_model(self) -> str:
         state = getattr(self.app, "app_state", None)
@@ -277,7 +278,9 @@ class TurnBlock(Widget):
         # immediately on every state push so done→duration is reflected at once).
         footers = list(self.query("#turn-footer"))
         if footers:
-            footers[0].update(_format_turn_footer(turn, fallback_model=self._current_model()))
+            text = _format_turn_footer(turn, fallback_model=self._current_model())
+            footers[0].update(text)
+            footers[0].display = bool(text)
 
         # Start/stop the live tick based on status transition.
         if turn.status == "running" and self._tick_timer is None:
@@ -286,9 +289,11 @@ class TurnBlock(Widget):
             self._stop_tick()
             footers = list(self.query("#turn-footer"))
             if footers:
-                footers[0].update(
-                    _format_turn_footer(turn, fallback_model=self._current_model())
+                text = _format_turn_footer(
+                    turn, fallback_model=self._current_model()
                 )
+                footers[0].update(text)
+                footers[0].display = bool(text)
 
 
 class ChatLog(Widget):

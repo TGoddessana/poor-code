@@ -60,7 +60,7 @@ PromptBox Input {
     border-left: solid $primary;
     color: $text;
     padding-left: 1;
-    margin-bottom: 1;
+    margin-bottom: 0;
 }
 
 .assistant-msg.status-pending {
