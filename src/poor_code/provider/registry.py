@@ -41,7 +41,12 @@ _SNAPSHOT_PATH = Path(__file__).parent / "_models_snapshot.json"
 def _load_snapshot() -> dict[str, dict]:
     if not _SNAPSHOT_PATH.exists():
         return {}
-    return json.loads(_SNAPSHOT_PATH.read_text())
+    try:
+        return json.loads(_SNAPSHOT_PATH.read_text())
+    except json.JSONDecodeError:
+        # Corrupt snapshot — degrade gracefully to DEFAULT_META behavior
+        # rather than breaking module import.
+        return {}
 
 
 # Loaded once at import time. Snapshot is committed and never mutates.
@@ -62,8 +67,8 @@ def _build_meta(model_id: str, entry: dict) -> ModelMeta:
     )
     return ModelMeta(
         model_id=model_id,
-        context_size=entry.get("context_size", 0) or DEFAULT_META.context_size,
-        max_output=entry.get("max_output", 0) or DEFAULT_META.max_output,
+        context_size=entry.get("context_size", 0),
+        max_output=entry.get("max_output", 0),
         pricing=pricing,
     )
 
@@ -76,10 +81,13 @@ def lookup(model_name: str) -> ModelMeta:
         return _build_meta(model_name, entry)
 
     # Longest-prefix: find the snapshot key that is the longest prefix of
-    # model_name. Example: "gpt-4o-2099-12-31" → "gpt-4o" if present.
+    # model_name. The matched prefix must end at a '-' separator (or be the
+    # whole string) so we don't mislabel across token boundaries — e.g.
+    # "gpt-4omg" must NOT match "gpt-4o". Example: "gpt-4o-2099-12-31" → "gpt-4o".
     best_key: str | None = None
     for key in _SNAPSHOT:
-        if model_name.startswith(key) and (best_key is None or len(key) > len(best_key)):
+        if (model_name == key or model_name.startswith(key + "-")) \
+                and (best_key is None or len(key) > len(best_key)):
             best_key = key
     if best_key is not None:
         return _build_meta(best_key, _SNAPSHOT[best_key])

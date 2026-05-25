@@ -61,3 +61,45 @@ def test_lookup_longest_prefix_match():
 def test_lookup_unknown_returns_default():
     m = lookup("this-model-definitely-does-not-exist-xyz")
     assert m is DEFAULT_META
+
+
+def test_lookup_prefix_match_requires_dash_boundary():
+    """A snapshot key must be followed by '-' or end-of-string to count as a
+    prefix. Otherwise we'd mislabel e.g. 'gpt-4omg' as 'gpt-4o'."""
+    # Sanity: gpt-4o is in the snapshot (used by other tests).
+    assert lookup("gpt-4o").model_id == "gpt-4o"
+    # False-positive trap: must NOT match.
+    m = lookup("gpt-4omg")
+    assert m is DEFAULT_META
+
+
+def test_load_snapshot_handles_corrupt_json(tmp_path, monkeypatch):
+    """If _models_snapshot.json is malformed, _load_snapshot returns {}
+    so lookup() can still fall back to DEFAULT_META."""
+    bad = tmp_path / "_models_snapshot.json"
+    bad.write_text("{not json at all")
+    from poor_code.provider import registry
+    monkeypatch.setattr(registry, "_SNAPSHOT_PATH", bad)
+    assert registry._load_snapshot() == {}
+
+
+def test_load_snapshot_handles_missing_file(tmp_path, monkeypatch):
+    """Missing snapshot file → {} (already handled, lock it in with a test)."""
+    nonexistent = tmp_path / "does_not_exist.json"
+    from poor_code.provider import registry
+    monkeypatch.setattr(registry, "_SNAPSHOT_PATH", nonexistent)
+    assert registry._load_snapshot() == {}
+
+
+def test_lookup_preserves_zero_context_size_from_snapshot(monkeypatch):
+    """When the snapshot reports context_size=0 (e.g., models.dev had no
+    info), the lookup must preserve the 0 — NOT silently substitute
+    DEFAULT_META.context_size. Callers (StatusFooter) treat 0 as 'unknown'
+    and render '?/?' instead of a fake number."""
+    from poor_code.provider import registry
+    fake_snapshot = {"weird-model": {"context_size": 0, "max_output": 0}}
+    monkeypatch.setattr(registry, "_SNAPSHOT", fake_snapshot)
+    m = lookup("weird-model")
+    assert m.context_size == 0
+    assert m.max_output == 0
+    assert m.model_id == "weird-model"  # not "<unknown>"
