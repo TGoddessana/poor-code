@@ -108,3 +108,10 @@ LoginScreen {
 #login-buttons Button {
     margin-left: 1;
 }
+
+ThinkingMascot {
+    dock: bottom;
+    height: 1;
+    color: $text-muted;
+    margin: 0 1;
+}

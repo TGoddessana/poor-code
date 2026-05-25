@@ -1,5 +1,4 @@
 import json
-from typing import Literal
 
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
@@ -142,9 +141,6 @@ class TurnBlock(Widget):
         yield Static(f"> {turn.user_text}", classes="user-msg")
         for seg in turn.segments:
             yield self._make_segment_widget(seg)
-        mode = self._desired_mascot_mode(turn)
-        if mode is not None:
-            yield ThinkingMascot(mode)
         if turn.status == "failed" and turn.error:
             yield Static(f"  error: {turn.error}", classes="turn-error")
 
@@ -154,32 +150,19 @@ class TurnBlock(Widget):
             return StreamingMarkdown(seg.text, classes="assistant-msg")
         return ToolCallEntry(seg)
 
-    @staticmethod
-    def _desired_mascot_mode(turn) -> Literal["pending", "running"] | None:
-        if turn.status not in ("pending", "running"):
-            return None
-        # While text is actively the trailing segment, the text itself is
-        # the activity indicator — no mascot.
-        if turn.segments and isinstance(turn.segments[-1], TextSegment):
-            return None
-        has_tools = any(isinstance(s, ToolCallView) for s in turn.segments)
-        return "running" if (turn.status == "running" and has_tools) else "pending"
-
     def refresh_from(self, turn) -> None:
         """Update children in-place (only for the last turn during streaming).
 
         Segments render in chronological order between user-msg and the
-        mascot/error trailer; new segments mount just before that trailer."""
+        error trailer; new segments mount just before that trailer."""
         self._turn = turn
 
         # Existing segment widgets in DOM order.
         existing_segs: list[Widget] = [
             c for c in self.children if isinstance(c, (Markdown, ToolCallEntry))
         ]
-        # Anchor for new segment mounts — must keep mascot/error at the bottom.
-        trailing = (
-            list(self.query(ThinkingMascot)) + list(self.query(".turn-error"))
-        )
+        # Anchor for new segment mounts — must keep error trailer at the bottom.
+        trailing = list(self.query(".turn-error"))
         anchor = trailing[0] if trailing else None
 
         for i, seg in enumerate(turn.segments):
@@ -207,28 +190,6 @@ class TurnBlock(Widget):
                     self.mount(new_w)
         for w in existing_segs[len(turn.segments):]:
             w.remove()
-
-        # --- ThinkingMascot: 항상 segments 뒤, error 위 ---
-        mascots = list(self.query(ThinkingMascot))
-        desired_mode = self._desired_mascot_mode(turn)
-
-        if desired_mode is None:
-            for m in mascots:
-                m.remove()
-        elif not mascots:
-            err = list(self.query(".turn-error"))
-            if err:
-                self.mount(ThinkingMascot(desired_mode), before=err[0])
-            else:
-                self.mount(ThinkingMascot(desired_mode))
-        elif mascots[0]._mode != desired_mode:
-            mascots[0].remove()
-            err = list(self.query(".turn-error"))
-            if err:
-                self.mount(ThinkingMascot(desired_mode), before=err[0])
-            else:
-                self.mount(ThinkingMascot(desired_mode))
-        # else: same mode already mounted — leave it
 
         # --- error ---
         err_list = list(self.query(".turn-error"))
