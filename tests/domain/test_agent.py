@@ -445,10 +445,13 @@ class _ModelAwareFakeLLM:
 async def test_agent_emits_usage_updated_with_cost():
     """Use a model that has non-zero pricing in the snapshot.
     claude-3-5-sonnet-20241022 = $3 input / $15 output per 1M."""
+    # OpenAI's real SSE order: content deltas → finish_reason chunk → usage chunk.
+    # UsageEnded arrives AFTER FinishedReason — the agent must keep consuming
+    # the stream past FinishedReason to see it.
     events = [
         TextDelta(text="hello"),
-        UsageEnded(input_tokens=1000, output_tokens=500),
         FinishedReason(reason="stop"),
+        UsageEnded(input_tokens=1000, output_tokens=500),
     ]
     llm = _ModelAwareFakeLLM(events, model="claude-3-5-sonnet-20241022")
     agent = Agent(

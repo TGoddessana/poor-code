@@ -142,7 +142,10 @@ class Agent:
                                 cost_usd=_compute_cost(pricing, in_tok, out_tok),
                             )
                         case FinishedReason():
-                            break
+                            # Don't break: OpenAI emits the usage chunk AFTER
+                            # the finish_reason chunk. Let the stream end on
+                            # its own so UsageEnded is consumed too.
+                            pass
             except Exception as e:
                 yield TurnFailed(turn_id=turn_id, error=f"{type(e).__name__}: {e}")
                 return
