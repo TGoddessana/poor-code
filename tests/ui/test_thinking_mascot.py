@@ -2,7 +2,7 @@ import pytest
 from textual.app import App, ComposeResult
 from textual.widgets import Static
 
-from poor_code.ui.widgets.chat_log import ThinkingMascot
+from poor_code.ui.widgets.mascot import ThinkingMascot
 
 
 class _App(App):

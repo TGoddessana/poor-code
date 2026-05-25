@@ -17,10 +17,10 @@ from textual.widgets import Markdown, Static
 from poor_code.ui.store import AppState, TextSegment, ToolCallView, TurnView
 from poor_code.ui.widgets.chat_log import (
     ChatLog,
-    ThinkingMascot,
     ToolCallEntry,
     TurnBlock,
 )
+from poor_code.ui.widgets.mascot import ThinkingMascot
 from poor_code.ui.widgets.streaming_markdown import StreamingMarkdown
 
 
