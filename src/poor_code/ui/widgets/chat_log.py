@@ -286,6 +286,7 @@ class ChatLog(Widget):
 
     def on_mount(self) -> None:
         self.watch(self.app, "app_state", self._on_state_change)
+        self.query_one("#chat-scroll", VerticalScroll).anchor()
 
     def _on_state_change(self, state: AppState) -> None:
         scroll = self.query_one("#chat-scroll", VerticalScroll)

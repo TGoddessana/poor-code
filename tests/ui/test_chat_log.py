@@ -90,6 +90,15 @@ def _running_turn(
 # -------------------------------------------------------------------------
 
 
+async def test_chat_scroll_container_is_anchored_on_mount():
+    """The VerticalScroll should be anchored so new turns auto-follow the
+    bottom (Textual v4.0.0+ semantics)."""
+    async with _Host().run_test() as pilot:
+        await pilot.pause()
+        scroll = pilot.app.query_one("#chat-scroll", VerticalScroll)
+        assert scroll.is_anchored
+
+
 async def test_chat_log_streams_text_deltas_via_append():
     """Pushing successively-longer TextSegment states must update the
     StreamingMarkdown source without remounting the widget. We assert
