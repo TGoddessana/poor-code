@@ -419,6 +419,84 @@ async def test_spinner_tick_wraps():
         assert SPINNER_FRAMES[0] in summary
 
 
+import time
+
+from poor_code.ui.widgets.chat_log import _format_turn_footer
+
+
+def test_format_turn_footer_done_uses_duration_and_model():
+    t = TurnView(
+        turn_id="t1", cmd_id="c1", user_text="hi",
+        status="done", duration_sec=1.234, model="gpt-4o",
+    )
+    assert _format_turn_footer(t, fallback_model="ignored") == "  gpt-4o · 1.2s"
+
+
+def test_format_turn_footer_running_uses_elapsed_and_fallback_model():
+    now = time.monotonic()
+    t = TurnView(
+        turn_id="t1", cmd_id="c1", user_text="hi",
+        status="running", started_at=now - 3.0, model=None,
+    )
+    text = _format_turn_footer(t, fallback_model="gpt-4o")
+    assert text.startswith("  gpt-4o · ")
+    assert "3." in text or "2." in text
+
+
+def test_format_turn_footer_pending_returns_empty():
+    t = TurnView(turn_id=None, cmd_id="c1", user_text="hi", status="pending")
+    assert _format_turn_footer(t, fallback_model="gpt-4o") == ""
+
+
+def test_format_turn_footer_failed_with_duration_shown():
+    t = TurnView(
+        turn_id="t1", cmd_id="c1", user_text="hi",
+        status="failed", duration_sec=0.5, model="gpt-4o",
+        error="boom",
+    )
+    assert _format_turn_footer(t, fallback_model="ignored") == "  gpt-4o · 0.5s"
+
+
+import asyncio
+
+import pytest
+
+
+class _Harness(App):
+    """Minimal App with reactive app_state, just enough to host TurnBlock."""
+    def __init__(self, turn: TurnView):
+        super().__init__()
+        self._turn = turn
+
+    def compose(self):
+        yield TurnBlock(self._turn)
+
+    @property
+    def app_state(self) -> AppState:
+        return AppState(model="gpt-4o")
+
+
+@pytest.mark.asyncio
+async def test_turn_block_ticks_footer_while_running():
+    """While status='running', the footer should update every ~100ms with
+    a fresh elapsed value."""
+    started = __import__("time").monotonic()
+    turn = TurnView(
+        turn_id="t1", cmd_id="c1", user_text="hi",
+        status="running", started_at=started, model=None,
+    )
+    app = _Harness(turn)
+    async with app.run_test() as pilot:
+        await pilot.pause(0.0)
+        block = app.query_one(TurnBlock)
+        footer = block.query_one("#turn-footer")
+        first = str(footer.content)
+        await pilot.pause(0.25)
+        second = str(footer.content)
+        assert first != second
+        assert "gpt-4o" in second
+
+
 async def test_state_change_does_not_auto_scroll_to_end():
     """Auto-scroll on every state change is removed. The scroll position
     must not be force-pushed to the bottom by _on_state_change."""

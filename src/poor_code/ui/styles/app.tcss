@@ -126,3 +126,25 @@ LoginScreen {
 #login-buttons Button {
     margin-left: 1;
 }
+
+.status-footer {
+    dock: bottom;
+    height: 1;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+.status-footer.warn {
+    color: $warning;
+}
+
+.status-footer.danger {
+    color: $error;
+}
+
+.turn-footer {
+    color: $text-muted;
+    height: 1;
+    margin-top: 0;
+    margin-bottom: 1;
+}
