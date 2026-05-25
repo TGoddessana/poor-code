@@ -5,8 +5,6 @@ These exercise the bugs reported in the rendering hand-off:
     empty padding and the user sees nothing).
   - Submitting a new turn must NOT overwrite the previous turn's block
     with the new turn's data.
-  - ThinkingMascot must sit at the bottom of the *last* turn (never on
-    a previous one) and must not appear wedged between tool entries.
 """
 from __future__ import annotations
 
@@ -21,7 +19,6 @@ from poor_code.ui.widgets.chat_log import (
     ToolCallEntry,
     TurnBlock,
 )
-from poor_code.ui.widgets.mascot import ThinkingMascot
 from poor_code.ui.widgets.streaming_markdown import StreamingMarkdown
 
 

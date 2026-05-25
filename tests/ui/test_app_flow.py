@@ -106,29 +106,6 @@ async def test_submit_slash_routes_through_dispatcher_not_agent():
         assert len(pilot.app.store.state.turns) == 0
 
 
-async def test_mascot_is_on_chat_screen_not_inside_turn_block():
-    from poor_code.ui.widgets.chat_log import TurnBlock
-    from poor_code.ui.widgets.mascot import ThinkingMascot
-
-    async with PoorCodeApp(agent=_agent_text("hello")).run_test() as pilot:
-        await pilot.pause(); await pilot.pause()
-        pilot.app.screen.query_one(Input).focus()
-        await pilot.press("h", "i")
-        await pilot.press("enter")
-        for _ in range(20):
-            await pilot.pause()
-
-        # 마스코트는 화면 어디든 1개만 존재해야 함
-        mascots = list(pilot.app.screen.query(ThinkingMascot))
-        assert len(mascots) == 1, f"expected exactly 1 mascot, got {len(mascots)}"
-
-        # 그 마스코트는 어떤 TurnBlock의 자식도 아니어야 함
-        blocks = list(pilot.app.screen.query(TurnBlock))
-        for b in blocks:
-            assert list(b.query(ThinkingMascot)) == [], \
-                "mascot must not be a child of TurnBlock"
-
-
 from poor_code.provider.providers import ollama_cloud
 
 

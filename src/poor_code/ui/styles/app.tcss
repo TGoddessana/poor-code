@@ -71,6 +71,11 @@ PromptBox Input {
     border-left: solid $error;
 }
 
+.tool-entry {
+    border-left: solid $primary;
+    padding-left: 1;
+}
+
 .tool-running { color: $warning; }
 .tool-done    { color: $success; }
 .tool-failed  { color: $error; }
@@ -120,11 +125,4 @@ LoginScreen {
 
 #login-buttons Button {
     margin-left: 1;
-}
-
-ThinkingMascot {
-    dock: bottom;
-    height: 1;
-    color: $text-muted;
-    margin: 0 1;
 }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
@@ -13,18 +15,53 @@ from poor_code.ui.store import AppState
 
 _HINT_COL_WIDTH = 24
 
+MascotMode = Literal["idle", "pending", "running"]
+
+# 모든 프레임은 같은 셀 너비(6)로 통일 — border-top 문자열 흔들림 방지.
+IDLE_FRAME = "(•‿•) "
+PENDING_FRAMES = [
+    "(˘_˘) ",
+    "(¬_¬) ",
+    "(-_-) ",
+    "(-.-)z",
+    "(O_O)!",
+    "(°o°) ",
+]
+RUNNING_FRAMES = [
+    "(ó_ò) ",
+    "(°▽°) ",
+    "(•‿•)*",
+]
+
+
+def compute_mascot_mode(state: AppState) -> MascotMode:
+    if not state.is_processing:
+        return "idle"
+    if not state.turns:
+        return "pending"
+    last = state.turns[-1]
+    return "running" if last.segments else "pending"
+
 
 class PromptBox(Container):
     def __init__(self) -> None:
         super().__init__()
         self._filtered: list[SlashCommand] = []
+        self._mascot_mode: MascotMode = "idle"
+        self._mascot_index = 0
+        self._mascot_timer = None
 
     def on_mount(self) -> None:
         self._original_placeholder = self.query_one(Input).placeholder
         self._cached_is_processing: bool | None = None
+        self.border_title = IDLE_FRAME
         self.watch(self.app, "app_state", self._on_state_change)
 
     def _on_state_change(self, state: AppState) -> None:
+        self._sync_placeholder(state)
+        self._sync_mascot(state)
+
+    def _sync_placeholder(self, state: AppState) -> None:
         if state.is_processing == self._cached_is_processing:
             return
         self._cached_is_processing = state.is_processing
@@ -33,6 +70,44 @@ class PromptBox(Container):
             inp.placeholder = "Ctrl+C로 취소"
         else:
             inp.placeholder = self._original_placeholder
+
+    def _sync_mascot(self, state: AppState) -> None:
+        new_mode = compute_mascot_mode(state)
+        if new_mode == self._mascot_mode:
+            return
+        self._mascot_mode = new_mode
+        self._mascot_index = 0
+        self._apply_mascot_mode()
+
+    def _apply_mascot_mode(self) -> None:
+        self._stop_mascot_timer()
+        if self._mascot_mode == "idle":
+            self.border_title = IDLE_FRAME
+            return
+        frames = self._current_mascot_frames()
+        self.border_title = frames[0]
+        interval = 0.7 if self._mascot_mode == "pending" else 0.4
+        self._mascot_timer = self.set_interval(interval, self._tick_mascot)
+
+    def _current_mascot_frames(self) -> list[str]:
+        if self._mascot_mode == "pending":
+            return PENDING_FRAMES
+        if self._mascot_mode == "running":
+            return RUNNING_FRAMES
+        return [IDLE_FRAME]
+
+    def _tick_mascot(self) -> None:
+        frames = self._current_mascot_frames()
+        self._mascot_index = (self._mascot_index + 1) % len(frames)
+        self.border_title = frames[self._mascot_index]
+
+    def _stop_mascot_timer(self) -> None:
+        if self._mascot_timer is not None:
+            self._mascot_timer.stop()
+            self._mascot_timer = None
+
+    def on_unmount(self) -> None:
+        self._stop_mascot_timer()
 
     def compose(self) -> ComposeResult:
         yield OptionList(id="slash-suggest")

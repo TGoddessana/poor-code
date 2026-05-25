@@ -174,6 +174,74 @@ async def test_enter_while_processing_does_not_clear_input():
         assert inp.value == "new message"
 
 
+async def test_all_mascot_frames_have_same_width():
+    """border-top 흔들림 방지: 모든 프레임이 같은 너비여야 한다."""
+    from poor_code.ui.widgets.prompt_box import (
+        IDLE_FRAME, PENDING_FRAMES, RUNNING_FRAMES,
+    )
+    all_frames = [IDLE_FRAME, *PENDING_FRAMES, *RUNNING_FRAMES]
+    widths = {len(f) for f in all_frames}
+    assert len(widths) == 1, f"frame widths must be uniform, got {widths}: {all_frames}"
+
+
+async def test_compute_mascot_mode_matrix():
+    from poor_code.ui.store import AppState, TextSegment, TurnView
+    from poor_code.ui.widgets.prompt_box import compute_mascot_mode
+
+    # idle
+    assert compute_mascot_mode(AppState()) == "idle"
+    assert compute_mascot_mode(AppState(is_processing=False)) == "idle"
+
+    # pending: processing but no segments yet
+    pending = TurnView(turn_id=None, cmd_id="c1", user_text="hi", status="pending")
+    assert compute_mascot_mode(AppState(turns=(pending,), is_processing=True)) == "pending"
+
+    # running: processing with segments
+    running = TurnView(
+        turn_id="T1", cmd_id="c1", user_text="hi",
+        segments=(TextSegment(text="a"),), status="running",
+    )
+    assert compute_mascot_mode(AppState(turns=(running,), is_processing=True)) == "running"
+
+
+async def test_promptbox_border_title_idle_on_mount():
+    from poor_code.ui.widgets.prompt_box import IDLE_FRAME, PromptBox
+    app = _app_with()
+    async with app.run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        box = pilot.app.screen.query_one(PromptBox)
+        assert box.border_title == IDLE_FRAME
+
+
+async def test_promptbox_border_title_switches_to_pending_when_processing():
+    from poor_code.ui.store import PromptSubmitted
+    from poor_code.ui.widgets.prompt_box import PENDING_FRAMES, PromptBox
+    app = _app_with()
+    async with app.run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        pilot.app.store.dispatch(PromptSubmitted(cmd_id="x", user_text="hello"))
+        await pilot.pause()
+        box = pilot.app.screen.query_one(PromptBox)
+        assert box.border_title == PENDING_FRAMES[0]
+
+
+async def test_promptbox_border_title_returns_to_idle_when_turn_ends():
+    from poor_code.messages import TurnEnded, TurnStarted
+    from poor_code.ui.store import PromptSubmitted
+    from poor_code.ui.widgets.prompt_box import IDLE_FRAME, PromptBox
+    app = _app_with()
+    async with app.run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        pilot.app.store.dispatch(PromptSubmitted(cmd_id="x", user_text="hi"))
+        pilot.app.store.dispatch(TurnStarted(cmd_id="x", turn_id="t1"))
+        await pilot.pause()
+
+        pilot.app.store.dispatch(TurnEnded(turn_id="t1"))
+        await pilot.pause()
+        box = pilot.app.screen.query_one(PromptBox)
+        assert box.border_title == IDLE_FRAME
+
+
 async def test_placeholder_changes_when_processing():
     app = _app_with()
     async with app.run_test() as pilot:
