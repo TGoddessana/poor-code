@@ -298,6 +298,23 @@ async def test_intermediate_thinking_text_visible_between_tools():
             "final answer missing"
 
 
+async def test_user_msg_has_no_arrow_prefix():
+    """user 메시지는 prefix 없이 텍스트만. 시각 구분은 CSS stripe + background가 담당."""
+    async with _Host().run_test() as pilot:
+        await pilot.pause()
+        turn = _done_turn("T1", "first prompt", with_tool=False)
+        pilot.app.push(AppState(turns=(turn,)))
+        for _ in range(5):
+            await pilot.pause()
+
+        block = pilot.app.query_one(TurnBlock)
+        user_msg = block.query_one(".user-msg", Static)
+        content = str(user_msg.content)
+        assert "first prompt" in content
+        assert not content.startswith("> "), f"user-msg should not start with '> ', got: {content!r}"
+        assert "> " not in content[:2], "user-msg leading chars should not be '> '"
+
+
 class _EntryApp(App):
     def compose(self) -> ComposeResult:
         tc = ToolCallView(

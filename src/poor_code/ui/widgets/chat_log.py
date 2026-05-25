@@ -138,7 +138,7 @@ class TurnBlock(Widget):
 
     def compose(self) -> ComposeResult:
         turn = self._turn
-        yield Static(f"> {turn.user_text}", classes="user-msg")
+        yield Static(turn.user_text, classes="user-msg")
         for seg in turn.segments:
             yield self._make_segment_widget(seg)
         if turn.status == "failed" and turn.error:

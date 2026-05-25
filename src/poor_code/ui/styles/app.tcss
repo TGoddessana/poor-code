@@ -49,7 +49,10 @@ PromptBox Input {
 }
 
 .user-msg {
-    color: $accent;
+    border-left: thick $accent;
+    background: $boost;
+    color: $text;
+    padding: 0 1;
     margin-bottom: 1;
 }
 
