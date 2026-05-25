@@ -16,6 +16,7 @@ from poor_code.provider.events import (
     ToolCallEnded,
     ToolCallInputDelta,
     ToolCallStarted,
+    UsageEnded,
 )
 
 _VALID_REASONS = {"stop", "tool_calls", "length", "error"}
@@ -32,6 +33,7 @@ class OpenAICompatibleChat:
             "model": model,
             "messages": messages,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if tools:
             body["tools"] = tools
@@ -46,6 +48,25 @@ class _OpenAIChatParser:
         self._calls: dict[int, dict[str, str]] = {}
 
     def parse_chunk(self, chunk: dict[str, Any]) -> Iterable[LLMEvent]:
+        # OpenAI's final-chunk usage frame has choices=[] (or absent) and
+        # usage populated. Emit UsageEnded before bailing on no-choices.
+        usage = chunk.get("usage")
+        if usage:
+            yield UsageEnded(
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+            )
+        elif chunk.get("done") and (
+            chunk.get("prompt_eval_count") is not None
+            or chunk.get("eval_count") is not None
+        ):
+            # Ollama native shape — no OpenAI `usage` field; fall back to its
+            # own eval counts. Only triggers when the OpenAI shape is absent.
+            yield UsageEnded(
+                input_tokens=chunk.get("prompt_eval_count") or 0,
+                output_tokens=chunk.get("eval_count") or 0,
+            )
+
         choices = chunk.get("choices") or []
         if not choices:
             return

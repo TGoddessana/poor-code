@@ -38,3 +38,11 @@ class ToolCallEnded(LLMEvent):
 @dataclass(frozen=True)
 class FinishedReason(LLMEvent):
     reason: Literal["stop", "tool_calls", "length", "error"]
+
+
+@dataclass(frozen=True)
+class UsageEnded(LLMEvent):
+    """Provider's reported token counts for the completed stream.
+    Pricing/cost is computed by the Agent layer, not here."""
+    input_tokens: int
+    output_tokens: int

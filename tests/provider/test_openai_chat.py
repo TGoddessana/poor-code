@@ -180,3 +180,71 @@ def test_parse_two_parallel_tool_calls():
     assert events[0].name == "read"
     assert events[3].call_id == "call_1"
     assert events[3].name == "write"
+
+
+from poor_code.provider.events import UsageEnded
+
+
+def test_usage_ended_dataclass_fields():
+    u = UsageEnded(input_tokens=120, output_tokens=45)
+    assert u.input_tokens == 120
+    assert u.output_tokens == 45
+
+
+def test_build_body_sets_include_usage():
+    body = OpenAICompatibleChat().build_body(messages=[], tools=[], model="m")
+    assert body.get("stream_options") == {"include_usage": True}
+
+
+def test_parse_usage_chunk_emits_usage_ended():
+    """OpenAI's final usage chunk: choices=[] and usage payload."""
+    parser = OpenAICompatibleChat().for_stream()
+    events = list(parser.parse_chunk({
+        "choices": [],
+        "usage": {"prompt_tokens": 120, "completion_tokens": 45, "total_tokens": 165},
+    }))
+    assert UsageEnded(input_tokens=120, output_tokens=45) in events
+
+
+def test_parse_usage_chunk_with_content_chunk_does_not_break():
+    """Standard content chunks have no `usage` field — still parsed."""
+    parser = OpenAICompatibleChat().for_stream()
+    events = list(parser.parse_chunk({
+        "choices": [{"delta": {"content": "hi"}, "finish_reason": None}]
+    }))
+    assert events == [TextDelta(text="hi")]
+
+
+def test_parse_usage_chunk_zero_tokens_still_emits():
+    parser = OpenAICompatibleChat().for_stream()
+    events = list(parser.parse_chunk({
+        "choices": [],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+    }))
+    assert UsageEnded(input_tokens=0, output_tokens=0) in events
+
+
+def test_parse_ollama_final_chunk_falls_back_to_eval_count():
+    """Ollama's native /api/chat done chunk uses prompt_eval_count/eval_count
+    instead of OpenAI's usage. When `usage` is absent but `done=true` and
+    the eval counts are present, emit UsageEnded from those."""
+    parser = OpenAICompatibleChat().for_stream()
+    events = list(parser.parse_chunk({
+        "done": True,
+        "prompt_eval_count": 80,
+        "eval_count": 30,
+    }))
+    assert UsageEnded(input_tokens=80, output_tokens=30) in events
+
+
+def test_parse_ollama_fallback_not_triggered_when_usage_present():
+    """If both `usage` and Ollama fields exist, OpenAI usage wins."""
+    parser = OpenAICompatibleChat().for_stream()
+    events = list(parser.parse_chunk({
+        "done": True,
+        "prompt_eval_count": 80,
+        "eval_count": 30,
+        "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+    }))
+    usage_events = [e for e in events if isinstance(e, UsageEnded)]
+    assert usage_events == [UsageEnded(input_tokens=100, output_tokens=50)]
