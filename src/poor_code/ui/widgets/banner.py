@@ -17,13 +17,18 @@ class Banner(Static):
 
     def on_mount(self) -> None:
         self.add_class("banner")
+        self._cached_fields: tuple[str, str | None, str | None] | None = None
         self.watch(self.app, "app_state", self._on_state_change)
         self._apply_state(self.app.app_state)
 
     def _on_state_change(self, state: AppState) -> None:
+        fields = (state.cwd, state.provider_name, state.model)
+        if fields == self._cached_fields:
+            return
         self._apply_state(state)
 
     def _apply_state(self, state: AppState) -> None:
+        self._cached_fields = (state.cwd, state.provider_name, state.model)
         self.update(self._build_renderable(state))
 
     def render_plain(self) -> str:
