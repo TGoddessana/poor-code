@@ -57,8 +57,18 @@ PromptBox Input {
 }
 
 .assistant-msg {
+    border-left: solid $primary;
     color: $text;
+    padding-left: 1;
     margin-bottom: 1;
+}
+
+.assistant-msg.status-pending {
+    border-left: solid $secondary;
+}
+
+.assistant-msg.status-failed {
+    border-left: solid $error;
 }
 
 .tool-running { color: $warning; }

@@ -298,6 +298,73 @@ async def test_intermediate_thinking_text_visible_between_tools():
             "final answer missing"
 
 
+async def test_assistant_msg_has_status_failed_class_when_turn_failed():
+    async with _Host().run_test() as pilot:
+        await pilot.pause()
+        failed_turn = TurnView(
+            turn_id="T1", cmd_id="c1", user_text="hi",
+            segments=(TextSegment(text="partial answer"),),
+            status="failed",
+            error="boom",
+        )
+        pilot.app.push(AppState(turns=(failed_turn,)))
+        for _ in range(5):
+            await pilot.pause()
+
+        block = pilot.app.query_one(TurnBlock)
+        md = block.query_one(".assistant-msg", StreamingMarkdown)
+        assert md.has_class("status-failed"), \
+            f"assistant-msg classes: {list(md.classes)}"
+
+
+async def test_assistant_msg_has_no_status_class_when_turn_done():
+    async with _Host().run_test() as pilot:
+        await pilot.pause()
+        done_turn = TurnView(
+            turn_id="T1", cmd_id="c1", user_text="hi",
+            segments=(TextSegment(text="full answer"),),
+            status="done",
+        )
+        pilot.app.push(AppState(turns=(done_turn,)))
+        for _ in range(5):
+            await pilot.pause()
+
+        block = pilot.app.query_one(TurnBlock)
+        md = block.query_one(".assistant-msg", StreamingMarkdown)
+        assert not md.has_class("status-failed")
+        assert not md.has_class("status-pending")
+
+
+async def test_assistant_msg_status_class_toggles_when_turn_status_changes():
+    """running → failed로 전환되면 assistant-msg에 status-failed 클래스가 붙어야 한다."""
+    async with _Host().run_test() as pilot:
+        await pilot.pause()
+        running = TurnView(
+            turn_id="T1", cmd_id="c1", user_text="hi",
+            segments=(TextSegment(text="partial"),),
+            status="running",
+        )
+        pilot.app.push(AppState(turns=(running,), is_processing=True))
+        for _ in range(5):
+            await pilot.pause()
+
+        block = pilot.app.query_one(TurnBlock)
+        md = block.query_one(".assistant-msg", StreamingMarkdown)
+        assert not md.has_class("status-failed")
+
+        failed = TurnView(
+            turn_id="T1", cmd_id="c1", user_text="hi",
+            segments=(TextSegment(text="partial"),),
+            status="failed",
+            error="boom",
+        )
+        pilot.app.push(AppState(turns=(failed,)))
+        for _ in range(5):
+            await pilot.pause()
+        assert md.has_class("status-failed"), \
+            f"after failed: classes={list(md.classes)}"
+
+
 async def test_user_msg_has_no_arrow_prefix():
     """user 메시지는 prefix 없이 텍스트만. 시각 구분은 CSS stripe + background가 담당."""
     async with _Host().run_test() as pilot:

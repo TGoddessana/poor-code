@@ -7,10 +7,9 @@ from textual.widgets import Markdown, Static
 
 from poor_code.ui.store import AppState, TextSegment, ToolCallView
 from poor_code.ui.widgets.banner import Banner
-from poor_code.ui.widgets.mascot import ThinkingMascot  # re-export for compat
 from poor_code.ui.widgets.streaming_markdown import StreamingMarkdown
 
-__all__ = ["ChatLog", "TurnBlock", "ToolCallEntry", "ThinkingMascot", "SPINNER_FRAMES"]
+__all__ = ["ChatLog", "TurnBlock", "ToolCallEntry", "SPINNER_FRAMES"]
 
 SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -144,11 +143,17 @@ class TurnBlock(Widget):
         if turn.status == "failed" and turn.error:
             yield Static(f"  error: {turn.error}", classes="turn-error")
 
-    @staticmethod
-    def _make_segment_widget(seg) -> Widget:
+    def _make_segment_widget(self, seg) -> Widget:
         if isinstance(seg, TextSegment):
-            return StreamingMarkdown(seg.text, classes="assistant-msg")
+            md = StreamingMarkdown(seg.text, classes="assistant-msg")
+            self._apply_assistant_status_class(md, self._turn.status)
+            return md
         return ToolCallEntry(seg)
+
+    @staticmethod
+    def _apply_assistant_status_class(md, status: str) -> None:
+        md.set_class(status == "pending", "status-pending")
+        md.set_class(status == "failed", "status-failed")
 
     def refresh_from(self, turn) -> None:
         """Update children in-place (only for the last turn during streaming).
@@ -190,6 +195,10 @@ class TurnBlock(Widget):
                     self.mount(new_w)
         for w in existing_segs[len(turn.segments):]:
             w.remove()
+
+        # Sync assistant-msg status classes to the new turn status.
+        for md in self.query(StreamingMarkdown):
+            self._apply_assistant_status_class(md, turn.status)
 
         # --- error ---
         err_list = list(self.query(".turn-error"))
