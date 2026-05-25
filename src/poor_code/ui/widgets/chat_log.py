@@ -223,9 +223,16 @@ class TurnBlock(Widget):
         existing_segs: list[Widget] = [
             c for c in self.children if isinstance(c, (Markdown, ToolCallEntry))
         ]
-        # Anchor for new segment mounts — must keep error trailer at the bottom.
-        trailing = list(self.query(".turn-error"))
-        anchor = trailing[0] if trailing else None
+        # Anchor for new segment mounts — segments must stay above both the
+        # error trailer and the per-turn footer. The footer is mounted during
+        # compose() (even when hidden for pending turns), so without anchoring
+        # against it, streamed segments land after it in the DOM.
+        err_list = list(self.query(".turn-error"))
+        footer_list = list(self.query("#turn-footer"))
+        anchor = (
+            err_list[0] if err_list
+            else (footer_list[0] if footer_list else None)
+        )
 
         for i, seg in enumerate(turn.segments):
             if i < len(existing_segs):

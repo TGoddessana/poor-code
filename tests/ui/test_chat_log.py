@@ -532,6 +532,47 @@ async def test_state_change_does_not_auto_scroll_to_end():
         )
 
 
+async def test_footer_stays_below_streamed_segments():
+    """Regression: when a pending turn mounts the footer first (empty/hidden),
+    and segments stream in afterwards, refresh_from() must mount new segments
+    BEFORE the footer — otherwise the footer ends up above the LLM response."""
+    async with _Host().run_test() as pilot:
+        await pilot.pause()
+
+        # Pending turn — footer is mounted (empty, display=False), no segments.
+        pending = _pending_turn(turn_id=None, cmd_id="c1", user_text="who are you")
+        pilot.app.push(AppState(turns=(pending,)))
+        for _ in range(3):
+            await pilot.pause()
+
+        # Then a running turn arrives with streamed text.
+        running = TurnView(
+            turn_id="T1", cmd_id="c1", user_text="who are you",
+            segments=(TextSegment(text="I am an LLM."),),
+            status="running",
+            started_at=__import__("time").monotonic(),
+        )
+        pilot.app.push(AppState(turns=(running,)))
+        for _ in range(3):
+            await pilot.pause()
+
+        block = pilot.app.query_one(TurnBlock)
+        # All direct children in DOM order.
+        kinds = [type(c).__name__ for c in block.children]
+        footer_idx = next(
+            i for i, c in enumerate(block.children) if c.id == "turn-footer"
+        )
+        segment_indices = [
+            i for i, c in enumerate(block.children)
+            if isinstance(c, (Markdown, ToolCallEntry))
+        ]
+        assert segment_indices, f"no segment widgets mounted; kinds={kinds}"
+        assert max(segment_indices) < footer_idx, (
+            f"footer (#{footer_idx}) is above a segment (last segment at "
+            f"#{max(segment_indices)}); DOM order: {kinds}"
+        )
+
+
 def test_format_turn_footer_failed_without_duration_returns_empty():
     """When duration_sec is None (turn failed before started_at was set),
     we return empty — there's nothing meaningful to show."""
