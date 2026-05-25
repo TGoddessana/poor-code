@@ -80,7 +80,7 @@ def test_turn_started_with_unknown_cmd_id_is_noop():
 def test_turn_ended_marks_done_and_clears_processing():
     s = reduce(AppState(), PromptSubmitted(cmd_id="c1", user_text="hi"))
     s = reduce(s, TurnStarted(cmd_id="c1", turn_id="T1"))
-    s = reduce(s, TurnEnded(turn_id="T1"))
+    s = reduce(s, TurnEnded(turn_id="T1", duration_sec=0.0, model=""))
     assert s.turns[0].status == "done"
     assert s.is_processing is False
 

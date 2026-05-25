@@ -8,6 +8,7 @@ via FakeLLMClient, not at the Agent boundary.
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,7 @@ from poor_code.messages import (
     TurnEnded,
     TurnFailed,
     TurnStarted,
+    UsageUpdated,
 )
 from poor_code.infra.turn_assembler import TurnAssembler
 from poor_code.provider.events import (
@@ -37,10 +39,25 @@ from poor_code.provider.events import (
     ToolCallEnded,
     ToolCallInputDelta,
     ToolCallStarted as ProviderToolCallStarted,
+    UsageEnded,
 )
+from poor_code.provider.registry import ModelPricing, lookup
 
 
 MAX_ITERATIONS = 8
+
+
+def _compute_cost(
+    pricing: ModelPricing | None,
+    input_tokens: int,
+    output_tokens: int,
+) -> float:
+    if pricing is None:
+        return 0.0
+    return (
+        input_tokens * pricing.input_per_1m
+        + output_tokens * pricing.output_per_1m
+    ) / 1_000_000
 
 
 @runtime_checkable
@@ -71,6 +88,9 @@ class Agent:
 
     async def run(self, cmd: Command, cancel: asyncio.Event) -> AsyncIterator[Event]:
         turn_id = uuid.uuid4().hex
+        start_time = time.monotonic()
+        model_name = getattr(self.llm, "model", "") or ""
+        pricing = lookup(model_name).pricing
         cmd_id = getattr(cmd, "cmd_id", "")
 
         user_text = self._cmd_to_text(cmd)
@@ -114,6 +134,13 @@ class Agent:
                                 pending[cid].args_json += delta
                         case ToolCallEnded():
                             pass  # finalization handled at FinishedReason
+                        case UsageEnded(input_tokens=in_tok, output_tokens=out_tok):
+                            yield UsageUpdated(
+                                turn_id=turn_id,
+                                input_tokens=in_tok,
+                                output_tokens=out_tok,
+                                cost_usd=_compute_cost(pricing, in_tok, out_tok),
+                            )
                         case FinishedReason():
                             break
             except Exception as e:
@@ -137,7 +164,11 @@ class Agent:
 
             if not call_order:
                 yield AssistantMessageCompleted(turn_id=turn_id, text=assistant_text)
-                yield TurnEnded(turn_id=turn_id)
+                yield TurnEnded(
+                    turn_id=turn_id,
+                    duration_sec=time.monotonic() - start_time,
+                    model=model_name,
+                )
                 return
 
             # Execute tool calls in order, feed results back, loop again.
@@ -151,7 +182,11 @@ class Agent:
                     return
 
         # Max iterations exhausted.
-        yield TurnEnded(turn_id=turn_id)
+        yield TurnEnded(
+            turn_id=turn_id,
+            duration_sec=time.monotonic() - start_time,
+            model=model_name,
+        )
 
     async def _execute_tool_call(
         self, turn_id: str, call: _PendingCall, ctx: ToolContext

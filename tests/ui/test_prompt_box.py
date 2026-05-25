@@ -236,7 +236,7 @@ async def test_promptbox_border_title_returns_to_idle_when_turn_ends():
         pilot.app.store.dispatch(TurnStarted(cmd_id="x", turn_id="t1"))
         await pilot.pause()
 
-        pilot.app.store.dispatch(TurnEnded(turn_id="t1"))
+        pilot.app.store.dispatch(TurnEnded(turn_id="t1", duration_sec=0.0, model=""))
         await pilot.pause()
         box = pilot.app.screen.query_one(PromptBox)
         assert box.border_title == IDLE_FRAME
@@ -258,7 +258,7 @@ async def test_placeholder_changes_when_processing():
 
         from poor_code.messages import TurnStarted, TurnEnded
         pilot.app.store.dispatch(TurnStarted(cmd_id="x", turn_id="t1"))
-        pilot.app.store.dispatch(TurnEnded(turn_id="t1"))
+        pilot.app.store.dispatch(TurnEnded(turn_id="t1", duration_sec=0.0, model=""))
         await pilot.pause()
 
         assert inp.placeholder == original

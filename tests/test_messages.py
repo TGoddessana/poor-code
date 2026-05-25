@@ -88,7 +88,7 @@ def test_usage_updated_field_names_match_provider_response_usage_dict():
 
 @pytest.mark.parametrize("ev", [
     TurnStarted(cmd_id="c"),
-    TurnEnded(turn_id="t"),
+    TurnEnded(turn_id="t", duration_sec=0.0, model=""),
     TurnFailed(turn_id="t", error="x"),
     AssistantTextDelta(turn_id="t", text="x"),
     AssistantMessageCompleted(turn_id="t", text="x"),

@@ -13,6 +13,7 @@ from poor_code.messages import (
     SendPrompt,
     TurnEnded,
     TurnStarted,
+    UsageUpdated,
 )
 from poor_code.provider.events import (
     FinishedReason,
@@ -389,3 +390,99 @@ async def test_cancel_during_tool_execute_yields_tool_call_failed_then_turn_fail
 
     # ToolCallFailed이 TurnFailed보다 먼저 와야 함
     assert types.index("ToolCallFailed") < types.index("TurnFailed")
+
+
+# --- Task 3: TurnEnded with duration_sec + model, _compute_cost, UsageUpdated ---
+
+
+def test_turn_ended_carries_duration_and_model():
+    e = TurnEnded(turn_id="t1", duration_sec=1.25, model="gpt-4o")
+    assert e.turn_id == "t1"
+    assert e.duration_sec == 1.25
+    assert e.model == "gpt-4o"
+
+
+from poor_code.domain.agent import _compute_cost
+from poor_code.provider.registry import ModelPricing
+
+
+def test_compute_cost_with_pricing():
+    p = ModelPricing(input_per_1m=3.0, output_per_1m=15.0)
+    # 1000 input @ $3/M + 500 output @ $15/M = 0.003 + 0.0075 = 0.0105
+    cost = _compute_cost(p, 1000, 500)
+    assert cost == pytest.approx(0.0105)
+
+
+def test_compute_cost_none_pricing_returns_zero():
+    assert _compute_cost(None, 1000, 500) == 0.0
+
+
+def test_compute_cost_zero_tokens():
+    p = ModelPricing(input_per_1m=3.0, output_per_1m=15.0)
+    assert _compute_cost(p, 0, 0) == 0.0
+
+
+# --- Agent.run integration: UsageUpdated cost + TurnEnded duration/model ---
+
+
+from poor_code.provider.events import UsageEnded
+
+
+class _ModelAwareFakeLLM:
+    """Streams a scripted list of LLMEvent values. .model lets the Agent
+    resolve which model handled the turn."""
+
+    def __init__(self, events, model: str = "claude-3-5-sonnet-20241022"):
+        self._events = events
+        self.model = model
+
+    async def stream(self, messages, tools):
+        for ev in self._events:
+            yield ev
+
+
+@pytest.mark.asyncio
+async def test_agent_emits_usage_updated_with_cost():
+    """Use a model that has non-zero pricing in the snapshot.
+    claude-3-5-sonnet-20241022 = $3 input / $15 output per 1M."""
+    events = [
+        TextDelta(text="hello"),
+        UsageEnded(input_tokens=1000, output_tokens=500),
+        FinishedReason(reason="stop"),
+    ]
+    llm = _ModelAwareFakeLLM(events, model="claude-3-5-sonnet-20241022")
+    agent = Agent(
+        llm=llm, tools=ToolRegistry([]), assembler=_real_assembler_for_tests()
+    )
+    cancel = asyncio.Event()
+
+    out_events = [ev async for ev in agent.run(SendPrompt(text="hi"), cancel)]
+
+    usage_events = [e for e in out_events if isinstance(e, UsageUpdated)]
+    assert len(usage_events) == 1
+    u = usage_events[0]
+    assert u.input_tokens == 1000
+    assert u.output_tokens == 500
+    # Expected: 1000 * 3 / 1e6 + 500 * 15 / 1e6 = 0.003 + 0.0075 = 0.0105
+    assert u.cost_usd == pytest.approx(0.0105)
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_ended_carries_duration_and_model():
+    events = [
+        TextDelta(text="hi"),
+        FinishedReason(reason="stop"),
+    ]
+    llm = _ModelAwareFakeLLM(events, model="claude-3-5-sonnet-20241022")
+    agent = Agent(
+        llm=llm, tools=ToolRegistry([]), assembler=_real_assembler_for_tests()
+    )
+    cancel = asyncio.Event()
+
+    end = None
+    async for ev in agent.run(SendPrompt(text="hi"), cancel):
+        if isinstance(ev, TurnEnded):
+            end = ev
+    assert end is not None
+    assert end.model == "claude-3-5-sonnet-20241022"
+    assert end.duration_sec >= 0.0  # monotonic guarantee

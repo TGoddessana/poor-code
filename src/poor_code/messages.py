@@ -65,6 +65,8 @@ class TurnStarted(Event):
 @dataclass(frozen=True)
 class TurnEnded(Event):
     turn_id: str
+    duration_sec: float
+    model: str
 
 
 @dataclass(frozen=True)
