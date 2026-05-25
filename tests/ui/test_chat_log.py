@@ -21,6 +21,7 @@ from poor_code.ui.widgets.chat_log import (
     ToolCallEntry,
     TurnBlock,
 )
+from poor_code.ui.widgets.streaming_markdown import StreamingMarkdown
 
 
 class _Host(App):
@@ -87,6 +88,17 @@ def _running_turn(
 # -------------------------------------------------------------------------
 # TurnBlock layout
 # -------------------------------------------------------------------------
+
+
+async def test_turn_block_uses_streaming_markdown_for_text_segments():
+    """Text segments must mount StreamingMarkdown — vanilla Markdown loses
+    the append-streaming fast path."""
+    async with _Host().run_test() as pilot:
+        await pilot.pause()
+        pilot.app.push(AppState(turns=(_done_turn("T1", "hi", with_tool=False),)))
+        for _ in range(5):
+            await pilot.pause()
+        assert pilot.app.query_one(TurnBlock).query_one(StreamingMarkdown)
 
 
 async def test_turn_block_height_shrinks_to_content():
@@ -270,7 +282,7 @@ async def test_segments_render_in_chronological_order():
 
         block = pilot.app.query_one(TurnBlock)
         kinds = [
-            type(c).__name__
+            "Markdown" if isinstance(c, Markdown) else type(c).__name__
             for c in block.children
             if isinstance(c, (Markdown, ToolCallEntry))
         ]

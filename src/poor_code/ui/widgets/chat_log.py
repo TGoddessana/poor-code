@@ -8,6 +8,7 @@ from textual.widgets import Markdown, Static
 
 from poor_code.ui.store import AppState, TextSegment, ToolCallView
 from poor_code.ui.widgets.banner import Banner
+from poor_code.ui.widgets.streaming_markdown import StreamingMarkdown
 
 SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -184,7 +185,7 @@ class TurnBlock(Widget):
     @staticmethod
     def _make_segment_widget(seg) -> Widget:
         if isinstance(seg, TextSegment):
-            return Markdown(seg.text, classes="assistant-msg")
+            return StreamingMarkdown(seg.text, classes="assistant-msg")
         return ToolCallEntry(seg)
 
     @staticmethod
