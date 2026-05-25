@@ -275,3 +275,77 @@ def test_provider_changed_to_none_clears_fields():
     s2 = reduce(s, ProviderChanged(provider_name=None, model=None))
     assert s2.provider_name is None
     assert s2.model is None
+
+
+from poor_code.provider.registry import ModelMeta
+
+
+def test_app_state_has_model_meta_default_none():
+    s = AppState()
+    assert s.model_meta is None
+
+
+def test_app_state_has_last_turn_tokens_default_zero():
+    s = AppState()
+    assert s.last_turn_tokens == 0
+
+
+def test_turn_view_has_new_fields_default_none():
+    t = TurnView(turn_id=None, cmd_id="c1", user_text="hi")
+    assert t.started_at is None
+    assert t.duration_sec is None
+    assert t.model is None
+
+
+from poor_code.ui.store import ProviderChanged
+
+
+def test_provider_changed_sets_model_meta_from_lookup():
+    s = AppState()
+    s2 = reduce(s, ProviderChanged(provider_name="openai", model="gpt-4o"))
+    assert s2.model == "gpt-4o"
+    assert s2.model_meta is not None
+    assert s2.model_meta.context_size > 0
+
+
+def test_provider_changed_with_none_model_clears_meta():
+    s = AppState(model="gpt-4o")  # pretend previously set
+    s2 = reduce(s, ProviderChanged(provider_name=None, model=None))
+    assert s2.model is None
+    assert s2.model_meta is None
+
+
+def test_turn_started_records_started_at():
+    s = AppState(turns=(TurnView(turn_id=None, cmd_id="c1", user_text="hi"),))
+    s2 = reduce(s, TurnStarted(cmd_id="c1", turn_id="t1"))
+    assert s2.turns[0].turn_id == "t1"
+    assert s2.turns[0].status == "running"
+    assert s2.turns[0].started_at is not None
+    assert s2.turns[0].started_at > 0
+
+
+def test_turn_ended_sets_duration_and_model():
+    s = AppState(turns=(
+        TurnView(turn_id="t1", cmd_id="c1", user_text="hi", status="running"),
+    ))
+    s2 = reduce(s, TurnEnded(turn_id="t1", duration_sec=2.5, model="gpt-4o"))
+    t = s2.turns[0]
+    assert t.status == "done"
+    assert t.duration_sec == 2.5
+    assert t.model == "gpt-4o"
+    assert s2.is_processing is False
+
+
+from poor_code.messages import UsageUpdated
+
+
+def test_usage_updated_accumulates_and_sets_last_turn_tokens():
+    s = AppState(usage=UsageState(input_tokens=100, output_tokens=50, cost_usd=0.001))
+    s2 = reduce(
+        s,
+        UsageUpdated(turn_id="t1", input_tokens=200, output_tokens=80, cost_usd=0.005),
+    )
+    assert s2.usage.input_tokens == 300
+    assert s2.usage.output_tokens == 130
+    assert s2.usage.cost_usd == pytest.approx(0.006)
+    assert s2.last_turn_tokens == 280

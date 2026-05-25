@@ -5,6 +5,7 @@ reducer; subscribers fire on state change. See spec §3.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal
 
@@ -20,6 +21,7 @@ from poor_code.messages import (
     TurnStarted,
     UsageUpdated,
 )
+from poor_code.provider.registry import ModelMeta, lookup
 
 
 # =========================================================================
@@ -55,6 +57,9 @@ class TurnView:
     segments: tuple[Segment, ...] = ()
     status: Literal["pending", "running", "done", "failed"] = "pending"
     error: str | None = None
+    started_at: float | None = None        # monotonic, set by TurnStarted
+    duration_sec: float | None = None      # set by TurnEnded
+    model: str | None = None               # set by TurnEnded
 
     @property
     def assistant_text(self) -> str:
@@ -86,6 +91,8 @@ class AppState:
     cwd: str = ""
     provider_name: str | None = None
     model: str | None = None
+    model_meta: ModelMeta | None = None
+    last_turn_tokens: int = 0
 
 
 # =========================================================================
@@ -202,16 +209,27 @@ def reduce(state: AppState, action: Action) -> AppState:
             if i is None:
                 return state
             return replace(
-                state, turns=_update_turn_at(state.turns, i, turn_id=tid, status="running")
+                state,
+                turns=_update_turn_at(
+                    state.turns, i,
+                    turn_id=tid,
+                    status="running",
+                    started_at=time.monotonic(),
+                ),
             )
 
-        case TurnEnded(turn_id=tid):
+        case TurnEnded(turn_id=tid, duration_sec=d, model=m):
             i = _find_turn_by_id(state, tid)
             if i is None:
                 return state
             return replace(
                 state,
-                turns=_update_turn_at(state.turns, i, status="done"),
+                turns=_update_turn_at(
+                    state.turns, i,
+                    status="done",
+                    duration_sec=d,
+                    model=m,
+                ),
                 is_processing=False,
             )
 
@@ -273,17 +291,22 @@ def reduce(state: AppState, action: Action) -> AppState:
             return _update_tool_call(state, tid, tcid, status="failed", error=err)
 
         case UsageUpdated(input_tokens=i_in, output_tokens=i_out, cost_usd=c):
-            return replace(state, usage=UsageState(
-                input_tokens=state.usage.input_tokens + i_in,
-                output_tokens=state.usage.output_tokens + i_out,
-                cost_usd=state.usage.cost_usd + c,
-            ))
+            return replace(
+                state,
+                usage=UsageState(
+                    input_tokens=state.usage.input_tokens + i_in,
+                    output_tokens=state.usage.output_tokens + i_out,
+                    cost_usd=state.usage.cost_usd + c,
+                ),
+                last_turn_tokens=i_in + i_out,
+            )
 
         case CwdChanged(cwd=cwd):
             return replace(state, cwd=cwd)
 
         case ProviderChanged(provider_name=p, model=m):
-            return replace(state, provider_name=p, model=m)
+            meta = lookup(m) if m else None
+            return replace(state, provider_name=p, model=m, model_meta=meta)
 
         case _:
             return state
