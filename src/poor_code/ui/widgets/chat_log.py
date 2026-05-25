@@ -6,7 +6,7 @@ from textual.containers import VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Markdown, Static
 
-from poor_code.ui.store import AppState, ToolCallView
+from poor_code.ui.store import AppState, TextSegment, ToolCallView
 from poor_code.ui.widgets.banner import Banner
 
 SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -55,7 +55,6 @@ class ToolCallEntry(Widget):
     DEFAULT_CSS = """
     ToolCallEntry {
         height: auto;
-        margin-bottom: 1;
     }
     ToolCallEntry > .tool-detail {
         display: none;
@@ -160,6 +159,13 @@ class ToolCallEntry(Widget):
 class TurnBlock(Widget):
     """A single turn in the chat log. Composes children via compose()."""
 
+    DEFAULT_CSS = """
+    TurnBlock {
+        height: auto;
+        margin-bottom: 1;
+    }
+    """
+
     def __init__(self, turn) -> None:
         super().__init__(classes="turn-block")
         self._turn = turn
@@ -167,54 +173,94 @@ class TurnBlock(Widget):
     def compose(self) -> ComposeResult:
         turn = self._turn
         yield Static(f"> {turn.user_text}", classes="user-msg")
-        if turn.assistant_text:
-            yield Markdown(turn.assistant_text, classes="assistant-msg")
-        for tc in turn.tool_calls:
-            yield ToolCallEntry(tc)
+        for seg in turn.segments:
+            yield self._make_segment_widget(seg)
+        mode = self._desired_mascot_mode(turn)
+        if mode is not None:
+            yield ThinkingMascot(mode)
         if turn.status == "failed" and turn.error:
             yield Static(f"  error: {turn.error}", classes="turn-error")
 
+    @staticmethod
+    def _make_segment_widget(seg) -> Widget:
+        if isinstance(seg, TextSegment):
+            return Markdown(seg.text, classes="assistant-msg")
+        return ToolCallEntry(seg)
+
+    @staticmethod
+    def _desired_mascot_mode(turn) -> Literal["pending", "running"] | None:
+        if turn.status not in ("pending", "running"):
+            return None
+        # While text is actively the trailing segment, the text itself is
+        # the activity indicator — no mascot.
+        if turn.segments and isinstance(turn.segments[-1], TextSegment):
+            return None
+        has_tools = any(isinstance(s, ToolCallView) for s in turn.segments)
+        return "running" if (turn.status == "running" and has_tools) else "pending"
+
     def refresh_from(self, turn) -> None:
-        """Update children in-place (only for the last turn during streaming)."""
+        """Update children in-place (only for the last turn during streaming).
+
+        Segments render in chronological order between user-msg and the
+        mascot/error trailer; new segments mount just before that trailer."""
         self._turn = turn
 
-        # --- assistant text ---
-        md_list = list(self.query(".assistant-msg"))
-        if turn.assistant_text:
-            if md_list:
-                md_list[0].update(turn.assistant_text)
-            else:
-                self.mount(Markdown(turn.assistant_text, classes="assistant-msg"))
-        elif md_list:
-            md_list[0].remove()
+        # Existing segment widgets in DOM order.
+        existing_segs: list[Widget] = [
+            c for c in self.children if isinstance(c, (Markdown, ToolCallEntry))
+        ]
+        # Anchor for new segment mounts — must keep mascot/error at the bottom.
+        trailing = (
+            list(self.query(ThinkingMascot)) + list(self.query(".turn-error"))
+        )
+        anchor = trailing[0] if trailing else None
 
-        # --- tool calls ---
-        existing_tools = list(self.query(ToolCallEntry))
-        for i, tc in enumerate(turn.tool_calls):
-            if i < len(existing_tools):
-                existing_tools[i].refresh_from(tc)
+        for i, seg in enumerate(turn.segments):
+            if i < len(existing_segs):
+                w = existing_segs[i]
+                if isinstance(seg, TextSegment) and isinstance(w, Markdown):
+                    w.update(seg.text)
+                elif isinstance(seg, ToolCallView) and isinstance(w, ToolCallEntry):
+                    w.refresh_from(seg)
+                else:
+                    # Kind mismatch — replace.
+                    w.remove()
+                    new_w = self._make_segment_widget(seg)
+                    if i + 1 < len(existing_segs):
+                        self.mount(new_w, before=existing_segs[i + 1])
+                    elif anchor is not None:
+                        self.mount(new_w, before=anchor)
+                    else:
+                        self.mount(new_w)
             else:
-                self.mount(ToolCallEntry(tc))
-        for w in existing_tools[len(turn.tool_calls):]:
+                new_w = self._make_segment_widget(seg)
+                if anchor is not None:
+                    self.mount(new_w, before=anchor)
+                else:
+                    self.mount(new_w)
+        for w in existing_segs[len(turn.segments):]:
             w.remove()
 
-        # --- ThinkingMascot: tool calls 뒤에 마운트 (항상 맨 아래) ---
+        # --- ThinkingMascot: 항상 segments 뒤, error 위 ---
         mascots = list(self.query(ThinkingMascot))
-        desired_mode: Literal["pending", "running"] | None = None
-        if turn.status in ("pending", "running") and not turn.assistant_text:
-            if turn.status == "running" and turn.tool_calls:
-                desired_mode = "running"
-            else:
-                desired_mode = "pending"
+        desired_mode = self._desired_mascot_mode(turn)
 
         if desired_mode is None:
             for m in mascots:
                 m.remove()
         elif not mascots:
-            self.mount(ThinkingMascot(desired_mode))
+            err = list(self.query(".turn-error"))
+            if err:
+                self.mount(ThinkingMascot(desired_mode), before=err[0])
+            else:
+                self.mount(ThinkingMascot(desired_mode))
         elif mascots[0]._mode != desired_mode:
             mascots[0].remove()
-            self.mount(ThinkingMascot(desired_mode))
+            err = list(self.query(".turn-error"))
+            if err:
+                self.mount(ThinkingMascot(desired_mode), before=err[0])
+            else:
+                self.mount(ThinkingMascot(desired_mode))
         # else: same mode already mounted — leave it
 
         # --- error ---
@@ -243,7 +289,6 @@ class ChatLog(Widget):
     def _on_state_change(self, state: AppState) -> None:
         scroll = self.query_one("#chat-scroll", VerticalScroll)
         self._sync_turns(scroll, state.turns)
-        scroll.scroll_end(animate=False)
 
     def _sync_turns(self, scroll: VerticalScroll, turns: tuple) -> None:
         existing = list(scroll.query(TurnBlock))
@@ -252,9 +297,15 @@ class ChatLog(Widget):
             scroll.remove_children()
             existing = []
 
-        for turn in turns[len(existing):]:
-            scroll.mount(TurnBlock(turn))
+        if len(turns) > len(existing):
+            # New turn(s) — compose() renders them with their initial state.
+            # Do NOT refresh existing[-1]: it belongs to a *prior* turn whose
+            # content must stay intact.
+            for turn in turns[len(existing):]:
+                scroll.mount(TurnBlock(turn))
+            return
 
+        # Same length: update the active (last) turn in-place.
         if turns and existing:
             last_turn = turns[-1]
             last_block = existing[-1]

@@ -38,14 +38,36 @@ class ToolCallView:
 
 
 @dataclass(frozen=True)
+class TextSegment:
+    """A chronological chunk of assistant text. One per agent iteration —
+    a new segment starts whenever a ToolCallView interrupts the text flow."""
+    text: str
+
+
+Segment = TextSegment | ToolCallView
+
+
+@dataclass(frozen=True)
 class TurnView:
     turn_id: str | None      # None while pending (before TurnStarted arrives)
     cmd_id: str
     user_text: str
-    assistant_text: str = ""
-    tool_calls: tuple[ToolCallView, ...] = ()
+    segments: tuple[Segment, ...] = ()
     status: Literal["pending", "running", "done", "failed"] = "pending"
     error: str | None = None
+
+    @property
+    def assistant_text(self) -> str:
+        """Last TextSegment's text — what AssistantMessageCompleted set.
+        Kept as a property for tests/callers that just want the final answer."""
+        for seg in reversed(self.segments):
+            if isinstance(seg, TextSegment):
+                return seg.text
+        return ""
+
+    @property
+    def tool_calls(self) -> tuple[ToolCallView, ...]:
+        return tuple(s for s in self.segments if isinstance(s, ToolCallView))
 
 
 @dataclass(frozen=True)
@@ -126,6 +148,12 @@ def _find_turn_by_id(state: AppState, turn_id: str) -> int | None:
     return None
 
 
+def _replace_segment(
+    segments: tuple[Segment, ...], index: int, new: Segment
+) -> tuple[Segment, ...]:
+    return segments[:index] + (new,) + segments[index + 1 :]
+
+
 def _update_tool_call(
     state: AppState, turn_id: str, tool_call_id: str, **changes: Any
 ) -> AppState:
@@ -133,18 +161,18 @@ def _update_tool_call(
     if i is None:
         return state
     turn = state.turns[i]
-    for j, tc in enumerate(turn.tool_calls):
-        if tc.tool_call_id == tool_call_id:
-            new_tc = replace(tc, **changes)
-            new_tcs = turn.tool_calls[:j] + (new_tc,) + turn.tool_calls[j + 1 :]
+    for j, seg in enumerate(turn.segments):
+        if isinstance(seg, ToolCallView) and seg.tool_call_id == tool_call_id:
+            new_seg = replace(seg, **changes)
+            new_segs = _replace_segment(turn.segments, j, new_seg)
             return replace(
-                state, turns=_update_turn_at(state.turns, i, tool_calls=new_tcs)
+                state, turns=_update_turn_at(state.turns, i, segments=new_segs)
             )
     return state
 
 
-def _append_tool_call(
-    state: AppState, turn_id: str, tc: ToolCallView
+def _append_segment(
+    state: AppState, turn_id: str, seg: Segment
 ) -> AppState:
     i = _find_turn_by_id(state, turn_id)
     if i is None:
@@ -152,7 +180,7 @@ def _append_tool_call(
     turn = state.turns[i]
     return replace(
         state,
-        turns=_update_turn_at(state.turns, i, tool_calls=turn.tool_calls + (tc,)),
+        turns=_update_turn_at(state.turns, i, segments=turn.segments + (seg,)),
     )
 
 
@@ -202,21 +230,38 @@ def reduce(state: AppState, action: Action) -> AppState:
             i = _find_turn_by_id(state, tid)
             if i is None:
                 return state
-            new_text = state.turns[i].assistant_text + chunk
-            return replace(
-                state, turns=_update_turn_at(state.turns, i, assistant_text=new_text)
-            )
+            turn = state.turns[i]
+            # Extend the trailing TextSegment, or open a new one if the most
+            # recent segment is a tool call (a new iteration's text).
+            if turn.segments and isinstance(turn.segments[-1], TextSegment):
+                last = turn.segments[-1]
+                new_segs = _replace_segment(
+                    turn.segments, len(turn.segments) - 1,
+                    TextSegment(text=last.text + chunk),
+                )
+                return replace(
+                    state, turns=_update_turn_at(state.turns, i, segments=new_segs)
+                )
+            return _append_segment(state, tid, TextSegment(text=chunk))
 
         case AssistantMessageCompleted(turn_id=tid, text=text):
             i = _find_turn_by_id(state, tid)
             if i is None:
                 return state
-            return replace(
-                state, turns=_update_turn_at(state.turns, i, assistant_text=text)
-            )
+            turn = state.turns[i]
+            # Pin the final iteration's text — overwrite the trailing
+            # TextSegment if one exists, otherwise append.
+            if turn.segments and isinstance(turn.segments[-1], TextSegment):
+                new_segs = _replace_segment(
+                    turn.segments, len(turn.segments) - 1, TextSegment(text=text),
+                )
+                return replace(
+                    state, turns=_update_turn_at(state.turns, i, segments=new_segs)
+                )
+            return _append_segment(state, tid, TextSegment(text=text))
 
         case ToolCallStarted(turn_id=tid, tool_call_id=tcid, tool_name=name, args=args):
-            return _append_tool_call(
+            return _append_segment(
                 state, tid,
                 ToolCallView(tool_call_id=tcid, tool_name=name, args=args, status="running"),
             )

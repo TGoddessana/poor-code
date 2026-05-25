@@ -125,6 +125,42 @@ def test_assistant_message_completed_replaces_assistant_text():
     assert s.turns[0].assistant_text == "final answer"
 
 
+from poor_code.ui.store import TextSegment
+
+
+def test_segments_track_chronological_order_of_text_and_tools():
+    """Iter 1: thinking text → tool. Iter 2: final answer. Segments must
+    preserve that order so the UI can render thinking ABOVE the tool call
+    and the final answer BELOW it."""
+    s = _running_state()
+    s = reduce(s, AssistantTextDelta(turn_id="T1", text="Let me check..."))
+    s = reduce(s, ToolCallStarted(
+        turn_id="T1", tool_call_id="tc1", tool_name="read", args={"path": "a"}
+    ))
+    s = reduce(s, ToolCallFinished(turn_id="T1", tool_call_id="tc1", result="ok"))
+    s = reduce(s, AssistantTextDelta(turn_id="T1", text="The answer is X."))
+    s = reduce(s, AssistantMessageCompleted(turn_id="T1", text="The answer is X."))
+
+    segs = s.turns[0].segments
+    assert len(segs) == 3
+    assert isinstance(segs[0], TextSegment) and segs[0].text == "Let me check..."
+    assert isinstance(segs[1], ToolCallView) and segs[1].status == "done"
+    assert isinstance(segs[2], TextSegment) and segs[2].text == "The answer is X."
+
+
+def test_text_delta_after_tool_starts_new_segment_not_appended_to_prior_text():
+    s = _running_state()
+    s = reduce(s, AssistantTextDelta(turn_id="T1", text="hello"))
+    s = reduce(s, ToolCallStarted(
+        turn_id="T1", tool_call_id="tc1", tool_name="read", args={}
+    ))
+    s = reduce(s, AssistantTextDelta(turn_id="T1", text="world"))
+    segs = s.turns[0].segments
+    assert [type(x).__name__ for x in segs] == ["TextSegment", "ToolCallView", "TextSegment"]
+    assert segs[0].text == "hello"
+    assert segs[2].text == "world"
+
+
 def test_tool_call_started_appends_running_tool_call():
     s = _running_state()
     s = reduce(s, ToolCallStarted(
