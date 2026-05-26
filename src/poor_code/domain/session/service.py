@@ -117,3 +117,13 @@ class SessionService:
 
     def active_task(self) -> Task | None:
         return self._active_task
+
+    def policies(self) -> Policies | None:
+        if self._active_task_state is None:
+            return None
+        return self._active_task_state.policies
+
+    def task_dir(self, task_id: str) -> Path:
+        if self._session is None:
+            raise RuntimeError("session not started")
+        return self._store.task_dir(self._session.session_id, task_id)

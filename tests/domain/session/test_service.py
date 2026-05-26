@@ -200,3 +200,37 @@ def test_begin_after_end_starts_new_task(service: SessionService, tmp_path: Path
     t2 = service.begin_task("second")
     assert t2.task_id != t1.task_id
     assert service.active_task() == t2
+
+
+def test_policies_none_before_begin(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    assert service.policies() is None
+
+
+def test_policies_locked_after_begin(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    service.begin_task("x")
+    p = service.policies()
+    assert p is not None
+    assert p.implementation_locked is True
+
+
+def test_policies_none_after_end(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("x")
+    service.end_task(t.task_id, TaskStatus.DONE)
+    assert service.policies() is None
+
+
+def test_service_task_dir_returns_disk_path(service: SessionService, root: Path, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("x")
+    sid = service.active_session().session_id
+    assert service.task_dir(t.task_id) == root / "sessions" / sid / "tasks" / t.task_id
+
+
+def test_service_task_dir_works_for_non_active_task_id(service: SessionService, root: Path, tmp_path: Path):
+    """task_dir is pure path computation — does not validate existence."""
+    service.start_session(tmp_path / "cwd")
+    sid = service.active_session().session_id
+    assert service.task_dir("never-existed") == root / "sessions" / sid / "tasks" / "never-existed"
