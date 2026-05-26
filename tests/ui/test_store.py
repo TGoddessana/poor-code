@@ -392,3 +392,45 @@ def test_turn_failed_without_started_at_leaves_duration_none():
     assert t.status == "failed"
     assert t.duration_sec is None
     assert t.model == "gpt-4o"  # still snapshots current model
+
+
+from poor_code.messages import (
+    ProjectMapBuildFailed,
+    ProjectMapBuildFinished,
+    ProjectMapBuildProgress,
+    ProjectMapBuildStarted,
+)
+from poor_code.ui.store import ProjectMapStatus
+
+
+def test_reducer_project_map_build_started_sets_indexing():
+    state = AppState()
+    new = reduce(state, ProjectMapBuildStarted(files_total=87))
+    assert new.project_map == ProjectMapStatus(phase="indexing", files_total=87)
+
+
+def test_reducer_project_map_build_progress_updates_counts():
+    state = AppState(project_map=ProjectMapStatus(phase="indexing", files_total=87))
+    new = reduce(state, ProjectMapBuildProgress(files_processed=12, files_total=87))
+    assert new.project_map == ProjectMapStatus(
+        phase="indexing", files_processed=12, files_total=87
+    )
+
+
+def test_reducer_project_map_build_finished_sets_ready():
+    state = AppState(project_map=ProjectMapStatus(phase="indexing", files_total=87))
+    new = reduce(
+        state,
+        ProjectMapBuildFinished(files_total=87, parse_error_count=2, duration_ms=420),
+    )
+    assert new.project_map == ProjectMapStatus(
+        phase="ready",
+        files_processed=87, files_total=87,
+        parse_error_count=2, duration_ms=420,
+    )
+
+
+def test_reducer_project_map_build_failed_sets_failed():
+    state = AppState()
+    new = reduce(state, ProjectMapBuildFailed(error="cwd unreadable"))
+    assert new.project_map == ProjectMapStatus(phase="failed", error="cwd unreadable")

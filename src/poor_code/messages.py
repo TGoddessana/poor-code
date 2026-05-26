@@ -125,3 +125,29 @@ class UsageUpdated(Event):
     input_tokens: int
     output_tokens: int
     cost_usd: float
+
+
+# --- Project Map build (S2) ---
+
+
+@dataclass(frozen=True)
+class ProjectMapBuildStarted(Event):
+    files_total: int
+
+
+@dataclass(frozen=True)
+class ProjectMapBuildProgress(Event):
+    files_processed: int
+    files_total: int
+
+
+@dataclass(frozen=True)
+class ProjectMapBuildFinished(Event):
+    files_total: int
+    parse_error_count: int
+    duration_ms: int
+
+
+@dataclass(frozen=True)
+class ProjectMapBuildFailed(Event):
+    error: str

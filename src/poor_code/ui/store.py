@@ -13,6 +13,10 @@ from poor_code.messages import (
     AssistantMessageCompleted,
     AssistantTextDelta,
     Event,
+    ProjectMapBuildFailed,
+    ProjectMapBuildFinished,
+    ProjectMapBuildProgress,
+    ProjectMapBuildStarted,
     ToolCallFailed,
     ToolCallFinished,
     ToolCallStarted,
@@ -82,6 +86,16 @@ class UsageState:
     cost_usd: float = 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectMapStatus:
+    phase: Literal["indexing", "ready", "failed"]
+    files_processed: int = 0
+    files_total: int = 0
+    parse_error_count: int = 0
+    duration_ms: int = 0
+    error: str | None = None
+
+
 @dataclass(frozen=True)
 class AppState:
     turns: tuple[TurnView, ...] = ()
@@ -93,6 +107,7 @@ class AppState:
     model: str | None = None
     model_meta: ModelMeta | None = None
     last_turn_tokens: int = 0
+    project_map: ProjectMapStatus | None = None
 
 
 # =========================================================================
@@ -312,6 +327,28 @@ def reduce(state: AppState, action: Action) -> AppState:
                 ),
                 last_turn_tokens=i_in + i_out,
             )
+
+        case ProjectMapBuildStarted(files_total=n):
+            return replace(state, project_map=ProjectMapStatus(
+                phase="indexing", files_total=n,
+            ))
+
+        case ProjectMapBuildProgress(files_processed=p, files_total=n):
+            return replace(state, project_map=ProjectMapStatus(
+                phase="indexing", files_processed=p, files_total=n,
+            ))
+
+        case ProjectMapBuildFinished(files_total=n, parse_error_count=e, duration_ms=d):
+            return replace(state, project_map=ProjectMapStatus(
+                phase="ready",
+                files_processed=n, files_total=n,
+                parse_error_count=e, duration_ms=d,
+            ))
+
+        case ProjectMapBuildFailed(error=err):
+            return replace(state, project_map=ProjectMapStatus(
+                phase="failed", error=err,
+            ))
 
         case CwdChanged(cwd=cwd):
             return replace(state, cwd=cwd)
