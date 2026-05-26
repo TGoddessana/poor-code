@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Protocol, runtime_checkable
 
+from poor_code.domain.session import SessionService
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.messages import (
@@ -80,10 +81,12 @@ class Agent:
         llm: _LLMClientLike,
         tools: ToolRegistry,
         assembler: TurnAssembler,
+        session: SessionService | None = None,
     ) -> None:
         self.llm = llm
         self.tools = tools
         self.assembler = assembler
+        self.session = session
         self.history: list[dict[str, Any]] = []
 
     async def run(self, cmd: Command, cancel: asyncio.Event) -> AsyncIterator[Event]:
@@ -97,6 +100,13 @@ class Agent:
         if user_text is None:
             yield TurnFailed(turn_id=turn_id, error=f"unsupported command: {type(cmd).__name__}")
             return
+
+        # Harness boundary: only the first user message in a session opens a Task.
+        # Subsequent messages fold into the active Task (1 msg ≠ 1 engineering task).
+        # No end_task here — TurnEnded is one turn within a task, not the task's end.
+        if self.session is not None:
+            if self.session.classify_message(user_text) == "new":
+                self.session.begin_task(user_text)
 
         self.history.append({"role": "user", "content": user_text})
         yield TurnStarted(cmd_id=cmd_id, turn_id=turn_id)

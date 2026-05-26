@@ -5,8 +5,12 @@ starts with a NoAuthLLM stub that fails the first turn with a hint to /login.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from poor_code.app import PoorCodeApp
 from poor_code.domain.agent import Agent
+from poor_code.domain.session import SessionService
+from poor_code.domain.session.store import SessionStore
 from poor_code.domain.tool.bash import BashTool
 from poor_code.domain.tool.edit import EditTool
 from poor_code.domain.tool.read import ReadTool
@@ -52,15 +56,23 @@ def _build_assembler() -> TurnAssembler:
     )
 
 
-def _build_agent() -> Agent:
+def _start_session(cwd: Path) -> SessionService:
+    service = SessionService(SessionStore(cwd / ".poor-code"))
+    service.start_session(cwd)
+    return service
+
+
+def _build_agent(session: SessionService) -> Agent:
     return Agent(
         llm=_initial_llm(),
         tools=ToolRegistry([ReadTool(), WriteTool(), EditTool(), BashTool()]),
         assembler=_build_assembler(),
+        session=session,
     )
 
 
 def main() -> None:
-    agent = _build_agent()
+    session = _start_session(Path.cwd())
+    agent = _build_agent(session)
     slash = SlashDispatcher(SlashRegistry([LoginCommand()]))
     PoorCodeApp(agent=agent, slash=slash).run()
