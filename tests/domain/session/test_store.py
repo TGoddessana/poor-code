@@ -40,3 +40,17 @@ def test_atomic_write_no_tmp_file_left_on_success(tmp_path: Path):
     assert target.exists()
     # No .tmp sibling.
     assert not (tmp_path / "out.json.tmp").exists()
+
+
+def test_atomic_write_failure_cleans_up_tmp_file(tmp_path: Path):
+    target = tmp_path / "out.json"
+    target.write_text('{"original": true}', encoding="utf-8")
+
+    with patch("os.replace", side_effect=OSError("simulated")):
+        with pytest.raises(OSError):
+            _atomic_write_json(target, {"new": True})
+
+    # Stale .tmp should not remain.
+    assert not (tmp_path / "out.json.tmp").exists()
+    # Original still intact.
+    assert "original" in target.read_text(encoding="utf-8")
