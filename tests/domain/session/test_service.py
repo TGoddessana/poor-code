@@ -67,3 +67,15 @@ def test_active_session_after_start_returns_session(service: SessionService, tmp
     cwd = tmp_path / "cwd"
     s = service.start_session(cwd)
     assert service.active_session() == s
+
+
+def test_classify_returns_new_when_no_active_task(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    assert service.classify_message("hi") == "new"
+
+
+def test_classify_takes_text_but_ignores_it(service: SessionService, tmp_path: Path):
+    """Signature reserves space for future LLM-based classifier; V1 must not branch on text."""
+    service.start_session(tmp_path / "cwd")
+    assert service.classify_message("") == "new"
+    assert service.classify_message("totally unrelated topic") == "new"

@@ -45,6 +45,18 @@ class SessionService:
         self._session_state = SessionState()
         return s
 
+    # ----- lifecycle -----
+
+    def classify_message(self, text: str) -> Literal["new", "continuation"]:
+        if self._session_state is None:
+            raise RuntimeError("session not started")
+        if self._session_state.active_task_id is None:
+            return "new"
+        assert self._active_task_state is not None
+        if self._active_task_state.status in {TaskStatus.DONE, TaskStatus.ABORTED}:
+            return "new"
+        return "continuation"
+
     # ----- queries -----
 
     def active_session(self) -> Session:
