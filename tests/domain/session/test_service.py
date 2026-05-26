@@ -136,3 +136,67 @@ def test_active_task_returns_task_after_begin(service: SessionService, tmp_path:
     service.start_session(tmp_path / "cwd")
     t = service.begin_task("x")
     assert service.active_task() == t
+
+
+from poor_code.domain.session.models import TaskStatus
+
+
+def test_end_task_done_transitions_session_state(service: SessionService, root: Path, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("x")
+    service.end_task(t.task_id, TaskStatus.DONE)
+
+    sid = service.active_session().session_id
+    data = json.loads((root / "sessions" / sid / "state.json").read_text(encoding="utf-8"))
+    assert data == {"status": "ready", "active_task_id": None}
+
+    task_data = json.loads((root / "sessions" / sid / "tasks" / t.task_id / "state.json").read_text(encoding="utf-8"))
+    assert task_data["status"] == "done"
+
+
+def test_end_task_aborted_transitions_session_state(service: SessionService, root: Path, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("x")
+    service.end_task(t.task_id, TaskStatus.ABORTED)
+
+    sid = service.active_session().session_id
+    task_data = json.loads((root / "sessions" / sid / "tasks" / t.task_id / "state.json").read_text(encoding="utf-8"))
+    assert task_data["status"] == "aborted"
+
+
+def test_classify_after_end_done_returns_new(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("x")
+    service.end_task(t.task_id, TaskStatus.DONE)
+    assert service.classify_message("next") == "new"
+
+
+def test_classify_after_end_aborted_returns_new(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("x")
+    service.end_task(t.task_id, TaskStatus.ABORTED)
+    assert service.classify_message("next") == "new"
+
+
+def test_end_task_with_pending_status_raises(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("x")
+    with pytest.raises(ValueError, match="terminal status"):
+        service.end_task(t.task_id, TaskStatus.PENDING)
+
+
+def test_end_task_with_wrong_id_raises(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    service.begin_task("x")
+    with pytest.raises(ValueError, match="not active"):
+        service.end_task("bogus-tid", TaskStatus.DONE)
+
+
+def test_begin_after_end_starts_new_task(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t1 = service.begin_task("first")
+    service.end_task(t1.task_id, TaskStatus.DONE)
+
+    t2 = service.begin_task("second")
+    assert t2.task_id != t1.task_id
+    assert service.active_task() == t2

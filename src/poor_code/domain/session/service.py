@@ -84,6 +84,30 @@ class SessionService:
         self._session_state = new_session_state
         return t
 
+    def end_task(self, task_id: str, status: TaskStatus) -> None:
+        if status not in {TaskStatus.DONE, TaskStatus.ABORTED}:
+            raise ValueError("end_task requires terminal status (DONE or ABORTED)")
+        if (
+            self._session is None
+            or self._session_state is None
+            or self._session_state.active_task_id != task_id
+            or self._active_task_state is None
+        ):
+            raise ValueError("task is not active")
+
+        new_task_state = TaskState(
+            status=status,
+            policies=self._active_task_state.policies,
+        )
+        self._store.write_task_state(self._session.session_id, task_id, new_task_state)
+
+        new_session_state = SessionState(status=SessionStatus.READY, active_task_id=None)
+        self._store.write_session_state(self._session.session_id, new_session_state)
+
+        self._active_task = None
+        self._active_task_state = None
+        self._session_state = new_session_state
+
     # ----- queries -----
 
     def active_session(self) -> Session:
