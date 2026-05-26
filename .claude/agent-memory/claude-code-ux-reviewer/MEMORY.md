@@ -1,3 +1,0 @@
-- [User Role](user_role.md) — backend developer, frame UI feedback in backend analogies
-- [poor-code Philosophy](poor-code-philosophy.md) — agent + tools as top-level primitives; 1급 추상화: Provider/Tool/SlashCommand/Hook/Profile
-- [poor-code Stack](poor-code-stack.md) — Python 3.14 + Textual + uv; Redux-style store; allow_all permission stub
