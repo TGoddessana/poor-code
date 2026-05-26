@@ -30,8 +30,16 @@ class StatusFooter(Static):
     def _apply(self, state: AppState) -> None:
         self.update(self._format(state))
         pct = self._ctx_pct(state)
-        self.set_class(pct is not None and pct > 90, "danger")
-        self.set_class(pct is not None and 70 < pct <= 90, "warn")
+        ctx_danger = pct is not None and pct > 90
+        ctx_warn = pct is not None and 70 < pct <= 90
+        map_danger = state.project_map is not None and state.project_map.phase == "failed"
+        map_warn = (
+            state.project_map is not None
+            and state.project_map.phase == "ready"
+            and state.project_map.parse_error_count > 0
+        )
+        self.set_class(ctx_danger or map_danger, "danger")
+        self.set_class((ctx_warn or map_warn) and not (ctx_danger or map_danger), "warn")
 
     @staticmethod
     def _format(state: AppState) -> str:
@@ -39,10 +47,26 @@ class StatusFooter(Static):
         ctx = StatusFooter._ctx_str(state)
         cost = f"${u.cost_usd:.4f}"
         model = state.model or ""
-        return (
+        base = (
             f" ↑ {_k(u.input_tokens)}  ↓ {_k(u.output_tokens)}   "
             f"{cost}   {ctx}   {model}"
         )
+        suffix = StatusFooter._format_map(state)
+        return base + suffix
+
+    @staticmethod
+    def _format_map(state: AppState) -> str:
+        pm = state.project_map
+        if pm is None:
+            return ""
+        if pm.phase == "indexing":
+            return f"  · map: {pm.files_processed}/{pm.files_total}"
+        if pm.phase == "ready":
+            if pm.parse_error_count > 0:
+                return f"  · map: {pm.files_total} files, {pm.parse_error_count} errors"
+            return f"  · map: {pm.files_total} files"
+        # failed
+        return "  · map: failed"
 
     @staticmethod
     def _ctx_pct(state: AppState) -> float | None:

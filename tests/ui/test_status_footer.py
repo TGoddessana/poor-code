@@ -1,5 +1,5 @@
 from poor_code.provider.registry import ModelMeta, ModelPricing
-from poor_code.ui.store import AppState, UsageState
+from poor_code.ui.store import AppState, UsageState, ProjectMapStatus
 from poor_code.ui.widgets.status_footer import StatusFooter, _k
 
 
@@ -52,3 +52,52 @@ def test_ctx_pct_computes_from_last_turn_tokens():
     meta = ModelMeta(model_id="m", context_size=200_000, max_output=4096)
     state = AppState(model_meta=meta, last_turn_tokens=100_000)
     assert StatusFooter._ctx_pct(state) == 50.0
+
+
+def test_footer_omits_map_when_project_map_is_none():
+    state = AppState(model="claude")
+    rendered = StatusFooter._format(state)
+    assert "map" not in rendered
+
+
+def test_footer_renders_indexing_with_progress_counts():
+    state = AppState(
+        model="claude",
+        project_map=ProjectMapStatus(phase="indexing", files_processed=12, files_total=87),
+    )
+    rendered = StatusFooter._format(state)
+    assert "map: 12/87" in rendered
+
+
+def test_footer_renders_ready_clean():
+    state = AppState(
+        model="claude",
+        project_map=ProjectMapStatus(
+            phase="ready", files_processed=87, files_total=87,
+            parse_error_count=0,
+        ),
+    )
+    rendered = StatusFooter._format(state)
+    assert "map: 87 files" in rendered
+    assert "errors" not in rendered
+
+
+def test_footer_renders_ready_with_errors():
+    state = AppState(
+        model="claude",
+        project_map=ProjectMapStatus(
+            phase="ready", files_processed=87, files_total=87,
+            parse_error_count=2,
+        ),
+    )
+    rendered = StatusFooter._format(state)
+    assert "map: 87 files, 2 errors" in rendered
+
+
+def test_footer_renders_failed():
+    state = AppState(
+        model="claude",
+        project_map=ProjectMapStatus(phase="failed", error="cwd unreadable"),
+    )
+    rendered = StatusFooter._format(state)
+    assert "map: failed" in rendered
