@@ -23,9 +23,3 @@ __all__ = [
     "TaskState",
     "TaskStatus",
 ]
-
-# Remove internal submodule references that leak into the package namespace
-# when store.py does `from poor_code.domain.session import paths`.
-import sys as _sys
-
-_sys.modules[__name__].__dict__.pop("paths", None)

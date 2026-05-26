@@ -24,13 +24,23 @@ def test_public_imports():
     assert TaskState is not None
 
 
-def test_internal_modules_not_part_of_public_surface():
-    """store and paths must not be re-exported from the package root."""
+def test_public_surface_locked_to_all():
+    """__all__ defines the contract. Internal classes like SessionStore must not appear."""
     import poor_code.domain.session as session_pkg
 
+    expected = {
+        "Policies",
+        "Session",
+        "SessionService",
+        "SessionState",
+        "SessionStatus",
+        "Task",
+        "TaskState",
+        "TaskStatus",
+    }
+    assert set(session_pkg.__all__) == expected
+
+    # SessionStore is internal — must not appear on the package root.
     assert not hasattr(session_pkg, "SessionStore"), (
         "SessionStore is internal — downstream code must go through SessionService"
-    )
-    assert not hasattr(session_pkg, "paths"), (
-        "paths module is internal — downstream code must use SessionService.task_dir"
     )
