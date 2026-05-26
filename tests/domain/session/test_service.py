@@ -79,3 +79,60 @@ def test_classify_takes_text_but_ignores_it(service: SessionService, tmp_path: P
     service.start_session(tmp_path / "cwd")
     assert service.classify_message("") == "new"
     assert service.classify_message("totally unrelated topic") == "new"
+
+
+def test_begin_task_creates_request_and_state(service: SessionService, root: Path, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("refactor auth")
+
+    assert t.task_id
+    assert t.raw_request == "refactor auth"
+    assert (root / "sessions" / service.active_session().session_id / "tasks" / t.task_id / "request.json").exists()
+    assert (root / "sessions" / service.active_session().session_id / "tasks" / t.task_id / "state.json").exists()
+
+
+def test_begin_task_sets_session_state_busy(service: SessionService, root: Path, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("refactor auth")
+
+    sid = service.active_session().session_id
+    data = json.loads((root / "sessions" / sid / "state.json").read_text(encoding="utf-8"))
+    assert data == {"status": "busy", "active_task_id": t.task_id}
+
+
+def test_begin_task_writes_pending_state_with_locked_policies(service: SessionService, root: Path, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("refactor auth")
+
+    sid = service.active_session().session_id
+    data = json.loads((root / "sessions" / sid / "tasks" / t.task_id / "state.json").read_text(encoding="utf-8"))
+    assert data == {"status": "pending", "policies": {"implementation_locked": True}}
+
+
+def test_begin_task_after_classify_returns_continuation(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    service.begin_task("first task")
+    assert service.classify_message("more details") == "continuation"
+
+
+def test_begin_task_while_active_raises(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    service.begin_task("first task")
+    with pytest.raises(RuntimeError, match="active task already in progress"):
+        service.begin_task("second task")
+
+
+def test_begin_task_before_start_raises(service: SessionService):
+    with pytest.raises(RuntimeError, match="not started"):
+        service.begin_task("oops")
+
+
+def test_active_task_is_none_before_begin(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    assert service.active_task() is None
+
+
+def test_active_task_returns_task_after_begin(service: SessionService, tmp_path: Path):
+    service.start_session(tmp_path / "cwd")
+    t = service.begin_task("x")
+    assert service.active_task() == t

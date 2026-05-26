@@ -57,9 +57,39 @@ class SessionService:
             return "new"
         return "continuation"
 
+    def begin_task(self, raw_request: str) -> Task:
+        if self._session is None or self._session_state is None:
+            raise RuntimeError("session not started")
+        if self._session_state.active_task_id is not None:
+            assert self._active_task_state is not None
+            if self._active_task_state.status not in {TaskStatus.DONE, TaskStatus.ABORTED}:
+                raise RuntimeError("active task already in progress")
+
+        t = Task(
+            task_id=str(uuid.uuid4()),
+            session_id=self._session.session_id,
+            raw_request=raw_request,
+            created_at=datetime.now(UTC),
+        )
+        ts = TaskState()  # PENDING + locked policies
+
+        self._store.write_task(t)
+        self._store.write_task_state(self._session.session_id, t.task_id, ts)
+
+        new_session_state = SessionState(status=SessionStatus.BUSY, active_task_id=t.task_id)
+        self._store.write_session_state(self._session.session_id, new_session_state)
+
+        self._active_task = t
+        self._active_task_state = ts
+        self._session_state = new_session_state
+        return t
+
     # ----- queries -----
 
     def active_session(self) -> Session:
         if self._session is None:
             raise RuntimeError("session not started")
         return self._session
+
+    def active_task(self) -> Task | None:
+        return self._active_task
