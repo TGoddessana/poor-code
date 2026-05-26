@@ -7,6 +7,7 @@ import poor_code.domain.project_map as pkg
 EXPECTED_PUBLIC = {
     "BuildProgress",
     "FileEntry",
+    "make_default_builder",
     "ParseError",
     "ProjectMap",
     "ProjectMapBuilder",

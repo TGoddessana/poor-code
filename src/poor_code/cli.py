@@ -22,10 +22,7 @@ from poor_code.infra.prompt_builder import PromptBuilder
 from poor_code.infra.settings import SettingsLoader
 from poor_code.infra.system_prompt import SystemPromptComposer
 from poor_code.infra.turn_assembler import TurnAssembler
-from poor_code.domain.project_map import ProjectMapBuilder
-from poor_code.domain.project_map.discovery import FileDiscovery
-from poor_code.domain.project_map.import_resolver import ImportResolver
-from poor_code.domain.project_map.tests_mapping import TestsMapper
+from poor_code.domain.project_map import make_default_builder
 from poor_code.provider.providers import ollama_cloud
 from poor_code.slash.commands.login import LoginCommand
 from poor_code.slash.dispatcher import SlashDispatcher
@@ -75,12 +72,8 @@ def _build_agent(session: SessionService) -> Agent:
     )
 
 
-def _build_project_map_builder() -> ProjectMapBuilder:
-    return ProjectMapBuilder(
-        discovery=FileDiscovery(),
-        resolver=ImportResolver(),
-        tests_mapper=TestsMapper(),
-    )
+def _build_project_map_builder():
+    return make_default_builder()
 
 
 def main() -> None:
