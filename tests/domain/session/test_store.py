@@ -148,3 +148,32 @@ def test_task_state_with_done_status_round_trip(tmp_path: Path):
     store.write_task_state("sid1", "tid1", ts)
     loaded = store.read_task_state("sid1", "tid1")
     assert loaded == ts
+
+
+import json
+
+
+def test_ensure_project_map_creates_placeholder(tmp_path: Path):
+    store = SessionStore(tmp_path)
+    store.ensure_project_map()
+    pm = tmp_path / "project_map.json"
+    assert pm.exists()
+    data = json.loads(pm.read_text(encoding="utf-8"))
+    assert data == {"status": "uninitialized", "version": 1}
+
+
+def test_ensure_project_map_does_not_overwrite_existing(tmp_path: Path):
+    pm = tmp_path / "project_map.json"
+    pm.parent.mkdir(parents=True, exist_ok=True)
+    pm.write_text('{"status": "ready", "files": [{"path": "x"}]}', encoding="utf-8")
+
+    store = SessionStore(tmp_path)
+    store.ensure_project_map()
+
+    data = json.loads(pm.read_text(encoding="utf-8"))
+    assert data == {"status": "ready", "files": [{"path": "x"}]}
+
+
+def test_store_task_dir_returns_expected_path(tmp_path: Path):
+    store = SessionStore(tmp_path)
+    assert store.task_dir("sid1", "tid1") == tmp_path / "sessions" / "sid1" / "tasks" / "tid1"

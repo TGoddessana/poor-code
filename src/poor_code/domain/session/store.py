@@ -161,3 +161,12 @@ class SessionStore:
     def read_task_state(self, session_id: str, task_id: str) -> TaskState:
         path = paths.task_state_json(self._root, session_id, task_id)
         return _dict_to_task_state(_read_json(path), path)
+
+    def ensure_project_map(self) -> None:
+        path = paths.project_map_json(self._root)
+        if path.exists():
+            return
+        _atomic_write_json(path, {"status": "uninitialized", "version": 1})
+
+    def task_dir(self, session_id: str, task_id: str) -> Path:
+        return paths.task_dir(self._root, session_id, task_id)
