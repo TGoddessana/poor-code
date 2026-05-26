@@ -109,3 +109,42 @@ def test_read_session_malformed_raises_value_error_with_path(tmp_path: Path):
     paths.session_json(tmp_path, "sid1").write_text("{not json", encoding="utf-8")
     with pytest.raises(ValueError, match="corrupt"):
         store.read_session("sid1")
+
+
+from poor_code.domain.session.models import (
+    Policies,
+    Task,
+    TaskState,
+    TaskStatus,
+)
+
+
+def test_task_round_trip(tmp_path: Path):
+    store = SessionStore(tmp_path)
+    t = Task(
+        task_id="tid1",
+        session_id="sid1",
+        raw_request="refactor auth",
+        created_at=datetime(2026, 5, 26, 12, 0, tzinfo=UTC),
+    )
+    store.write_task(t)
+    loaded = store.read_task("sid1", "tid1")
+    assert loaded == t
+
+
+def test_task_state_round_trip_with_defaults(tmp_path: Path):
+    store = SessionStore(tmp_path)
+    ts = TaskState()
+    store.write_task_state("sid1", "tid1", ts)
+    loaded = store.read_task_state("sid1", "tid1")
+    assert loaded == ts
+    assert loaded.policies.implementation_locked is True
+    assert loaded.status is TaskStatus.PENDING
+
+
+def test_task_state_with_done_status_round_trip(tmp_path: Path):
+    store = SessionStore(tmp_path)
+    ts = TaskState(status=TaskStatus.DONE, policies=Policies(implementation_locked=False))
+    store.write_task_state("sid1", "tid1", ts)
+    loaded = store.read_task_state("sid1", "tid1")
+    assert loaded == ts

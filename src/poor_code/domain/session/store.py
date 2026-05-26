@@ -9,9 +9,13 @@ from typing import Any
 
 from poor_code.domain.session import paths
 from poor_code.domain.session.models import (
+    Policies,
     Session,
     SessionState,
     SessionStatus,
+    Task,
+    TaskState,
+    TaskStatus,
 )
 
 
@@ -79,6 +83,44 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
         raise ValueError(f"corrupt session file at {src}: {e}") from e
 
 
+def _task_to_dict(t: Task) -> dict[str, Any]:
+    return {
+        "task_id": t.task_id,
+        "session_id": t.session_id,
+        "raw_request": t.raw_request,
+        "created_at": t.created_at.isoformat(),
+    }
+
+
+def _dict_to_task(d: dict[str, Any], src: Path) -> Task:
+    try:
+        return Task(
+            task_id=d["task_id"],
+            session_id=d["session_id"],
+            raw_request=d["raw_request"],
+            created_at=datetime.fromisoformat(d["created_at"]),
+        )
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError(f"corrupt session file at {src}: {e}") from e
+
+
+def _task_state_to_dict(ts: TaskState) -> dict[str, Any]:
+    return {
+        "status": ts.status.value,
+        "policies": {"implementation_locked": ts.policies.implementation_locked},
+    }
+
+
+def _dict_to_task_state(d: dict[str, Any], src: Path) -> TaskState:
+    try:
+        return TaskState(
+            status=TaskStatus(d["status"]),
+            policies=Policies(implementation_locked=d["policies"]["implementation_locked"]),
+        )
+    except (KeyError, ValueError, TypeError) as e:
+        raise ValueError(f"corrupt session file at {src}: {e}") from e
+
+
 class SessionStore:
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -99,3 +141,23 @@ class SessionStore:
     def read_session_state(self, session_id: str) -> SessionState:
         path = paths.session_state_json(self._root, session_id)
         return _dict_to_session_state(_read_json(path), path)
+
+    def write_task(self, t: Task) -> None:
+        _atomic_write_json(
+            paths.task_request_json(self._root, t.session_id, t.task_id),
+            _task_to_dict(t),
+        )
+
+    def read_task(self, session_id: str, task_id: str) -> Task:
+        path = paths.task_request_json(self._root, session_id, task_id)
+        return _dict_to_task(_read_json(path), path)
+
+    def write_task_state(self, session_id: str, task_id: str, st: TaskState) -> None:
+        _atomic_write_json(
+            paths.task_state_json(self._root, session_id, task_id),
+            _task_state_to_dict(st),
+        )
+
+    def read_task_state(self, session_id: str, task_id: str) -> TaskState:
+        path = paths.task_state_json(self._root, session_id, task_id)
+        return _dict_to_task_state(_read_json(path), path)
