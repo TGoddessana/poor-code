@@ -1,7 +1,7 @@
 """Domain models for session/task lifecycle. See CONTRACT.md."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -38,6 +38,27 @@ class Session:
 class SessionState:
     status: SessionStatus = SessionStatus.READY
     active_task_id: str | None = None
+    cursor: Cursor | None = None
+    request: Request | None = None
+    understanding: CodeContext | None = None
+    history: tuple[Transition, ...] = ()
+
+    def with_request(self, request: Request) -> "SessionState":
+        return replace(self, request=request)
+
+    def with_understanding(self, cc: CodeContext) -> "SessionState":
+        return replace(self, understanding=cc)
+
+    def advancing_to(
+        self, *, node: str, phase: Phase, trigger: TriggerKind, reason: str, ts_iso: str
+    ) -> "SessionState":
+        prev = self.cursor.current_node if self.cursor else ""
+        tr = Transition(from_node=prev, to_node=node, trigger=trigger, reason=reason, ts_iso=ts_iso)
+        return replace(
+            self,
+            cursor=Cursor(phase=phase, current_node=node),
+            history=self.history + (tr,),
+        )
 
 
 @dataclass(frozen=True, slots=True)
