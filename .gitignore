@@ -16,3 +16,6 @@ wheels/
 
 # internal docs
 docs/
+
+# poor-code runtime state
+.poor-code/
