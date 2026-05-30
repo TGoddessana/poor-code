@@ -60,12 +60,17 @@ def _map_to_dict(m: ProjectMap) -> dict[str, Any]:
 def _file_to_dict(fe: FileEntry) -> dict[str, Any]:
     return {
         "path": fe.path,
+        "language": fe.language,
+        "content_hash": fe.content_hash,
+        "imports": list(fe.imports),
+        "imported_by": list(fe.imported_by),
+        "tests": list(fe.tests),
         "symbols": [
-            {"name": s.name, "kind": s.kind.value, "lineno": s.lineno}
+            {"name": s.name, "kind": s.kind.value, "lineno": s.lineno,
+             "signature": s.signature, "doc": s.doc,
+             "calls": list(s.calls), "called_by": list(s.called_by)}
             for s in fe.symbols
         ],
-        "imports": list(fe.imports),
-        "tests": list(fe.tests),
     }
 
 
@@ -87,11 +92,13 @@ def _dict_to_map(d: dict[str, Any], src: Path) -> ProjectMap:
 
 def _dict_to_file(fd: dict[str, Any], src: Path) -> FileEntry:
     return FileEntry(
-        path=fd["path"],
+        path=fd["path"], language=fd["language"], content_hash=fd["content_hash"],
+        imports=tuple(fd["imports"]), imported_by=tuple(fd["imported_by"]),
+        tests=tuple(fd["tests"]),
         symbols=tuple(
-            Symbol(name=s["name"], kind=SymbolKind(s["kind"]), lineno=s["lineno"])
+            Symbol(name=s["name"], kind=SymbolKind(s["kind"]), lineno=s["lineno"],
+                   signature=s["signature"], doc=s["doc"],
+                   calls=tuple(s["calls"]), called_by=tuple(s["called_by"]))
             for s in fd["symbols"]
         ),
-        imports=tuple(fd["imports"]),
-        tests=tuple(fd["tests"]),
     )
