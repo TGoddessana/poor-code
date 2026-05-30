@@ -32,9 +32,12 @@ class CallResolver:
         calls: dict[tuple[str, str], list[str]] = defaultdict(list)
         for pf in parsed_files:
             local = per_file[pf.path]
+            defined_symbols = {s.name for s in pf.symbols}
             for rc in pf.raw_calls:
                 if not rc.caller:
                     continue  # module-level call; no owning symbol
+                if rc.caller not in defined_symbols:
+                    continue  # phantom caller (e.g. nested function); skip both edges
                 target = self._resolve_one(rc.callee, pf.path, local, global_index)
                 if target is None:
                     continue

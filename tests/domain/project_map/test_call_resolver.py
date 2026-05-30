@@ -33,3 +33,20 @@ def test_unresolved_dropped():
     a = _pf("a.py", [_sym("caller")], RawCall(caller="caller", callee="nowhere"))
     calls, _ = CallResolver().resolve((a,))
     assert calls.get(("a.py", "caller"), ()) == ()
+
+def test_nested_caller_not_a_symbol_produces_no_dangling_edges():
+    # 'outer.inner' is not a defined symbol (only 'outer' is); a call attributed
+    # to it must NOT create a forward edge NOR a dangling called_by edge.
+    pf = _pf("a.py", [_sym("outer"), _sym("helper")],
+             RawCall(caller="outer.inner", callee="helper"))
+    calls, called_by = CallResolver().resolve((pf,))
+    assert calls.get(("a.py", "outer.inner"), ()) == ()
+    assert called_by.get(("a.py", "helper"), ()) == ()
+
+def test_real_caller_still_resolves():
+    # sanity: a real symbol caller still produces both edges
+    pf = _pf("a.py", [_sym("outer"), _sym("helper")],
+             RawCall(caller="outer", callee="helper"))
+    calls, called_by = CallResolver().resolve((pf,))
+    assert calls[("a.py", "outer")] == ("a.py::helper",)
+    assert called_by[("a.py", "helper")] == ("a.py::outer",)
