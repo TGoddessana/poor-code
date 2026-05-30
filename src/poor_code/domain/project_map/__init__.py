@@ -17,18 +17,21 @@ from poor_code.domain.project_map.store import ProjectMapStore
 
 
 def make_default_builder() -> ProjectMapBuilder:
-    """Construct a ProjectMapBuilder with the default V1 dependencies.
+    """Construct a ProjectMapBuilder with the default v2 dependencies.
 
-    The concrete discovery / resolver / tests_mapper classes are internal;
-    downstream code should call this factory instead of importing them.
+    The concrete discovery / resolver / call_resolver / tests_mapper classes
+    are internal; downstream code should call this factory instead of
+    importing them.
     """
     # Local import to avoid leaking submodule names into the package namespace.
+    from poor_code.domain.project_map.call_resolver import CallResolver
     from poor_code.domain.project_map.discovery import FileDiscovery
     from poor_code.domain.project_map.import_resolver import ImportResolver
     from poor_code.domain.project_map.tests_mapping import TestsMapper
     return ProjectMapBuilder(
         discovery=FileDiscovery(),
         resolver=ImportResolver(),
+        call_resolver=CallResolver(),
         tests_mapper=TestsMapper(),
     )
 
