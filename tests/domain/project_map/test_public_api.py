@@ -32,5 +32,13 @@ def test_internal_classes_not_exposed():
     for forbidden in (
         "FileDiscovery", "ImportResolver", "TestsMapper",
         "RawImport", "ParsedFile",
+        "CallResolver", "RawCall",
     ):
         assert forbidden not in pkg.__all__
+
+
+def test_make_default_builder_builds(tmp_path):
+    from poor_code.domain.project_map import make_default_builder
+    (tmp_path / "a.py").write_text("def f():\n    pass\n", encoding="utf-8")
+    m = make_default_builder().build(tmp_path)
+    assert m.version == 2

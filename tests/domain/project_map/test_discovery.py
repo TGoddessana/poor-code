@@ -68,3 +68,12 @@ def test_result_is_sorted(tmp_path: Path):
     _touch(tmp_path / "m.py")
     result = FileDiscovery().discover(tmp_path)
     assert list(result) == sorted(result)
+
+
+def test_discovers_js_ts_not_unknown(tmp_path):
+    from poor_code.domain.project_map.discovery import FileDiscovery
+    for rel in ("a.py", "b.js", "c.ts", "d.tsx", "keep.rs", "notes.md"):
+        p = tmp_path / rel
+        p.write_text("x", encoding="utf-8")
+    result = {p.relative_to(tmp_path).as_posix() for p in FileDiscovery().discover(tmp_path)}
+    assert result == {"a.py", "b.js", "c.ts", "d.tsx"}

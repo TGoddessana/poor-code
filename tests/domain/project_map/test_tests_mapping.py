@@ -6,7 +6,15 @@ from poor_code.domain.project_map.tests_mapping import TestsMapper
 
 
 def _pf(path: str) -> ParsedFile:
-    return ParsedFile(path=path, symbols=(), raw_imports=(), parse_error=None)
+    return ParsedFile(
+        path=path,
+        language="python",
+        content_hash="sha256:x",
+        symbols=(),
+        raw_imports=(),
+        raw_calls=(),
+        parse_error=None,
+    )
 
 
 def test_test_file_requires_tests_segment_and_name_pattern():
@@ -55,6 +63,13 @@ def test_both_test_naming_styles_match():
     )
     out = TestsMapper().map(files)
     assert set(out["src/foo.py"]) == {"tests/test_foo.py", "tests/foo_test.py"}
+
+
+def test_ts_spec_and_test_suffixes():
+    from poor_code.domain.project_map.tests_mapping import TestsMapper
+    files = (_pf("web/util.ts"), _pf("web/util.test.ts"), _pf("web/util.spec.ts"))
+    out = TestsMapper().map(files)
+    assert set(out["web/util.ts"]) == {"web/util.test.ts", "web/util.spec.ts"}
 
 
 def test_result_is_sorted_for_determinism():

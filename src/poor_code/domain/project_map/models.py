@@ -1,7 +1,7 @@
-"""Frozen dataclasses for the project_map domain.
+"""Frozen dataclasses for the project_map domain (schema v2).
 
-Persistent types: Symbol, FileEntry, ParseError, ProjectMap.
-Intermediate types (not persisted): RawImport, ParsedFile, BuildProgress.
+Persistent: Symbol, FileEntry, ParseError, ProjectMap.
+Intermediate (not persisted): RawImport, RawCall, ParsedFile, BuildProgress.
 """
 from __future__ import annotations
 
@@ -22,13 +22,20 @@ class Symbol:
     name: str
     kind: SymbolKind
     lineno: int
+    signature: str | None
+    doc: str | None
+    calls: tuple[str, ...]
+    called_by: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class FileEntry:
     path: str
+    language: str
+    content_hash: str
     symbols: tuple[Symbol, ...]
     imports: tuple[str, ...]
+    imported_by: tuple[str, ...]
     tests: tuple[str, ...]
 
 
@@ -54,10 +61,19 @@ class RawImport:
 
 
 @dataclass(frozen=True, slots=True)
+class RawCall:
+    caller: str   # qualified symbol name of the enclosing definition ("" if module-level)
+    callee: str   # bare called name as written
+
+
+@dataclass(frozen=True, slots=True)
 class ParsedFile:
     path: str
+    language: str
+    content_hash: str
     symbols: tuple[Symbol, ...]
     raw_imports: tuple[RawImport, ...]
+    raw_calls: tuple[RawCall, ...]
     parse_error: ParseError | None
 
 

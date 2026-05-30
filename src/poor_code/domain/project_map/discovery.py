@@ -1,4 +1,4 @@
-"""FileDiscovery — cwd-recursive .py walk honoring root .gitignore.
+"""FileDiscovery — cwd-recursive multi-language walk honoring root .gitignore.
 
 Internal — do not import outside this package.
 """
@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pathspec
 
+from poor_code.domain.project_map.languages import EXTENSION_TO_LANGUAGE
+
 
 _HARD_EXCLUDED_DIRS = (".poor-code", ".git")
 
@@ -16,8 +18,10 @@ class FileDiscovery:
     def discover(self, cwd: Path) -> tuple[Path, ...]:
         spec = self._load_gitignore(cwd)
         results: list[Path] = []
-        for p in cwd.rglob("*.py"):
+        for p in cwd.rglob("*"):
             if not p.is_file():
+                continue
+            if p.suffix not in EXTENSION_TO_LANGUAGE:
                 continue
             if self._is_hard_excluded(p, cwd):
                 continue
