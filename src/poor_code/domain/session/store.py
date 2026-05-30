@@ -9,13 +9,21 @@ from typing import Any
 
 from poor_code.domain.session import paths
 from poor_code.domain.session.models import (
+    CodeContext,
+    CodeRef,
+    Cursor,
+    Phase,
     Policies,
+    Request,
+    RequestKind,
     Session,
     SessionState,
     SessionStatus,
     Task,
     TaskState,
     TaskStatus,
+    Transition,
+    TriggerKind,
 )
 
 
@@ -69,15 +77,69 @@ def _dict_to_session(d: dict[str, Any], src: Path) -> Session:
         raise ValueError(f"corrupt session file at {src}: {e}") from e
 
 
+def _ref_to_dict(r: CodeRef) -> dict[str, Any]:
+    return {"file": r.file, "symbol": r.symbol, "lineno": r.lineno}
+
+
+def _dict_to_ref(d: dict[str, Any]) -> CodeRef:
+    return CodeRef(file=d["file"], symbol=d.get("symbol"), lineno=d.get("lineno"))
+
+
 def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
-    return {"status": st.status.value, "active_task_id": st.active_task_id}
+    cc = st.understanding
+    return {
+        "status": st.status.value,
+        "active_task_id": st.active_task_id,
+        "cursor": (
+            None if st.cursor is None else {
+                "phase": st.cursor.phase.value,
+                "current_node": st.cursor.current_node,
+                "task_id": st.cursor.task_id,
+                "attempt_id": st.cursor.attempt_id,
+            }
+        ),
+        "request": (
+            None if st.request is None else
+            {"raw_text": st.request.raw_text, "kind": st.request.kind.value}
+        ),
+        "understanding": (
+            None if cc is None else {
+                "candidates": [_ref_to_dict(r) for r in cc.candidates],
+                "confusers": [_ref_to_dict(r) for r in cc.confusers],
+                "related_tests": [_ref_to_dict(r) for r in cc.related_tests],
+            }
+        ),
+        "history": [
+            {"from_node": t.from_node, "to_node": t.to_node,
+             "trigger": t.trigger.value, "reason": t.reason, "ts_iso": t.ts_iso}
+            for t in st.history
+        ],
+    }
 
 
 def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
     try:
+        cur = d.get("cursor")
+        req = d.get("request")
+        cc = d.get("understanding")
         return SessionState(
             status=SessionStatus(d["status"]),
             active_task_id=d.get("active_task_id"),
+            cursor=(None if cur is None else Cursor(
+                phase=Phase(cur["phase"]), current_node=cur["current_node"],
+                task_id=cur.get("task_id"), attempt_id=cur.get("attempt_id"))),
+            request=(None if req is None else Request(
+                raw_text=req["raw_text"], kind=RequestKind(req["kind"]))),
+            understanding=(None if cc is None else CodeContext(
+                candidates=tuple(_dict_to_ref(r) for r in cc["candidates"]),
+                confusers=tuple(_dict_to_ref(r) for r in cc["confusers"]),
+                related_tests=tuple(_dict_to_ref(r) for r in cc["related_tests"]))),
+            history=tuple(
+                Transition(from_node=t["from_node"], to_node=t["to_node"],
+                           trigger=TriggerKind(t["trigger"]), reason=t["reason"],
+                           ts_iso=t["ts_iso"])
+                for t in d.get("history", [])
+            ),
         )
     except (KeyError, ValueError) as e:
         raise ValueError(f"corrupt session file at {src}: {e}") from e

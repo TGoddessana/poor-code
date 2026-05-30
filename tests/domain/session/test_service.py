@@ -37,7 +37,7 @@ def test_start_session_writes_default_session_state(service: SessionService, roo
     s = service.start_session(cwd)
     state_file = root / "sessions" / s.session_id / "state.json"
     data = json.loads(state_file.read_text(encoding="utf-8"))
-    assert data == {"status": "ready", "active_task_id": None}
+    assert data["status"] == "ready" and data["active_task_id"] is None
 
 
 def test_start_session_does_not_overwrite_existing_project_map(service: SessionService, root: Path, tmp_path: Path):
@@ -97,7 +97,7 @@ def test_begin_task_sets_session_state_busy(service: SessionService, root: Path,
 
     sid = service.active_session().session_id
     data = json.loads((root / "sessions" / sid / "state.json").read_text(encoding="utf-8"))
-    assert data == {"status": "busy", "active_task_id": t.task_id}
+    assert data["status"] == "busy" and data["active_task_id"] == t.task_id
 
 
 def test_begin_task_writes_pending_state_with_locked_policies(service: SessionService, root: Path, tmp_path: Path):
@@ -148,7 +148,7 @@ def test_end_task_done_transitions_session_state(service: SessionService, root: 
 
     sid = service.active_session().session_id
     data = json.loads((root / "sessions" / sid / "state.json").read_text(encoding="utf-8"))
-    assert data == {"status": "ready", "active_task_id": None}
+    assert data["status"] == "ready" and data["active_task_id"] is None
 
     task_data = json.loads((root / "sessions" / sid / "tasks" / t.task_id / "state.json").read_text(encoding="utf-8"))
     assert task_data["status"] == "done"
