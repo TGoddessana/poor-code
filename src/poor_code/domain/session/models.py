@@ -1,7 +1,7 @@
 """Domain models for session/task lifecycle. See CONTRACT.md."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -38,6 +38,27 @@ class Session:
 class SessionState:
     status: SessionStatus = SessionStatus.READY
     active_task_id: str | None = None
+    cursor: Cursor | None = None
+    request: Request | None = None
+    understanding: CodeContext | None = None
+    history: tuple[Transition, ...] = ()
+
+    def with_request(self, request: Request) -> "SessionState":
+        return replace(self, request=request)
+
+    def with_understanding(self, cc: CodeContext) -> "SessionState":
+        return replace(self, understanding=cc)
+
+    def advancing_to(
+        self, *, node: str, phase: Phase, trigger: TriggerKind, reason: str, ts_iso: str
+    ) -> "SessionState":
+        prev = self.cursor.current_node if self.cursor else ""
+        tr = Transition(from_node=prev, to_node=node, trigger=trigger, reason=reason, ts_iso=ts_iso)
+        return replace(
+            self,
+            cursor=Cursor(phase=phase, current_node=node),
+            history=self.history + (tr,),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,3 +73,81 @@ class Task:
 class TaskState:
     status: TaskStatus = TaskStatus.PENDING
     policies: Policies = field(default_factory=Policies)
+
+
+# ----- harness value objects (graph cycle) -----
+
+class RequestKind(str, Enum):
+    ENGINEERING = "engineering"
+    LIGHTWEIGHT = "lightweight"
+
+
+@dataclass(frozen=True, slots=True)
+class Request:
+    raw_text: str
+    kind: RequestKind
+
+
+@dataclass(frozen=True, slots=True)
+class CodeRef:
+    """ProjectMap을 가리키는 타입 포인터. symbol=None이면 파일 전체."""
+    file: str
+    symbol: str | None = None
+    lineno: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CodeContext:
+    candidates: tuple[CodeRef, ...] = ()
+    confusers: tuple[CodeRef, ...] = ()
+    related_tests: tuple[CodeRef, ...] = ()
+
+
+class Phase(str, Enum):
+    ROUTING = "routing"
+    LOCATING = "locating"
+    # S4~ 가 INTERVIEWING/PLANNING/… 추가
+
+
+class TriggerKind(str, Enum):
+    FORWARD = "forward"
+    GATE = "gate"
+    USER = "user"
+    ESCALATE = "escalate"
+
+
+@dataclass(frozen=True, slots=True)
+class Cursor:
+    phase: Phase
+    current_node: str
+    task_id: str | None = None
+    attempt_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Transition:
+    from_node: str
+    to_node: str
+    trigger: TriggerKind
+    reason: str
+    ts_iso: str  # isoformat; 호출부에서 datetime.now(UTC).isoformat()
+
+
+class VerdictKind(str, Enum):
+    ADVANCE = "advance"
+    REPAIR = "repair"
+    ESCALATE = "escalate"
+
+
+class Layer(str, Enum):
+    IMPLEMENTATION = "implementation"
+    PLAN = "plan"
+    UNDERSTANDING = "understanding"
+
+
+@dataclass(frozen=True, slots=True)
+class Verdict:
+    kind: VerdictKind
+    layer: Layer | None = None
+    hint: str | None = None
+    query: str | None = None
