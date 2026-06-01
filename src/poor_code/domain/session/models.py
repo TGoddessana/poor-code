@@ -103,10 +103,53 @@ class CodeContext:
     related_tests: tuple[CodeRef, ...] = ()
 
 
+class QueryKind(str, Enum):
+    CLARIFY = "clarify"
+    CHOOSE = "choose"
+    APPROVE = "approve"
+    CONFIRM = "confirm"
+
+
+@dataclass(frozen=True, slots=True)
+class Query:
+    """사용자에게 묻는 1급 객체 (§19). id는 노드가 결정론적으로 부여."""
+    id: str
+    kind: QueryKind
+    prompt: str
+    context: str | None = None
+    options: tuple[str, ...] = ()      # CHOOSE 선택지
+    resolves: str | None = None        # 어떤 Requirement 슬롯을 채우나(선택)
+    rationale: str | None = None       # 이 질문이 왜 구현을 바꾸나
+
+
+@dataclass(frozen=True, slots=True)
+class UserResponse:
+    query_id: str
+    answer: str
+    chosen_option: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AnsweredQuery:
+    query: Query
+    response: UserResponse
+
+
+@dataclass(frozen=True, slots=True)
+class Requirement:
+    """§10 [구속] — Interviewer 산출. 모델 추측(CodeContext)과 달리 사용자 확정."""
+    summary: str
+    acceptance: tuple[str, ...] = ()
+    out_of_scope: tuple[str, ...] = ()
+    assumptions: tuple[str, ...] = ()
+    open_questions: tuple[str, ...] = ()
+
+
 class Phase(str, Enum):
     ROUTING = "routing"
     LOCATING = "locating"
-    # S4~ 가 INTERVIEWING/PLANNING/… 추가
+    INTERVIEWING = "interviewing"
+    # S5~ 가 PLANNING/… 추가
 
 
 class TriggerKind(str, Enum):
