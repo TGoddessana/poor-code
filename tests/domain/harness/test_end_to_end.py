@@ -59,6 +59,26 @@ async def test_engineering_request_flows_to_code_context_and_checkpoints(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_empty_candidates_bounce_back_to_locator_then_escalate(tmp_path: Path):
+    # Locator finds nothing → UnderstandingGate fires the first real back-edge.
+    llm = FakeLLMClient({"candidates": [], "confusers": [], "related_tests": []})
+    registry = build_default_registry(llm=llm, project_map=_map())
+
+    visited: list[str] = []
+    driver = Driver(registry, route, on_step=lambda s: visited.append(s.cursor.current_node))
+    start = SessionState(
+        cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
+        request=Request(raw_text="add a thing", kind=RequestKind.ENGINEERING),
+    )
+    final = await driver.run(start, asyncio.Event())
+
+    # The cursor looped back to the locator (the back-edge actually fired) ...
+    assert visited.count("locator") == 2
+    # ... and, still empty on the retry, the gate escalated to the user.
+    assert final.cursor.current_node == "user"
+
+
+@pytest.mark.asyncio
 async def test_lightweight_request_parks_at_fast_path(tmp_path: Path):
     registry = build_default_registry(
         llm=FakeLLMClient({"candidates": [], "confusers": [], "related_tests": []}),

@@ -12,7 +12,8 @@ from poor_code.domain.session.models import (
 FORWARD: dict[tuple[str, str | None], str] = {
     ("router", "engineering"): "locator",
     ("router", "lightweight"): "fast_path",
-    ("locator", None): "interviewer",
+    ("locator", None): "understanding_gate",
+    ("understanding_gate", None): "interviewer",  # gate ADVANCE falls through here
     # S4~ append: ("interviewer", None): "planner", ...
 }
 

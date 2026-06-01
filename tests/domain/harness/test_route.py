@@ -16,9 +16,19 @@ def test_router_lightweight_goes_to_fast_path():
     assert route("router", res, SessionState()) == "fast_path"
 
 
-def test_locator_forwards_to_interviewer():
+def test_locator_forwards_to_understanding_gate():
     res = NodeResult(output=CodeContext())
-    assert route("locator", res, SessionState()) == "interviewer"
+    assert route("locator", res, SessionState()) == "understanding_gate"
+
+
+def test_understanding_gate_advance_forwards_to_interviewer():
+    res = NodeResult(output=None, verdict=Verdict(kind=VerdictKind.ADVANCE))
+    assert route("understanding_gate", res, SessionState()) == "interviewer"
+
+
+def test_understanding_gate_repair_loops_back_to_locator():
+    res = NodeResult(output=None, verdict=Verdict(kind=VerdictKind.REPAIR, layer=Layer.UNDERSTANDING))
+    assert route("understanding_gate", res, SessionState()) == "locator"
 
 
 def test_repair_verdict_routes_to_shallowest_producer():

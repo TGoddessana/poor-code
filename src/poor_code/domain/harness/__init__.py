@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from poor_code.domain.harness.driver import Driver
 from poor_code.domain.harness.node import Node, NodeContext, NodeResult
+from poor_code.domain.harness.nodes.gates import UnderstandingGate
 from poor_code.domain.harness.nodes.locator import Locator
 from poor_code.domain.harness.nodes.router import Router
 from poor_code.domain.harness.registry import NodeRegistry
@@ -21,4 +22,5 @@ def build_default_registry(*, llm, project_map: ProjectMap) -> NodeRegistry:
     reg = NodeRegistry()
     reg.register(Router())
     reg.register(Locator(llm, project_map=project_map))
+    reg.register(UnderstandingGate())
     return reg
