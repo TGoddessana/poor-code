@@ -11,7 +11,7 @@ from typing import Callable
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
-    CodeContext, Phase, Request, SessionState, TriggerKind, Verdict,
+    CodeContext, Phase, Request, Requirement, SessionState, TriggerKind, Verdict,
 )
 
 RouteFn = Callable[[str, NodeResult, SessionState], "str | None"]
@@ -38,6 +38,10 @@ class Driver:
                 return state
 
             result = await node.run(NodeContext(state=state, cancel=cancel))
+            if result.query is not None:                   # suspend: await user
+                state = state.with_pending_query(result.query)
+                self._on_step(state)                       # checkpoint with pending query
+                return state                               # cursor stays → re-entrant resume
             state = self._apply(state, result)            # ① write (sole writer)
 
             nxt = self._route(node.name, result, state)   # ② ask topology
@@ -59,11 +63,13 @@ class Driver:
             return state.with_request(out)
         if isinstance(out, CodeContext):
             return state.with_understanding(out)
+        if isinstance(out, Requirement):
+            return state.with_requirement(out)
         return state
 
 
 def _phase_for(node: str, current: Phase) -> Phase:
-    return {"locator": Phase.LOCATING}.get(node, current)
+    return {"locator": Phase.LOCATING, "interviewer": Phase.INTERVIEWING}.get(node, current)
 
 
 def _trigger_for(verdict: Verdict | None) -> TriggerKind:
