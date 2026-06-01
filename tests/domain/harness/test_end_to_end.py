@@ -15,10 +15,20 @@ from poor_code.provider.events import (
 
 
 class FakeLLMClient:
-    def __init__(self, args_obj): self._args = json.dumps(args_obj)
+    """Routes canned structured output by which tool the node offered, so the
+    same client drives both the Router (classify_request) and the Locator
+    (emit_code_context) along their real agent paths."""
+    def __init__(self, *, code_context, kind="engineering"):
+        self._by_tool = {
+            "classify_request": {"kind": kind, "reason": "test"},
+            "emit_code_context": code_context,
+        }
+
     async def stream(self, messages, tools):
-        yield ToolCallStarted(call_id="c1", name=tools[0]["function"]["name"])
-        yield ToolCallInputDelta(call_id="c1", json_delta=self._args)
+        name = tools[0]["function"]["name"]
+        args = json.dumps(self._by_tool[name])
+        yield ToolCallStarted(call_id="c1", name=name)
+        yield ToolCallInputDelta(call_id="c1", json_delta=args)
         yield ToolCallEnded(call_id="c1")
         yield FinishedReason(reason="tool_calls")
 
@@ -34,8 +44,8 @@ def _map():
 
 @pytest.mark.asyncio
 async def test_engineering_request_flows_to_code_context_and_checkpoints(tmp_path: Path):
-    llm = FakeLLMClient({"candidates": [{"file": "src/auth.py", "symbol": "login"}],
-                         "confusers": [], "related_tests": []})
+    llm = FakeLLMClient(code_context={"candidates": [{"file": "src/auth.py", "symbol": "login"}],
+                                      "confusers": [], "related_tests": []})
     registry = build_default_registry(llm=llm, project_map=_map())
 
     store = SessionStore(tmp_path)
@@ -61,7 +71,7 @@ async def test_engineering_request_flows_to_code_context_and_checkpoints(tmp_pat
 @pytest.mark.asyncio
 async def test_empty_candidates_bounce_back_to_locator_then_escalate(tmp_path: Path):
     # Locator finds nothing → UnderstandingGate fires the first real back-edge.
-    llm = FakeLLMClient({"candidates": [], "confusers": [], "related_tests": []})
+    llm = FakeLLMClient(code_context={"candidates": [], "confusers": [], "related_tests": []})
     registry = build_default_registry(llm=llm, project_map=_map())
 
     visited: list[str] = []
@@ -81,12 +91,13 @@ async def test_empty_candidates_bounce_back_to_locator_then_escalate(tmp_path: P
 @pytest.mark.asyncio
 async def test_lightweight_request_parks_at_fast_path(tmp_path: Path):
     registry = build_default_registry(
-        llm=FakeLLMClient({"candidates": [], "confusers": [], "related_tests": []}),
+        llm=FakeLLMClient(kind="lightweight",
+                          code_context={"candidates": [], "confusers": [], "related_tests": []}),
         project_map=_map())
     driver = Driver(registry, route)
     start = SessionState(
         cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
-        request=Request(raw_text="hello", kind=RequestKind.ENGINEERING),  # Router reclassifies
+        request=Request(raw_text="반갑다 너는 누구냐", kind=RequestKind.ENGINEERING),  # Router reclassifies
     )
     final = await driver.run(start, asyncio.Event())
     assert final.cursor.current_node == "fast_path"   # handed off to legacy agent.py path

@@ -17,10 +17,10 @@ __all__ = [
 
 
 def build_default_registry(*, llm, project_map: ProjectMap) -> NodeRegistry:
-    """Assemble the v1 nodes: Router (code) + Locator (agent). Interviewer and
+    """Assemble the v1 nodes: Router + Locator (both agents). Interviewer and
     beyond are not registered yet — the Driver parks there until S4 adds them."""
     reg = NodeRegistry()
-    reg.register(Router())
+    reg.register(Router(llm))
     reg.register(Locator(llm, project_map=project_map))
     reg.register(UnderstandingGate())
     return reg
