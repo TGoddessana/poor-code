@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from poor_code.infra import paths
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -29,8 +31,8 @@ class SettingsLoader:
         merged: dict[str, Any] = {}
 
         for path in (
-            self._home / ".poor-code" / "settings.json",
-            cwd / ".poor-code" / "settings.json",
+            paths.settings_json(self._home),
+            paths.settings_json(cwd),
         ):
             data = _load_one(path)
             if data is None:

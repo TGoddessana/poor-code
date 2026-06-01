@@ -16,7 +16,7 @@ from poor_code.domain.tool.edit import EditTool
 from poor_code.domain.tool.read import ReadTool
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.domain.tool.write import WriteTool
-from poor_code.infra import auth_store
+from poor_code.infra import auth_store, paths
 from poor_code.infra.context_loader import ContextLoader
 from poor_code.infra.prompt_builder import PromptBuilder
 from poor_code.infra.settings import SettingsLoader
@@ -58,7 +58,7 @@ def _build_assembler() -> TurnAssembler:
 
 
 def _start_session(cwd: Path) -> SessionService:
-    service = SessionService(SessionStore(cwd / ".poor-code"))
+    service = SessionService(SessionStore(paths.config_dir(cwd)))
     service.start_session(cwd)
     return service
 

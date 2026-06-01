@@ -1,6 +1,6 @@
 """Persistent provider credentials.
 
-Stored at ~/.config/poor-code/auth.json with 0600 perms. Schema is intentionally
+Stored at ~/.poor-code/auth.json with 0600 perms. Schema is intentionally
 flat: one entry per provider id, holding api_key + model. Not encrypted — same
 trust level as a shell rc file. Use an OS keyring later if we need stronger
 storage.
@@ -13,6 +13,8 @@ import stat
 from pathlib import Path
 from typing import TypedDict
 
+from poor_code.infra import paths
+
 
 class ProviderCreds(TypedDict, total=False):
     api_key: str
@@ -24,7 +26,7 @@ class AuthFile(TypedDict, total=False):
 
 
 def _path() -> Path:
-    return Path.home() / ".config" / "poor-code" / "auth.json"
+    return paths.auth_json(Path.home())
 
 
 def load() -> AuthFile:

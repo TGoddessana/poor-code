@@ -10,6 +10,7 @@ from textual.reactive import reactive
 
 from poor_code.domain.agent import Agent
 from poor_code.domain.project_map import ProjectMapBuilder, ProjectMapStore
+from poor_code.infra import paths
 from poor_code.messages import (
     ProjectMapBuildFailed,
     ProjectMapBuildFinished,
@@ -80,7 +81,7 @@ class PoorCodeApp(App):
             project_map = await loop.run_in_executor(
                 None, lambda: builder.build(cwd, progress)
             )
-            store.write(project_map, cwd / ".poor-code")
+            store.write(project_map, paths.config_dir(cwd))
         except Exception as e:
             self.store.dispatch(ProjectMapBuildFailed(error=f"{type(e).__name__}: {e}"))
             return

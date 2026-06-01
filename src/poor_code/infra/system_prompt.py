@@ -9,6 +9,7 @@ import platform
 from dataclasses import dataclass
 from pathlib import Path
 
+from poor_code.infra import paths
 from poor_code.infra.settings import Settings
 
 
@@ -44,8 +45,8 @@ class SystemPromptComposer:
 
         appendices: list[str] = []
         for path in (
-            self._home / ".poor-code" / "system_prompt.md",
-            cwd / ".poor-code" / "system_prompt.md",
+            paths.system_prompt_md(self._home),
+            paths.system_prompt_md(cwd),
         ):
             if not path.exists():
                 continue

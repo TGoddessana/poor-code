@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from poor_code.infra import paths
 from poor_code.infra.git import SubprocessGit, _GitLike
 
 
@@ -38,7 +39,7 @@ class ContextLoader:
         chunks: list[str] = []
 
         for path in (
-            self._home / ".poor-code" / "POORCODE.md",
+            paths.poorcode_md(self._home),
             cwd / "POORCODE.md",
         ):
             if not path.exists():
