@@ -39,3 +39,12 @@ def test_repair_verdict_routes_to_shallowest_producer():
 def test_escalate_verdict_routes_to_user():
     res = NodeResult(output=None, verdict=Verdict(kind=VerdictKind.ESCALATE, query="?"))
     assert route("completion_gate", res, SessionState()) == "user"
+
+
+def test_interviewer_forwards_to_planner():
+    from poor_code.domain.harness.route import route
+    from poor_code.domain.harness.node import NodeResult
+    from poor_code.domain.session.models import Requirement, SessionState
+    res = NodeResult(output=Requirement(summary="done"))
+    nxt = route("interviewer", res, SessionState())
+    assert nxt == "planner"

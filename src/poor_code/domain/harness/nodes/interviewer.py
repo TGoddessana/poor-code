@@ -1,0 +1,165 @@
+# src/poor_code/domain/harness/nodes/interviewer.py
+"""Interviewer — last node of the understanding layer. Single-step: each run
+asks ONE Query (→ Driver suspends via NodeResult.query) or emits the Requirement
+(→ done, route forwards to planner). The multi-round interview is the Driver
+re-entering this node across suspend/resume turns; the loop's state lives in
+SessionState.interview/pending_query, not in a loop here. Adversarial
+spec-reviewer persona; asks only decision-changing questions; MAX_ROUNDS is a
+hard code cap that overrides the model. See design.md §10/§19."""
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel
+
+from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _LLMClientLike
+from poor_code.domain.project_map.models import ProjectMap
+from poor_code.domain.session.models import (
+    AnsweredQuery, CodeRef, Query, QueryKind, Requirement, SessionState,
+)
+
+_TOOL_NAME = "interview_step"
+MAX_ROUNDS = 6
+
+_SYSTEM = (
+    "You are the Interviewer — a senior freelance engineer vetting an "
+    "underspecified spec before you commit to building it. Be relentlessly "
+    "skeptical: surface ambiguity, hidden assumptions, missing acceptance "
+    "criteria, scope boundaries, edge/failure cases, and conflicts with the "
+    "existing code shown in CODE CONTEXT (cite the candidate signatures). "
+    "Always probe HOW the result will be validated (tests/commands/observable "
+    "behavior). DISCIPLINE: ask ONLY a question whose answer would change what "
+    "gets built — no filler, no nitpicking — and ask the single highest-leverage "
+    "gap each round. When no decision-changing ambiguity remains, finish: emit "
+    "the Requirement. Tone: blunt and direct, never personally insulting. Ask in "
+    "the user's language. Call interview_step exactly once."
+)
+
+_FINALIZE = (
+    "\n\nYou have reached the question limit. Do NOT ask another question. "
+    "Emit action=done with the best Requirement you can; put anything still "
+    "unresolved into open_questions."
+)
+
+
+class _QueryOut(BaseModel):
+    kind: Literal["clarify", "choose", "approve", "confirm"] = "clarify"
+    prompt: str
+    context: str | None = None
+    options: list[str] = []
+    resolves: str | None = None
+    rationale: str
+
+
+class _RequirementOut(BaseModel):
+    summary: str
+    acceptance: list[str] = []
+    out_of_scope: list[str] = []
+    assumptions: list[str] = []
+    open_questions: list[str] = []
+
+
+class _InterviewStepOut(BaseModel):
+    action: Literal["ask", "done"]
+    query: _QueryOut | None = None
+    requirement: _RequirementOut | None = None
+
+
+class Interviewer(AgentNode):
+    name = "interviewer"
+
+    def __init__(self, llm: _LLMClientLike, project_map: ProjectMap) -> None:
+        super().__init__(llm)
+        self._map = project_map
+
+    async def run(self, ctx: NodeContext) -> NodeResult:
+        state = ctx.state
+        at_cap = len(state.interview) >= MAX_ROUNDS
+        step = _InterviewStepOut.model_validate_json(await self._dispatch(ctx))
+        if step.action == "done" or at_cap:
+            if step.requirement is None:
+                raise ValueError("interviewer: finishing but no requirement emitted")
+            return NodeResult(output=self._to_requirement(step.requirement))
+        if step.query is None:
+            raise ValueError("interviewer: action=ask but no query emitted")
+        qid = f"q{len(state.interview) + 1}"
+        return NodeResult(query=self._to_query(qid, step.query))
+
+    def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
+        assert state.request is not None, "Interviewer requires state.request"
+        system = _SYSTEM + (_FINALIZE if len(state.interview) >= MAX_ROUNDS else "")
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content":
+                f"REQUEST:\n{state.request.raw_text}\n\n"
+                f"CODE CONTEXT:\n{self._context_digest(state)}\n\n"
+                f"INTERVIEW SO FAR:\n{self._interview_digest(state.interview)}"},
+        ]
+
+    def output_tool(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": _TOOL_NAME,
+                "description": "Ask one question (action=ask) or finish (action=done).",
+                "parameters": _InterviewStepOut.model_json_schema(),
+            },
+        }
+
+    # --- mapping helpers ---
+    @staticmethod
+    def _to_query(qid: str, q: _QueryOut) -> Query:
+        return Query(id=qid, kind=QueryKind(q.kind), prompt=q.prompt,
+                     context=q.context, options=tuple(q.options),
+                     resolves=q.resolves, rationale=q.rationale)
+
+    @staticmethod
+    def _to_requirement(r: _RequirementOut) -> Requirement:
+        return Requirement(summary=r.summary, acceptance=tuple(r.acceptance),
+                           out_of_scope=tuple(r.out_of_scope),
+                           assumptions=tuple(r.assumptions),
+                           open_questions=tuple(r.open_questions))
+
+    # --- prompt digests ---
+    def _context_digest(self, state: SessionState) -> str:
+        cc = state.understanding
+        if cc is None:
+            return "(none)"
+        lines: list[str] = []
+        for label, refs in (("candidates", cc.candidates),
+                            ("confusers", cc.confusers),
+                            ("related_tests", cc.related_tests)):
+            lines.append(f"{label}:")
+            if not refs:
+                lines.append("  (none)")
+            for r in refs:
+                lines.append(f"  - {self._render_ref(r)}")
+        return "\n".join(lines)
+
+    def _render_ref(self, ref: CodeRef) -> str:
+        where = ref.file if ref.symbol is None else f"{ref.file}::{ref.symbol}"
+        sig = self._signature_of(ref)
+        return f"{where}  {sig}" if sig else where
+
+    def _signature_of(self, ref: CodeRef) -> str | None:
+        if ref.symbol is None:
+            return None
+        for fe in self._map.files:
+            if fe.path == ref.file:
+                for s in fe.symbols:
+                    if s.name == ref.symbol:
+                        return s.signature
+        return None
+
+    @staticmethod
+    def _interview_digest(interview: tuple[AnsweredQuery, ...]) -> str:
+        if not interview:
+            return "(none yet)"
+        lines: list[str] = []
+        for aq in interview:
+            lines.append(f"Q({aq.query.kind.value}) {aq.query.prompt}")
+            ans = aq.response.answer
+            if aq.response.chosen_option:
+                ans = f"[{aq.response.chosen_option}] {ans}"
+            lines.append(f"  -> {ans}")
+        return "\n".join(lines)

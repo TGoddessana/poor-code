@@ -14,7 +14,7 @@ FORWARD: dict[tuple[str, str | None], str] = {
     ("router", "lightweight"): "fast_path",
     ("locator", None): "understanding_gate",
     ("understanding_gate", None): "interviewer",  # gate ADVANCE falls through here
-    # S4~ append: ("interviewer", None): "planner", ...
+    ("interviewer", None): "planner",             # done → planner (unregistered → park)
 }
 
 # back-edge target per broken layer (fail-to-shallowest, design.md §6/§18).

@@ -51,3 +51,49 @@ async def test_driver_stops_when_route_returns_none():
     final = await driver.run(start, asyncio.Event())
     # router lightweight → 'fast_path' (unknown) → park
     assert final.cursor.current_node == "fast_path"
+
+
+@pytest.mark.asyncio
+async def test_driver_suspends_on_query_and_keeps_cursor():
+    from poor_code.domain.harness.node import NodeResult, NodeContext
+    from poor_code.domain.session.models import Query, QueryKind
+
+    class _AskStub:
+        name = "interviewer"
+        async def run(self, ctx):
+            return NodeResult(query=Query(id="q1", kind=QueryKind.CLARIFY, prompt="why?"))
+
+    reg = NodeRegistry()
+    reg.register(_AskStub())
+    driver = Driver(reg, route)
+    start = SessionState(cursor=Cursor(phase=Phase.INTERVIEWING, current_node="interviewer"),
+                         request=Request(raw_text="x", kind=RequestKind.ENGINEERING))
+    final = await driver.run(start, asyncio.Event())
+
+    assert final.pending_query is not None
+    assert final.pending_query.id == "q1"
+    assert final.cursor.current_node == "interviewer"   # cursor stayed; re-entrant
+    # suspend did not append a transition
+    assert all(t.to_node != "interviewer" or t.from_node != "interviewer"
+               for t in final.history)
+
+
+@pytest.mark.asyncio
+async def test_driver_applies_requirement_and_routes_to_planner():
+    from poor_code.domain.harness.node import NodeResult
+    from poor_code.domain.session.models import Requirement
+
+    class _DoneStub:
+        name = "interviewer"
+        async def run(self, ctx):
+            return NodeResult(output=Requirement(summary="done"))
+
+    reg = NodeRegistry()
+    reg.register(_DoneStub())   # planner unregistered → park
+    driver = Driver(reg, route)
+    start = SessionState(cursor=Cursor(phase=Phase.INTERVIEWING, current_node="interviewer"),
+                         request=Request(raw_text="x", kind=RequestKind.ENGINEERING))
+    final = await driver.run(start, asyncio.Event())
+
+    assert final.requirement is not None and final.requirement.summary == "done"
+    assert final.cursor.current_node == "planner"   # forwarded, then parked

@@ -9,13 +9,17 @@ from typing import Any
 
 from poor_code.domain.session import paths
 from poor_code.domain.session.models import (
+    AnsweredQuery,
     CodeContext,
     CodeRef,
     Cursor,
     Phase,
     Policies,
+    Query,
+    QueryKind,
     Request,
     RequestKind,
+    Requirement,
     Session,
     SessionState,
     SessionStatus,
@@ -24,6 +28,7 @@ from poor_code.domain.session.models import (
     TaskStatus,
     Transition,
     TriggerKind,
+    UserResponse,
 )
 
 
@@ -85,6 +90,44 @@ def _dict_to_ref(d: dict[str, Any]) -> CodeRef:
     return CodeRef(file=d["file"], symbol=d.get("symbol"), lineno=d.get("lineno"))
 
 
+def _query_to_dict(q: Query) -> dict[str, Any]:
+    return {"id": q.id, "kind": q.kind.value, "prompt": q.prompt,
+            "context": q.context, "options": list(q.options),
+            "resolves": q.resolves, "rationale": q.rationale}
+
+
+def _dict_to_query(d: dict[str, Any]) -> Query:
+    return Query(id=d["id"], kind=QueryKind(d["kind"]), prompt=d["prompt"],
+                 context=d.get("context"), options=tuple(d.get("options", ())),
+                 resolves=d.get("resolves"), rationale=d.get("rationale"))
+
+
+def _requirement_to_dict(r: Requirement) -> dict[str, Any]:
+    return {"summary": r.summary, "acceptance": list(r.acceptance),
+            "out_of_scope": list(r.out_of_scope), "assumptions": list(r.assumptions),
+            "open_questions": list(r.open_questions)}
+
+
+def _dict_to_requirement(d: dict[str, Any]) -> Requirement:
+    return Requirement(summary=d["summary"], acceptance=tuple(d.get("acceptance", ())),
+                       out_of_scope=tuple(d.get("out_of_scope", ())),
+                       assumptions=tuple(d.get("assumptions", ())),
+                       open_questions=tuple(d.get("open_questions", ())))
+
+
+def _answered_to_dict(a: AnsweredQuery) -> dict[str, Any]:
+    return {"query": _query_to_dict(a.query),
+            "response": {"query_id": a.response.query_id, "answer": a.response.answer,
+                         "chosen_option": a.response.chosen_option}}
+
+
+def _dict_to_answered(d: dict[str, Any]) -> AnsweredQuery:
+    r = d["response"]
+    return AnsweredQuery(query=_dict_to_query(d["query"]),
+                         response=UserResponse(query_id=r["query_id"], answer=r["answer"],
+                                               chosen_option=r.get("chosen_option")))
+
+
 def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
     cc = st.understanding
     return {
@@ -114,6 +157,11 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
              "trigger": t.trigger.value, "reason": t.reason, "ts_iso": t.ts_iso}
             for t in st.history
         ],
+        "requirement": (None if st.requirement is None
+                        else _requirement_to_dict(st.requirement)),
+        "pending_query": (None if st.pending_query is None
+                          else _query_to_dict(st.pending_query)),
+        "interview": [_answered_to_dict(a) for a in st.interview],
     }
 
 
@@ -140,6 +188,11 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
                            ts_iso=t["ts_iso"])
                 for t in d.get("history", [])
             ),
+            requirement=(None if d.get("requirement") is None
+                         else _dict_to_requirement(d["requirement"])),
+            pending_query=(None if d.get("pending_query") is None
+                           else _dict_to_query(d["pending_query"])),
+            interview=tuple(_dict_to_answered(a) for a in d.get("interview", [])),
         )
     except (KeyError, ValueError) as e:
         raise ValueError(f"corrupt session file at {src}: {e}") from e

@@ -15,10 +15,24 @@ from poor_code.provider.events import (
 
 
 class FakeLLMClient:
-    def __init__(self, args_obj): self._args = json.dumps(args_obj)
+    """Routes canned structured output by which tool the node offered, so the
+    same client drives Router (classify_request), Locator (emit_code_context),
+    and Interviewer (interview_step) along their real agent paths. The
+    interviewer step defaults to one 'ask' so the graph suspends there."""
+    def __init__(self, *, code_context, kind="engineering"):
+        self._by_tool = {
+            "classify_request": {"kind": kind, "reason": "test"},
+            "emit_code_context": code_context,
+            "interview_step": {"action": "ask",
+                               "query": {"kind": "clarify", "prompt": "scope?",
+                                         "rationale": "scope is ambiguous"}},
+        }
+
     async def stream(self, messages, tools):
-        yield ToolCallStarted(call_id="c1", name=tools[0]["function"]["name"])
-        yield ToolCallInputDelta(call_id="c1", json_delta=self._args)
+        name = tools[0]["function"]["name"]
+        args = json.dumps(self._by_tool[name])
+        yield ToolCallStarted(call_id="c1", name=name)
+        yield ToolCallInputDelta(call_id="c1", json_delta=args)
         yield ToolCallEnded(call_id="c1")
         yield FinishedReason(reason="tool_calls")
 
@@ -34,8 +48,8 @@ def _map():
 
 @pytest.mark.asyncio
 async def test_engineering_request_flows_to_code_context_and_checkpoints(tmp_path: Path):
-    llm = FakeLLMClient({"candidates": [{"file": "src/auth.py", "symbol": "login"}],
-                         "confusers": [], "related_tests": []})
+    llm = FakeLLMClient(code_context={"candidates": [{"file": "src/auth.py", "symbol": "login"}],
+                                      "confusers": [], "related_tests": []})
     registry = build_default_registry(llm=llm, project_map=_map())
 
     store = SessionStore(tmp_path)
@@ -48,20 +62,22 @@ async def test_engineering_request_flows_to_code_context_and_checkpoints(tmp_pat
     )
     final = await driver.run(start, asyncio.Event())
 
-    # graph parked at interviewer (not implemented), with understanding produced
+    # graph reached the interviewer and suspended on a question, with understanding produced
     assert final.cursor.current_node == "interviewer"
+    assert final.pending_query is not None
     assert final.understanding.candidates[0].symbol == "login"
 
-    # persisted: reloading the checkpoint yields the same understanding
+    # persisted: reloading the suspend checkpoint yields the same understanding + pending query
     reloaded = store.read_session_state(sid)
     assert reloaded.understanding.candidates[0].file == "src/auth.py"
     assert reloaded.cursor.current_node == "interviewer"
+    assert reloaded.pending_query is not None
 
 
 @pytest.mark.asyncio
 async def test_empty_candidates_bounce_back_to_locator_then_escalate(tmp_path: Path):
     # Locator finds nothing → UnderstandingGate fires the first real back-edge.
-    llm = FakeLLMClient({"candidates": [], "confusers": [], "related_tests": []})
+    llm = FakeLLMClient(code_context={"candidates": [], "confusers": [], "related_tests": []})
     registry = build_default_registry(llm=llm, project_map=_map())
 
     visited: list[str] = []
@@ -81,13 +97,88 @@ async def test_empty_candidates_bounce_back_to_locator_then_escalate(tmp_path: P
 @pytest.mark.asyncio
 async def test_lightweight_request_parks_at_fast_path(tmp_path: Path):
     registry = build_default_registry(
-        llm=FakeLLMClient({"candidates": [], "confusers": [], "related_tests": []}),
+        llm=FakeLLMClient(kind="lightweight",
+                          code_context={"candidates": [], "confusers": [], "related_tests": []}),
         project_map=_map())
     driver = Driver(registry, route)
     start = SessionState(
         cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
-        request=Request(raw_text="hello", kind=RequestKind.ENGINEERING),  # Router reclassifies
+        request=Request(raw_text="반갑다 너는 누구냐", kind=RequestKind.ENGINEERING),  # Router reclassifies
     )
     final = await driver.run(start, asyncio.Event())
     assert final.cursor.current_node == "fast_path"   # handed off to legacy agent.py path
     assert final.understanding is None                 # never reached locator
+
+
+class ScriptedLLM:
+    """Routes by tool name; interview_step pops a scripted step per call."""
+    def __init__(self, *, kind, code_context, interview_steps):
+        self._kind = kind
+        self._cc = code_context
+        self._steps = list(interview_steps)
+
+    async def stream(self, messages, tools):
+        name = tools[0]["function"]["name"]
+        if name == "classify_request":
+            args = {"kind": self._kind, "reason": "t"}
+        elif name == "emit_code_context":
+            args = self._cc
+        elif name == "interview_step":
+            args = self._steps.pop(0)
+        else:
+            raise AssertionError(f"unexpected tool {name}")
+        payload = json.dumps(args)
+        yield ToolCallStarted(call_id="c1", name=name)
+        yield ToolCallInputDelta(call_id="c1", json_delta=payload)
+        yield ToolCallEnded(call_id="c1")
+        yield FinishedReason(reason="tool_calls")
+
+
+@pytest.mark.asyncio
+async def test_interview_suspends_resumes_then_parks_at_planner(tmp_path: Path):
+    from poor_code.domain.session.models import UserResponse
+    llm = ScriptedLLM(
+        kind="engineering",
+        code_context={"candidates": [{"file": "src/auth.py", "symbol": "login"}],
+                      "confusers": [], "related_tests": []},
+        interview_steps=[
+            {"action": "ask", "query": {"kind": "choose", "prompt": "new file or extend?",
+                                        "options": ["new", "extend"], "rationale": "layout"}},
+            {"action": "ask", "query": {"kind": "confirm", "prompt": "reuse auth_store?",
+                                        "rationale": "storage"}},
+            {"action": "done", "requirement": {"summary": "add google login",
+                                                "acceptance": ["providers/google.py"]}},
+        ],
+    )
+    registry = build_default_registry(llm=llm, project_map=_map())
+    driver = Driver(registry, route)
+    state = SessionState(
+        cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
+        request=Request(raw_text="add google login", kind=RequestKind.ENGINEERING),
+    )
+
+    questions_asked = 0
+    while True:
+        state = await driver.run(state, asyncio.Event())
+        if state.pending_query is None:
+            break
+        questions_asked += 1
+        q = state.pending_query
+        state = state.with_user_response(
+            UserResponse(query_id=q.id, answer="new",
+                         chosen_option=(q.options[0] if q.options else None)))
+
+    assert questions_asked == 2
+    assert state.requirement is not None
+    assert state.requirement.summary == "add google login"
+    assert len(state.interview) == 2
+    assert state.cursor.current_node == "planner"   # parked after Requirement
+
+
+@pytest.mark.asyncio
+async def test_with_user_response_guards_mismatched_query_id():
+    from poor_code.domain.session.models import Query, QueryKind, UserResponse
+    st = SessionState().with_pending_query(
+        Query(id="q1", kind=QueryKind.CLARIFY, prompt="?"))
+    with pytest.raises(ValueError):
+        st.with_user_response(UserResponse(query_id="nope", answer="x"))

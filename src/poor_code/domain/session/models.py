@@ -42,12 +42,30 @@ class SessionState:
     request: Request | None = None
     understanding: CodeContext | None = None
     history: tuple[Transition, ...] = ()
+    requirement: "Requirement | None" = None
+    pending_query: "Query | None" = None
+    interview: "tuple[AnsweredQuery, ...]" = ()
 
     def with_request(self, request: Request) -> "SessionState":
         return replace(self, request=request)
 
     def with_understanding(self, cc: CodeContext) -> "SessionState":
         return replace(self, understanding=cc)
+
+    def with_requirement(self, r: "Requirement") -> "SessionState":
+        return replace(self, requirement=r)
+
+    def with_pending_query(self, q: "Query") -> "SessionState":
+        return replace(self, pending_query=q)
+
+    def with_user_response(self, resp: "UserResponse") -> "SessionState":
+        assert self.pending_query is not None, "no pending query to answer"
+        if resp.query_id != self.pending_query.id:
+            raise ValueError(
+                f"response query_id {resp.query_id!r} != pending {self.pending_query.id!r}"
+            )
+        answered = AnsweredQuery(query=self.pending_query, response=resp)
+        return replace(self, interview=self.interview + (answered,), pending_query=None)
 
     def advancing_to(
         self, *, node: str, phase: Phase, trigger: TriggerKind, reason: str, ts_iso: str
@@ -103,10 +121,53 @@ class CodeContext:
     related_tests: tuple[CodeRef, ...] = ()
 
 
+class QueryKind(str, Enum):
+    CLARIFY = "clarify"
+    CHOOSE = "choose"
+    APPROVE = "approve"
+    CONFIRM = "confirm"
+
+
+@dataclass(frozen=True, slots=True)
+class Query:
+    """사용자에게 묻는 1급 객체 (§19). id는 노드가 결정론적으로 부여."""
+    id: str
+    kind: QueryKind
+    prompt: str
+    context: str | None = None
+    options: tuple[str, ...] = ()      # CHOOSE 선택지
+    resolves: str | None = None        # 어떤 Requirement 슬롯을 채우나(선택)
+    rationale: str | None = None       # 이 질문이 왜 구현을 바꾸나
+
+
+@dataclass(frozen=True, slots=True)
+class UserResponse:
+    query_id: str
+    answer: str
+    chosen_option: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AnsweredQuery:
+    query: Query
+    response: UserResponse
+
+
+@dataclass(frozen=True, slots=True)
+class Requirement:
+    """§10 [구속] — Interviewer 산출. 모델 추측(CodeContext)과 달리 사용자 확정."""
+    summary: str
+    acceptance: tuple[str, ...] = ()
+    out_of_scope: tuple[str, ...] = ()
+    assumptions: tuple[str, ...] = ()
+    open_questions: tuple[str, ...] = ()
+
+
 class Phase(str, Enum):
     ROUTING = "routing"
     LOCATING = "locating"
-    # S4~ 가 INTERVIEWING/PLANNING/… 추가
+    INTERVIEWING = "interviewing"
+    # S5~ 가 PLANNING/… 추가
 
 
 class TriggerKind(str, Enum):

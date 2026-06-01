@@ -35,3 +35,36 @@ def test_empty_session_state_roundtrip(tmp_path: Path):
     store.write_session_state(sid, SessionState())
     got = store.read_session_state(sid)
     assert got.cursor is None and got.request is None and got.history == ()
+
+
+def test_round_trip_pending_query_requirement_interview(tmp_path):
+    from poor_code.domain.session.store import SessionStore
+    from poor_code.domain.session.models import (
+        SessionState, Query, QueryKind, UserResponse, Requirement, AnsweredQuery,
+    )
+    answered = AnsweredQuery(
+        query=Query(id="q1", kind=QueryKind.CHOOSE, prompt="new file vs extend?",
+                    options=("new", "extend")),
+        response=UserResponse(query_id="q1", answer="new", chosen_option="new"),
+    )
+    st = SessionState(
+        requirement=Requirement(summary="add google login",
+                                acceptance=("provider file",),
+                                open_questions=("scopes?",)),
+        pending_query=Query(id="q2", kind=QueryKind.CONFIRM,
+                            prompt="reuse auth_store?", rationale="storage choice"),
+        interview=(answered,),
+    )
+
+    store = SessionStore(tmp_path)
+    sid = "sess1"
+    store.write_session_state(sid, st)
+    back = store.read_session_state(sid)
+
+    assert back.requirement.summary == "add google login"
+    assert back.requirement.open_questions == ("scopes?",)
+    assert back.pending_query.id == "q2"
+    assert back.pending_query.kind is QueryKind.CONFIRM
+    assert len(back.interview) == 1
+    assert back.interview[0].query.options == ("new", "extend")
+    assert back.interview[0].response.chosen_option == "new"
