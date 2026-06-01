@@ -42,12 +42,30 @@ class SessionState:
     request: Request | None = None
     understanding: CodeContext | None = None
     history: tuple[Transition, ...] = ()
+    requirement: "Requirement | None" = None
+    pending_query: "Query | None" = None
+    interview: "tuple[AnsweredQuery, ...]" = ()
 
     def with_request(self, request: Request) -> "SessionState":
         return replace(self, request=request)
 
     def with_understanding(self, cc: CodeContext) -> "SessionState":
         return replace(self, understanding=cc)
+
+    def with_requirement(self, r: "Requirement") -> "SessionState":
+        return replace(self, requirement=r)
+
+    def with_pending_query(self, q: "Query") -> "SessionState":
+        return replace(self, pending_query=q)
+
+    def with_user_response(self, resp: "UserResponse") -> "SessionState":
+        assert self.pending_query is not None, "no pending query to answer"
+        if resp.query_id != self.pending_query.id:
+            raise ValueError(
+                f"response query_id {resp.query_id!r} != pending {self.pending_query.id!r}"
+            )
+        answered = AnsweredQuery(query=self.pending_query, response=resp)
+        return replace(self, interview=self.interview + (answered,), pending_query=None)
 
     def advancing_to(
         self, *, node: str, phase: Phase, trigger: TriggerKind, reason: str, ts_iso: str

@@ -59,3 +59,42 @@ def test_query_and_userresponse_and_requirement_construct():
 def test_phase_has_interviewing():
     from poor_code.domain.session.models import Phase
     assert Phase.INTERVIEWING.value == "interviewing"
+
+
+def test_with_requirement_and_pending_query():
+    from poor_code.domain.session.models import (
+        SessionState, Requirement, Query, QueryKind,
+    )
+    st = SessionState()
+    assert st.requirement is None and st.pending_query is None and st.interview == ()
+
+    st2 = st.with_requirement(Requirement(summary="x"))
+    assert st2.requirement.summary == "x"
+
+    q = Query(id="q1", kind=QueryKind.CLARIFY, prompt="why?")
+    st3 = st.with_pending_query(q)
+    assert st3.pending_query is q
+
+
+def test_with_user_response_records_and_clears():
+    from poor_code.domain.session.models import (
+        SessionState, Query, QueryKind, UserResponse,
+    )
+    q = Query(id="q1", kind=QueryKind.CONFIRM, prompt="reuse auth_store?")
+    st = SessionState().with_pending_query(q)
+    st2 = st.with_user_response(UserResponse(query_id="q1", answer="yes"))
+    assert st2.pending_query is None
+    assert len(st2.interview) == 1
+    assert st2.interview[0].query.id == "q1"
+    assert st2.interview[0].response.answer == "yes"
+
+
+def test_with_user_response_rejects_mismatched_id():
+    import pytest
+    from poor_code.domain.session.models import (
+        SessionState, Query, QueryKind, UserResponse,
+    )
+    st = SessionState().with_pending_query(
+        Query(id="q1", kind=QueryKind.CLARIFY, prompt="?"))
+    with pytest.raises(ValueError):
+        st.with_user_response(UserResponse(query_id="WRONG", answer="x"))
