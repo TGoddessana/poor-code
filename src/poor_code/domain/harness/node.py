@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Protocol, runtime_checkable
 
-from poor_code.domain.session.models import SessionState, Verdict
+from poor_code.domain.session.models import Query, SessionState, Verdict
 from poor_code.provider.events import (
     FinishedReason,
     LLMEvent,
@@ -18,8 +18,9 @@ from poor_code.provider.events import (
 
 @dataclass(frozen=True)
 class NodeResult:
-    output: object | None
+    output: object | None = None
     verdict: Verdict | None = None
+    query: Query | None = None
 
 
 @dataclass

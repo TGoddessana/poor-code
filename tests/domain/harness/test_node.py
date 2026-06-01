@@ -22,3 +22,12 @@ async def test_node_protocol_runs():
     ctx = NodeContext(state=SessionState(), cancel=asyncio.Event())
     result = await node.run(ctx)
     assert isinstance(result.output, CodeContext)
+
+
+def test_node_result_can_carry_query():
+    from poor_code.domain.harness.node import NodeResult
+    from poor_code.domain.session.models import Query, QueryKind
+    q = Query(id="q1", kind=QueryKind.CLARIFY, prompt="?")
+    r = NodeResult(query=q)
+    assert r.query is q
+    assert r.output is None and r.verdict is None
