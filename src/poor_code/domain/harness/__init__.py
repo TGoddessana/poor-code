@@ -17,6 +17,7 @@ from poor_code.domain.harness.nodes.global_validator import GlobalValidator
 from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.harness.nodes.interviewer import Interviewer
 from poor_code.domain.harness.nodes.planner import Planner
+from poor_code.domain.harness.nodes.reporter import Reporter
 from poor_code.domain.harness.nodes.router import Router
 from poor_code.domain.harness.nodes.validator import Validator
 from poor_code.domain.harness.registry import NodeRegistry
@@ -33,7 +34,7 @@ __all__ = [
     "Driver", "Node", "NodeContext", "NodeResult", "NodeRegistry",
     "Router", "ExploringNode", "Interviewer", "Planner", "PlanGate", "FastPathNode",
     "TaskSelector", "EngGate", "ValidationRunner", "CompletionGate",
-    "Composer", "Implementer", "Validator", "FailureAnalyst", "GlobalValidator",
+    "Composer", "Implementer", "Validator", "FailureAnalyst", "GlobalValidator", "Reporter",
     "route", "FORWARD", "build_default_registry",
 ]
 
@@ -64,6 +65,7 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     reg.register(Validator(llm))
     reg.register(FailureAnalyst(llm))
     reg.register(GlobalValidator(llm, cwd=project_map.cwd))
+    reg.register(Reporter())
     if agent is not None:
         reg.register(FastPathNode(agent))
     return reg

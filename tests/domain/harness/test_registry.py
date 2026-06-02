@@ -34,3 +34,21 @@ def test_execution_agent_nodes_are_registered():
     for name in ("composer", "implementer", "validator",
                  "failure_analyst", "global_validator"):
         assert reg.get(name) is not None, f"{name} not registered"
+
+
+def test_reporter_is_registered():
+    from datetime import UTC, datetime
+    from pathlib import Path
+    from poor_code.domain.harness import build_default_registry
+    from poor_code.domain.project_map.models import ProjectMap
+
+    class _LLM:
+        async def stream(self, messages, tools):
+            if False:
+                yield None
+
+    pm = ProjectMap(version=2, generated_at=datetime.now(UTC), cwd=Path("."),
+                    files=(), parse_errors=())
+    reg = build_default_registry(llm=_LLM(), project_map=pm)
+    assert reg.get("reporter") is not None
+    assert reg.get("reporter").name == "reporter"
