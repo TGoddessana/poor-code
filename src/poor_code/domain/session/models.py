@@ -139,6 +139,27 @@ class SessionState:
         tasks = tuple(upd(t) for t in self.plan.tasks)
         return replace(self, plan=replace(self.plan, tasks=tasks))
 
+    def with_task_context(self, task_id: str, context: "TaskContext") -> "SessionState":
+        return self._with_task(task_id, context=context)
+
+    def upsert_attempt(self, task_id: str, attempt: "Attempt") -> "SessionState":
+        """Append the attempt, or replace the existing one with the same id
+        (in-place adversarial refinement). Sets cursor.attempt_id either way."""
+        assert self.plan is not None, "no plan to upsert attempts in"
+        task = next((t for t in self.plan.tasks if t.id == task_id), None)
+        if task is None:
+            raise ValueError(f"task {task_id!r} not found in plan")
+        if any(a.id == attempt.id for a in task.attempts):
+            attempts = tuple(attempt if a.id == attempt.id else a for a in task.attempts)
+        else:
+            attempts = task.attempts + (attempt,)
+        tasks = tuple(replace(t, attempts=attempts) if t.id == task_id else t
+                      for t in self.plan.tasks)
+        st = replace(self, plan=replace(self.plan, tasks=tasks))
+        if st.cursor is None:
+            return st
+        return replace(st, cursor=replace(st.cursor, attempt_id=attempt.id))
+
     def with_user_response(self, resp: "UserResponse") -> "SessionState":
         assert self.pending_query is not None, "no pending query to answer"
         if resp.query_id != self.pending_query.id:

@@ -164,3 +164,57 @@ def test_update_attempt_unknown_attempt_raises():
     s = _state_with_two_tasks().with_active_task("t1").append_attempt("t1", Attempt(id="a1"))
     with pytest.raises(ValueError, match="attempt 'nope' not found in task 't1'"):
         s.update_attempt("t1", "nope")
+
+
+def _state_with_one_task():
+    from poor_code.domain.session.models import (
+        SessionState, Plan, Task, EditScope, Cursor, Phase, TaskStatus)
+    return SessionState(
+        plan=Plan(tasks=(Task(id="t1", title="x", purpose="p",
+                              edit_scope=EditScope(editable=("a.txt",)),
+                              how_to_validate="test -f a.txt", status=TaskStatus.ACTIVE),)),
+        cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="composer", task_id="t1"))
+
+
+def test_with_task_context_sets_context():
+    from poor_code.domain.session.models import TaskContext, CodeRef
+    st = _state_with_one_task()
+    ctx = TaskContext(refs=(CodeRef(file="a.txt"),), snippet=None)
+    st2 = st.with_task_context("t1", ctx)
+    assert st2.plan.tasks[0].context == ctx
+    assert st.plan.tasks[0].context is None  # original untouched (frozen)
+
+
+def test_with_task_context_unknown_task_raises():
+    st = _state_with_one_task()
+    from poor_code.domain.session.models import TaskContext
+    import pytest
+    with pytest.raises(ValueError):
+        st.with_task_context("nope", TaskContext())
+
+
+def test_upsert_attempt_appends_when_id_new():
+    from poor_code.domain.session.models import Attempt
+    st = _state_with_one_task()
+    st2 = st.upsert_attempt("t1", Attempt(id="t1-a1"))
+    assert len(st2.plan.tasks[0].attempts) == 1
+    assert st2.cursor.attempt_id == "t1-a1"
+
+
+def test_upsert_attempt_replaces_when_id_exists():
+    from poor_code.domain.session.models import Attempt, ChangeRecord
+    st = _state_with_one_task().upsert_attempt("t1", Attempt(id="t1-a1", adversarial_rounds=0))
+    st2 = st.upsert_attempt(
+        "t1", Attempt(id="t1-a1", adversarial_rounds=1,
+                      patch=ChangeRecord(files=("a.txt",), diff="d")))
+    assert len(st2.plan.tasks[0].attempts) == 1            # replaced, not appended
+    assert st2.plan.tasks[0].attempts[0].adversarial_rounds == 1
+    assert st2.plan.tasks[0].attempts[0].patch.files == ("a.txt",)
+    assert st2.cursor.attempt_id == "t1-a1"
+
+
+def test_upsert_attempt_unknown_task_raises():
+    from poor_code.domain.session.models import Attempt
+    import pytest
+    with pytest.raises(ValueError):
+        _state_with_one_task().upsert_attempt("nope", Attempt(id="x"))
