@@ -6,6 +6,7 @@ Empty result writes self-diagnosis into CodeContext.search_notes for repair."""
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -84,7 +85,7 @@ class ExploringNode(AgentNode):
         for _ in range(MAX_ITERATIONS):
             if ctx.cancel.is_set():
                 raise asyncio.CancelledError(f"{self.name} cancelled")
-            text, calls = await self._stream_round(messages)
+            text, calls = await self._stream_round(messages, ctx.sink)
             assistant: dict[str, Any] = {"role": "assistant", "content": text}
             if calls:
                 assistant["tool_calls"] = [
@@ -96,14 +97,21 @@ class ExploringNode(AgentNode):
             if not calls:
                 break
             for cid, name, args in calls:
+                if ctx.sink is not None:
+                    ctx.sink.tool_started(cid, name, _safe_args(args))
+                output = await self._run_tool(name, args, tool_ctx)
+                if ctx.sink is not None:
+                    if output.startswith("ERROR:"):
+                        ctx.sink.tool_failed(cid, output)
+                    else:
+                        ctx.sink.tool_finished(cid, output)
                 messages.append({
-                    "role": "tool", "tool_call_id": cid,
-                    "content": await self._run_tool(name, args, tool_ctx),
+                    "role": "tool", "tool_call_id": cid, "content": output,
                 })
         # hand the whole exploration (minus its own system prompt) to stage ②
         return messages[1:]
 
-    async def _stream_round(self, messages: list[dict[str, Any]]):
+    async def _stream_round(self, messages: list[dict[str, Any]], sink: object | None = None):
         text = ""
         pending: dict[str, dict[str, str]] = {}
         order: list[str] = []
@@ -111,6 +119,8 @@ class ExploringNode(AgentNode):
             match ev:
                 case TextDelta(text=t):
                     text += t
+                    if sink is not None:
+                        sink.text_delta(t)
                 case ToolCallStarted(call_id=cid, name=name):
                     pending[cid] = {"name": name, "args": ""}
                     order.append(cid)
@@ -165,3 +175,11 @@ class ExploringNode(AgentNode):
             syms = ", ".join(s.name for s in fe.symbols) or "(no symbols)"
             lines.append(f"- {fe.path} [{fe.language}]: {syms}")
         return "\n".join(lines)
+
+
+def _safe_args(args_json: str) -> dict:
+    try:
+        v = json.loads(args_json or "{}")
+        return v if isinstance(v, dict) else {"_": v}
+    except (ValueError, TypeError):
+        return {}
