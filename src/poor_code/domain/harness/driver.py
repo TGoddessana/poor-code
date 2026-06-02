@@ -11,7 +11,7 @@ from typing import Callable
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
-    CodeContext, Phase, Plan, Request, Requirement, SessionState, TriggerKind, Verdict,
+    CodeContext, Phase, Plan, Request, Requirement, SessionState, TriggerKind, Verdict, VerdictKind,
 )
 
 RouteFn = Callable[[str, NodeResult, SessionState], "str | None"]
@@ -43,6 +43,9 @@ class Driver:
                 self._on_step(state)                       # checkpoint with pending query
                 return state                               # cursor stays → re-entrant resume
             state = self._apply(state, result)            # ① write (sole writer)
+            v = result.verdict
+            if v is not None and v.kind is VerdictKind.REPAIR and v.hint:
+                state = state.with_repair_hint(v.hint)     # carry hint to the re-entered node
 
             nxt = self._route(node.name, result, state)   # ② ask topology
             if nxt is None:
@@ -62,7 +65,7 @@ class Driver:
         if isinstance(out, Request):
             return state.with_request(out)
         if isinstance(out, CodeContext):
-            return state.with_understanding(out)
+            return state.with_understanding(out).with_repair_hint(None)
         if isinstance(out, Requirement):
             return state.with_requirement(out)
         if isinstance(out, Plan):
@@ -72,6 +75,7 @@ class Driver:
 
 def _phase_for(node: str, current: Phase) -> Phase:
     return {
+        "explorer": Phase.LOCATING,
         "locator": Phase.LOCATING,
         "interviewer": Phase.INTERVIEWING,
         "planner": Phase.PLANNING,

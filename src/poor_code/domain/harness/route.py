@@ -10,9 +10,9 @@ from poor_code.domain.session.models import (
 
 # (node_name, branch) → next_node. branch=None for single-out nodes.
 FORWARD: dict[tuple[str, str | None], str] = {
-    ("router", "engineering"): "locator",
+    ("router", "engineering"): "explorer",
     ("router", "lightweight"): "fast_path",
-    ("locator", None): "understanding_gate",
+    ("explorer", None): "understanding_gate",
     ("understanding_gate", None): "interviewer",  # gate ADVANCE falls through here
     ("interviewer", None): "planner",
     ("planner", None): "plan_gate",
@@ -23,7 +23,7 @@ FORWARD: dict[tuple[str, str | None], str] = {
 _SHALLOWEST: dict[Layer, str] = {
     Layer.IMPLEMENTATION: "implementer",
     Layer.PLAN: "planner",
-    Layer.UNDERSTANDING: "locator",
+    Layer.UNDERSTANDING: "explorer",
 }
 
 

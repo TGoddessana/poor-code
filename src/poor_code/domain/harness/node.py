@@ -67,8 +67,12 @@ class AgentNode:
         args_json = await self._dispatch(ctx)
         return NodeResult(output=self.parse(args_json))
 
-    async def _dispatch(self, ctx: NodeContext) -> str:
-        messages = self.build_messages(ctx.state)
+    async def _dispatch(self, ctx: NodeContext, extra_messages: list[dict] | None = None) -> str:
+        base = self.build_messages(ctx.state)
+        if extra_messages:
+            messages = [base[0], *extra_messages, *base[1:]]
+        else:
+            messages = base
         tools = [self.output_tool()]
         args_by_call: dict[str, str] = {}
         order: list[str] = []

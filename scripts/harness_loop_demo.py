@@ -1,8 +1,8 @@
 """Show the harness graph's FIRST back-edge actually firing — no real LLM needed.
 
-The Locator is fed a fake LLM that always returns an EMPTY CodeContext (found
+The Explorer is fed a fake LLM that always returns an EMPTY CodeContext (found
 nothing). The UnderstandingGate then fires repair(understanding), which route()
-turns into a back-edge to the locator. Still empty on the retry → escalate(user).
+turns into a back-edge to the explorer. Still empty on the retry → escalate(user).
 
 Run:
     .venv/bin/python scripts/harness_loop_demo.py
@@ -26,8 +26,8 @@ from poor_code.provider.events import (
 )
 
 
-class _EmptyLocatorLLM:
-    """A fake LLM: makes the Locator emit whatever CodeContext we hand it."""
+class _EmptyExplorerLLM:
+    """A fake LLM: makes the Explorer emit whatever CodeContext we hand it."""
 
     def __init__(self, args_obj) -> None:
         self._args = json.dumps(args_obj)
@@ -49,8 +49,8 @@ def _tiny_map() -> ProjectMap:
 
 
 def main() -> None:
-    # Force the Locator to find nothing → the gate has something to complain about.
-    llm = _EmptyLocatorLLM({"candidates": [], "confusers": [], "related_tests": []})
+    # Force the Explorer to find nothing → the gate has something to complain about.
+    llm = _EmptyExplorerLLM({"candidates": [], "confusers": [], "related_tests": []})
     registry = build_default_registry(llm=llm, project_map=_tiny_map())
 
     driver = Driver(registry, route)
@@ -61,17 +61,17 @@ def main() -> None:
     )
     final = asyncio.run(driver.run(start, asyncio.Event()))
 
-    print("REQUEST: 'add a thing that matches nothing' (Locator forced to find 0 candidates)\n")
+    print("REQUEST: 'add a thing that matches nothing' (Explorer forced to find 0 candidates)\n")
     print("WALK (start @ router):")
     print(f"  0. {'(start)':18s}                       router")
     for i, t in enumerate(final.history, 1):
-        is_back = t.to_node == "locator" and t.trigger.name == "GATE"
+        is_back = t.to_node == "explorer" and t.trigger.name == "GATE"
         tag = "   <<<<<< BACK-EDGE FIRED" if is_back else ""
         print(f"  {i}. {t.from_node:18s} --[{t.trigger.name:8s}]-->  {t.to_node}{tag}")
 
-    visited = 1 + sum(1 for t in final.history if t.to_node == "locator")
+    visited = 1 + sum(1 for t in final.history if t.to_node == "explorer")
     print(f"\nFINAL cursor = {final.cursor.current_node!r}  (transitions: {len(final.history)})")
-    print(f"locator visited {visited}x → the graph looped, then escalated.")
+    print(f"explorer visited {visited}x → the graph looped, then escalated.")
 
 
 if __name__ == "__main__":

@@ -24,18 +24,19 @@ class UnderstandingGate:
         if self._already_repaired(ctx.state):
             return NodeResult(output=None, verdict=Verdict(
                 kind=VerdictKind.ESCALATE,
-                query="No code candidates found even after re-locating.",
+                query="No code candidates found even after re-exploring.",
             ))
+        hint = cc.search_notes.strip() or "Explorer found no candidates; widen the search."
         return NodeResult(output=None, verdict=Verdict(
             kind=VerdictKind.REPAIR,
             layer=Layer.UNDERSTANDING,
-            hint="Locator returned no candidates; widen the search.",
+            hint=hint,
         ))
 
     @staticmethod
     def _already_repaired(state) -> bool:
         return any(
-            t.trigger is TriggerKind.GATE and t.to_node == "locator"
+            t.trigger is TriggerKind.GATE and t.to_node == "explorer"
             for t in state.history
         )
 
