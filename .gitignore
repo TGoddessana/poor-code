@@ -19,3 +19,6 @@ docs/
 
 # poor-code runtime state
 .poor-code/
+
+# local feature worktrees
+.worktrees/
