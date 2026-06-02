@@ -225,3 +225,14 @@ async def test_apply_task_context_and_upsert_attempt_and_clears_hint():
     st = Driver._apply(st, NodeResult(output=Attempt(id="t1-a1", adversarial_rounds=1)))
     assert len(st.plan.tasks[0].attempts) == 1
     assert st.plan.tasks[0].attempts[0].adversarial_rounds == 1
+
+
+def test_apply_report_sets_state_report():
+    from poor_code.domain.harness.driver import Driver, _phase_for
+    from poor_code.domain.harness.node import NodeResult
+    from poor_code.domain.session.models import Phase, Report, ReportOutcome, SessionState
+
+    r = Report(outcome=ReportOutcome.SUCCEEDED, summary="ok")
+    new = Driver._apply(SessionState(), NodeResult(output=r))
+    assert new.report is r
+    assert _phase_for("reporter", Phase.IMPLEMENTING) is Phase.FINALIZING

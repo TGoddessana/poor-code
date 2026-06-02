@@ -11,9 +11,9 @@ from typing import Callable
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
-    AttemptStatus, Attempt, CodeContext, FeedbackEntry, Phase, Plan, Request, Requirement,
-    SelectedTask, SessionState, TaskCompleted, TaskContext, TaskStatus, TriggerKind,
-    ValidationResult, Verdict, VerdictKind,
+    AttemptStatus, Attempt, CodeContext, FeedbackEntry, Phase, Plan, Report, Request,
+    Requirement, SelectedTask, SessionState, TaskCompleted, TaskContext, TaskStatus,
+    TriggerKind, ValidationResult, Verdict, VerdictKind,
 )
 
 RouteFn = Callable[[str, NodeResult, SessionState], "str | None"]
@@ -94,6 +94,8 @@ class Driver:
             return (state
                     .update_attempt(out.task_id, out.attempt_id, status=AttemptStatus.DONE)
                     .with_task_status(out.task_id, TaskStatus.DONE))
+        if isinstance(out, Report):
+            return state.with_report(out)
         return state
 
 
@@ -113,6 +115,7 @@ def _phase_for(node: str, current: Phase) -> Phase:
         "failure_analyst": Phase.IMPLEMENTING,
         "completion_gate": Phase.IMPLEMENTING,
         "global_validator": Phase.FINALIZING,
+        "reporter": Phase.FINALIZING,
     }.get(node, current)
 
 
