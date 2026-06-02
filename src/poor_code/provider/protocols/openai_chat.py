@@ -93,10 +93,13 @@ class _OpenAIChatParser:
         if finish_reason is not None:
             for idx in sorted(self._calls):
                 call = self._calls[idx]
-                call_id = call["id"] or uuid.uuid4().hex
-                yield ToolCallStarted(call_id=call_id, name=call["name"])
-                yield ToolCallInputDelta(call_id=call_id, json_delta=call["args"] or "{}")
-                yield ToolCallEnded(call_id=call_id)
+                base_id = call["id"] or uuid.uuid4().hex
+                pieces = _split_top_level_json(call["args"] or "{}")
+                for k, piece in enumerate(pieces):
+                    cid = base_id if len(pieces) == 1 else f"{base_id}#{k}"
+                    yield ToolCallStarted(call_id=cid, name=call["name"])
+                    yield ToolCallInputDelta(call_id=cid, json_delta=piece)
+                    yield ToolCallEnded(call_id=cid)
             reason = finish_reason if finish_reason in _VALID_REASONS else "stop"
             yield FinishedReason(reason=reason)
 
