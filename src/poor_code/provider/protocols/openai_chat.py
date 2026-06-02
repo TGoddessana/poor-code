@@ -6,6 +6,7 @@ accumulates them and emits Started+InputDelta+Ended on finish_reason.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any, Iterable
 
@@ -35,7 +36,7 @@ class OpenAICompatibleChat:
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": _sanitize_messages(messages),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
@@ -154,3 +155,41 @@ def _split_top_level_json(s: str) -> list[str]:
     if len(pieces) <= 1:
         return [s]  # single value (or none) → original unchanged
     return pieces
+
+
+def _repair_args(s: str) -> str:
+    """Ensure a tool-call argument string is valid JSON. Valid → unchanged.
+    Otherwise take the first valid top-level object, else '{}'."""
+    try:
+        json.loads(s)
+        return s
+    except (ValueError, TypeError):
+        pass
+    for piece in _split_top_level_json(s):
+        try:
+            json.loads(piece)
+            return piece
+        except (ValueError, TypeError):
+            continue
+    return "{}"
+
+
+def _sanitize_messages(messages: list[dict]) -> list[dict]:
+    """Repair invalid assistant tool-call argument strings (defensive floor).
+    Returns a new list; never mutates the input."""
+    out: list[dict] = []
+    for m in messages:
+        tcs = m.get("tool_calls")
+        if m.get("role") == "assistant" and tcs:
+            new_tcs = []
+            for tc in tcs:
+                fn = tc.get("function") or {}
+                args = fn.get("arguments")
+                if isinstance(args, str):
+                    repaired = _repair_args(args)
+                    if repaired != args:
+                        tc = {**tc, "function": {**fn, "arguments": repaired}}
+                new_tcs.append(tc)
+            m = {**m, "tool_calls": new_tcs}
+        out.append(m)
+    return out
