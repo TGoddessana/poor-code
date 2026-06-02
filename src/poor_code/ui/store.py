@@ -128,6 +128,12 @@ class PromptSubmitted(UIAction):
 
 
 @dataclass(frozen=True)
+class AnswerSubmitted(UIAction):
+    turn_id: str
+    answer: str
+
+
+@dataclass(frozen=True)
 class CwdChanged(UIAction):
     cwd: str
 

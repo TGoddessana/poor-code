@@ -4,6 +4,9 @@ from textual.widgets import Input, OptionList
 
 from poor_code.app import PoorCodeApp
 from poor_code.domain.agent import Agent
+from poor_code.domain.harness.driver import Driver
+from poor_code.domain.harness.registry import NodeRegistry
+from poor_code.domain.harness.route import route as harness_route
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.infra.prompt_builder import PromptBuilder
 from poor_code.infra.turn_assembler import TurnAssembler
@@ -36,6 +39,10 @@ class _Cmd:
     def execute(self, ctx, parsed): self.seen.append(parsed)
 
 
+def _make_driver(_llm):
+    return Driver(NodeRegistry(), harness_route)
+
+
 def _app_with(*cmds) -> PoorCodeApp:
     agent = Agent(
         llm=FakeLLMClient.text_only("nope"),
@@ -43,7 +50,7 @@ def _app_with(*cmds) -> PoorCodeApp:
         assembler=_assembler(),
     )
     slash = SlashDispatcher(SlashRegistry(list(cmds)))
-    return PoorCodeApp(agent=agent, slash=slash)
+    return PoorCodeApp(agent=agent, make_driver=_make_driver, slash=slash)
 
 
 async def test_typing_slash_shows_popup_with_all_commands():

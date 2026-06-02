@@ -5,10 +5,15 @@ starts with a NoAuthLLM stub that fails the first turn with a hint to /login.
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from poor_code.app import PoorCodeApp
 from poor_code.domain.agent import Agent
+from poor_code.domain.harness import build_default_registry
+from poor_code.domain.harness.driver import Driver
+from poor_code.domain.harness.route import route
+from poor_code.domain.project_map import ProjectMap, ProjectMapStore
 from poor_code.domain.session import SessionService
 from poor_code.domain.session.store import SessionStore
 from poor_code.domain.tool.bash import BashTool
@@ -76,9 +81,29 @@ def _build_project_map_builder():
     return make_default_builder()
 
 
+def _load_project_map(cwd: Path) -> ProjectMap:
+    try:
+        return ProjectMapStore().read(paths.config_dir(cwd))
+    except (FileNotFoundError, ValueError):
+        return ProjectMap(version=2, generated_at=datetime.now(UTC),
+                          cwd=cwd, files=(), parse_errors=())
+
+
+def _make_driver_factory(project_map: ProjectMap):
+    def make(llm):
+        registry = build_default_registry(llm=llm, project_map=project_map)
+        return Driver(registry, route)
+    return make
+
+
 def main() -> None:
-    session = _start_session(Path.cwd())
+    cwd = Path.cwd()
+    session = _start_session(cwd)
     agent = _build_agent(session)
     slash = SlashDispatcher(SlashRegistry([LoginCommand()]))
     builder = _build_project_map_builder()
-    PoorCodeApp(agent=agent, slash=slash, project_map_builder=builder).run()
+    make_driver = _make_driver_factory(_load_project_map(cwd))
+    PoorCodeApp(
+        agent=agent, make_driver=make_driver, slash=slash,
+        project_map_builder=builder,
+    ).run()
