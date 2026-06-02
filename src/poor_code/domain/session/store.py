@@ -302,6 +302,7 @@ def _dict_to_answered(d: dict[str, Any]) -> AnsweredQuery:
 
 
 def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
+    # lazy import: avoids the harness→session→harness import cycle at module load
     from poor_code.domain.harness.nodes.reporter import report_to_dict
     cc = st.understanding
     return {
@@ -347,6 +348,7 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
 
 def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
     try:
+        # lazy import: avoids the harness→session→harness import cycle at module load
         from poor_code.domain.harness.nodes.reporter import report_from_dict
         cur = d.get("cursor")
         req = d.get("request")
