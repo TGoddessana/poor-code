@@ -62,3 +62,41 @@ async def test_task_selector_done_branch_when_no_pending():
     plan = Plan(tasks=(Task(id="t1", title="A", purpose="p", status=TaskStatus.DONE),))
     r = await TaskSelector().run(_ctx(SessionState(plan=plan)))
     assert r.output is None and r.branch == "done"
+
+
+from poor_code.domain.harness.nodes.execution import EngGate
+from poor_code.domain.session.models import (
+    Attempt, ChangeRecord, EditScope, VerdictKind, Layer,
+)
+
+
+def _state_with_attempt(attempt, *, editable=("src/a.py",), forbidden=()):
+    plan = Plan(tasks=(Task(id="t1", title="A", purpose="p",
+                            edit_scope=EditScope(editable=editable, forbidden=forbidden),
+                            attempts=(attempt,)),))
+    cur = Cursor(phase=Phase.IMPLEMENTING, current_node="eng_gate", task_id="t1",
+                 attempt_id=attempt.id)
+    return SessionState(plan=plan, cursor=cur)
+
+
+@pytest.mark.asyncio
+async def test_eng_gate_advances_on_in_scope_patch():
+    a = Attempt(id="a1", patch=ChangeRecord(files=("src/a.py",), diff="@@"))
+    r = await EngGate().run(_ctx(_state_with_attempt(a)))
+    assert r.verdict.kind is VerdictKind.ADVANCE
+
+
+@pytest.mark.asyncio
+async def test_eng_gate_repairs_on_missing_patch():
+    a = Attempt(id="a1", patch=None)
+    r = await EngGate().run(_ctx(_state_with_attempt(a)))
+    assert r.verdict.kind is VerdictKind.REPAIR
+    assert r.verdict.layer is Layer.IMPLEMENTATION
+
+
+@pytest.mark.asyncio
+async def test_eng_gate_repairs_on_out_of_scope_edit():
+    a = Attempt(id="a1", patch=ChangeRecord(files=("src/forbidden.py",), diff="@@"))
+    r = await EngGate().run(_ctx(_state_with_attempt(a, editable=("src/a.py",),
+                                                     forbidden=("src/forbidden.py",))))
+    assert r.verdict.kind is VerdictKind.REPAIR
