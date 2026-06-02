@@ -16,6 +16,7 @@ from poor_code.messages import (
     NodeEntered,
     PlanReady,
     QueryRaised,
+    ReportReady,
     ToolCallFailed,
     ToolCallFinished,
     ToolCallStarted,
@@ -32,6 +33,10 @@ def _plan_lines(plan: Plan) -> tuple[str, ...]:
         validate = t.how_to_validate or "(none)"
         lines.append(f"{i}. {t.title} — edits: {edits} — validate: {validate}")
     return tuple(lines)
+
+
+def _report_lines(report) -> tuple[str, ...]:
+    return tuple(f"{t.title} — {t.status.value}" for t in report.tasks)
 
 
 class TurnSink:
@@ -68,6 +73,11 @@ class TurnSink:
 
     def plan_ready(self, plan: Plan) -> None:
         self._dispatch(PlanReady(turn_id=self._turn_id, lines=_plan_lines(plan)))
+
+    def report_ready(self, report) -> None:
+        self._dispatch(ReportReady(
+            turn_id=self._turn_id, outcome=report.outcome.value,
+            summary=report.summary, lines=_report_lines(report)))
 
     # --- fast_path bridge: forward Agent's events under this turn ---
     def forward(self, event: Event) -> None:

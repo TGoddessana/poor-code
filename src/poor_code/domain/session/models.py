@@ -47,6 +47,12 @@ class FeedbackMemory:
     entries: tuple[FeedbackEntry, ...] = ()
 
 
+class Policy(str, Enum):
+    SUPERVISED = "supervised"   # TUI default — suspend on query
+    FULL_AUTO = "full_auto"     # headless — auto-answer, never suspend
+    PARANOID = "paranoid"       # enum only; tool-prompt behavior deferred
+
+
 @dataclass(frozen=True, slots=True)
 class SessionState:
     status: SessionStatus = SessionStatus.READY
@@ -61,6 +67,8 @@ class SessionState:
     interview: "tuple[AnsweredQuery, ...]" = ()
     repair_hint: str | None = None
     feedback: FeedbackMemory = field(default_factory=FeedbackMemory)
+    report: "Report | None" = None
+    policy: Policy = Policy.SUPERVISED
 
     def with_request(self, request: Request) -> "SessionState":
         return replace(self, request=request)
@@ -85,6 +93,12 @@ class SessionState:
             self,
             feedback=replace(self.feedback, entries=self.feedback.entries + (entry,)),
         )
+
+    def with_report(self, r: "Report") -> "SessionState":
+        return replace(self, report=r)
+
+    def with_policy(self, p: "Policy") -> "SessionState":
+        return replace(self, policy=p)
 
     def _with_task(self, task_id: str, **changes) -> "SessionState":
         assert self.plan is not None, "no plan to update tasks in"
@@ -341,6 +355,28 @@ class ChangeRecord:
 class ChangeSet:
     aggregate_diff: str = ""
     per_task: tuple[tuple[str, str], ...] = ()   # (task_id, diff)
+
+
+class ReportOutcome(str, Enum):
+    SUCCEEDED = "succeeded"
+    ABANDONED = "abandoned"
+
+
+@dataclass(frozen=True, slots=True)
+class TaskReport:
+    task_id: str
+    title: str
+    status: TaskStatus
+    attempts: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Report:
+    outcome: ReportOutcome
+    tasks: tuple[TaskReport, ...] = ()
+    global_validation_passed: bool = False
+    changeset: ChangeSet | None = None
+    summary: str = ""
 
 
 @dataclass(frozen=True, slots=True)

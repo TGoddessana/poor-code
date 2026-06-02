@@ -27,6 +27,7 @@ from poor_code.domain.session.models import (
     EditScope,
     Phase,
     Plan,
+    Policy,
     WorkItemPolicies,
     Query,
     QueryKind,
@@ -301,6 +302,8 @@ def _dict_to_answered(d: dict[str, Any]) -> AnsweredQuery:
 
 
 def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
+    # lazy import: avoids the harness→session→harness import cycle at module load
+    from poor_code.domain.harness.nodes.reporter import report_to_dict
     cc = st.understanding
     return {
         "status": st.status.value,
@@ -338,11 +341,15 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
         "interview": [_answered_to_dict(a) for a in st.interview],
         "repair_hint": st.repair_hint,
         "feedback": [_feedback_entry_to_dict(e) for e in st.feedback.entries],
+        "policy": st.policy.value,
+        "report": (None if st.report is None else report_to_dict(st.report)),
     }
 
 
 def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
     try:
+        # lazy import: avoids the harness→session→harness import cycle at module load
+        from poor_code.domain.harness.nodes.reporter import report_from_dict
         cur = d.get("cursor")
         req = d.get("request")
         cc = d.get("understanding")
@@ -375,6 +382,8 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
             feedback=FeedbackMemory(
                 entries=tuple(_dict_to_feedback_entry(e) for e in d.get("feedback", []))
             ),
+            policy=Policy(d.get("policy", Policy.SUPERVISED.value)),
+            report=(None if d.get("report") is None else report_from_dict(d["report"])),
         )
     except (KeyError, ValueError) as e:
         raise ValueError(f"corrupt session file at {src}: {e}") from e

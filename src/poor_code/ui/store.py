@@ -20,6 +20,7 @@ from poor_code.messages import (
     ProjectMapBuildProgress,
     ProjectMapBuildStarted,
     QueryRaised,
+    ReportReady,
     ToolCallFailed,
     ToolCallFinished,
     ToolCallStarted,
@@ -72,7 +73,14 @@ class PlanSegment:
     lines: tuple[str, ...]
 
 
-Segment = TextSegment | ToolCallView | NodeLabelSegment | QuerySegment | PlanSegment
+@dataclass(frozen=True)
+class ReportSegment:
+    outcome: str
+    summary: str
+    lines: tuple[str, ...] = ()
+
+
+Segment = TextSegment | ToolCallView | NodeLabelSegment | QuerySegment | PlanSegment | ReportSegment
 
 
 @dataclass(frozen=True)
@@ -404,6 +412,10 @@ def reduce(state: AppState, action: Action) -> AppState:
 
         case PlanReady(turn_id=tid, lines=lines):
             return _append_segment(state, tid, PlanSegment(lines=lines))
+
+        case ReportReady(turn_id=tid, outcome=outcome, summary=summary, lines=lines):
+            return _append_segment(
+                state, tid, ReportSegment(outcome=outcome, summary=summary, lines=lines))
 
         case _:
             return state

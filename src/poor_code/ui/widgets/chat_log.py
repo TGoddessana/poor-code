@@ -7,7 +7,7 @@ from textual.widget import Widget
 from textual.widgets import Markdown, Static
 
 from poor_code.ui.store import (
-    AppState, NodeLabelSegment, PlanSegment, QuerySegment, TextSegment, ToolCallView,
+    AppState, NodeLabelSegment, PlanSegment, QuerySegment, ReportSegment, TextSegment, ToolCallView,
 )
 from poor_code.ui.widgets.banner import Banner
 from poor_code.ui.widgets.streaming_markdown import StreamingMarkdown
@@ -25,6 +25,11 @@ def _render_segment(seg) -> str:
         return "\n".join(lines)
     if isinstance(seg, PlanSegment):
         return "📋 계획\n" + "\n".join(f"   {ln}" for ln in seg.lines)
+    if isinstance(seg, ReportSegment):
+        icon = "✅" if seg.outcome == "succeeded" else "⚠️"
+        body = [f"{icon} {seg.summary}"]
+        body += [f"   {ln}" for ln in seg.lines]
+        return "\n".join(body)
     return str(seg)
 
 
@@ -280,7 +285,7 @@ class TurnBlock(Widget):
                     self.app.call_later(w.write_delta, seg.text)
                 elif isinstance(seg, ToolCallView) and isinstance(w, ToolCallEntry):
                     w.refresh_from(seg)
-                elif isinstance(seg, (NodeLabelSegment, QuerySegment, PlanSegment)) and isinstance(w, StaticSegment):
+                elif isinstance(seg, (NodeLabelSegment, QuerySegment, PlanSegment, ReportSegment)) and isinstance(w, StaticSegment):
                     w.refresh_from(seg)
                 else:
                     # Kind mismatch — replace.

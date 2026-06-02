@@ -179,3 +179,12 @@ class PlanReady(Event):
     """Graph parked with a completed plan, pre-rendered to display lines."""
     turn_id: str
     lines: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ReportReady(Event):
+    """Graph reached its terminal Report, pre-rendered for display."""
+    turn_id: str
+    outcome: str
+    summary: str
+    lines: tuple[str, ...] = ()

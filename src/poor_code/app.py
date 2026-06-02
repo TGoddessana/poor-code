@@ -169,6 +169,8 @@ class PoorCodeApp(App):
             return  # turn stays open; reducer set awaiting_input
         if final.plan is not None:
             sink.plan_ready(final.plan)
+        if final.report is not None:
+            sink.report_ready(final.report)
         self.store.dispatch(TurnEnded(
             turn_id=self._turn_id,
             duration_sec=time.monotonic() - self._turn_started,

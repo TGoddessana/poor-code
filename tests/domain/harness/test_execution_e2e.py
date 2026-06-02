@@ -7,7 +7,7 @@ import pytest
 
 from poor_code.domain.harness import build_default_registry, Driver, route
 from poor_code.domain.session.models import (
-    SessionState, Cursor, Phase, Request, RequestKind, TaskStatus)
+    SessionState, Cursor, Phase, Request, RequestKind, ReportOutcome, TaskStatus)
 from poor_code.domain.session.store import SessionStore
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.provider.events import (
@@ -78,9 +78,11 @@ async def test_full_execution_reaches_reporter_and_writes_file(tmp_path):
         request=Request(raw_text="create out.txt", kind=RequestKind.ENGINEERING))
     final = await driver.run(start, asyncio.Event())
 
-    # the graph ran to the (unregistered) reporter park = slice-1 terminal
+    # the graph ran through reporter (registered) and terminated
     assert final.cursor.current_node == "reporter"
     assert final.cursor.phase is Phase.FINALIZING
+    assert final.report is not None
+    assert final.report.outcome is ReportOutcome.SUCCEEDED
     # the implementer actually created the file in the work tree
     assert (tmp_path / "out.txt").read_text() == "ok"
     # the task completed via the binding runner
