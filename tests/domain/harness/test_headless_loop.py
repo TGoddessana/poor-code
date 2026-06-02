@@ -63,3 +63,26 @@ async def test_full_auto_escalate_parks_at_user_and_stamps_abandoned():
     final = await run_headless(driver, _state("esc_node"), asyncio.Event(), sink=None)
     assert final.report is not None
     assert final.report.outcome is ReportOutcome.ABANDONED
+
+
+@pytest.mark.asyncio
+async def test_full_auto_caps_runaway_queries_and_abandons():
+    from poor_code.domain.harness.driver import Driver
+    from poor_code.domain.harness.headless import MAX_AUTO_ANSWERS
+
+    class _AlwaysAsk:
+        name = "ask_node"
+        def __init__(self): self.calls = 0
+        async def run(self, ctx):
+            self.calls += 1
+            return NodeResult(query=Query(id=f"q{self.calls}", kind=QueryKind.CLARIFY, prompt="?"))
+
+    node = _AlwaysAsk()
+    reg = NodeRegistry(); reg.register(node)
+    driver = Driver(reg, lambda n, r, s: None)  # ask_node has no forward edge
+    final = await run_headless(driver, _state("ask_node"), asyncio.Event(), sink=None)
+    assert final.report is not None
+    assert final.report.outcome is ReportOutcome.ABANDONED
+    # bounded: the node was called at most MAX_AUTO_ANSWERS + 1 times (the +1 is the final
+    # round that returns the still-pending query which trips the cap)
+    assert node.calls <= MAX_AUTO_ANSWERS + 1

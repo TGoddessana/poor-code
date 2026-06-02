@@ -72,14 +72,18 @@ def resolve_llm():
 
 
 _CANNED_ANSWER = "Proceed using your best judgment. Do not ask further questions."
+MAX_AUTO_ANSWERS = 20  # safety cap: headless must terminate even if a node asks forever
 
 
 async def run_headless(driver, state: SessionState, cancel: "asyncio.Event",
                        sink: object | None = None) -> SessionState:
-    """FULL_AUTO walk: auto-answer queries; stamp ABANDONED on any non-success park."""
+    """FULL_AUTO walk: auto-answer queries (bounded by MAX_AUTO_ANSWERS); stamp
+    ABANDONED on any non-success park or if the auto-answer cap is exhausted."""
+    auto_answers = 0
     while True:
         state = await driver.run(state, cancel, sink=sink)
-        if state.pending_query is not None:
+        if state.pending_query is not None and auto_answers < MAX_AUTO_ANSWERS:
+            auto_answers += 1
             state = state.with_user_response(
                 UserResponse(query_id=state.pending_query.id, answer=_CANNED_ANSWER))
             continue
