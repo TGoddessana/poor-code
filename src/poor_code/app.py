@@ -154,6 +154,11 @@ class PoorCodeApp(App):
             self.store.dispatch(TurnFailed(turn_id=self._turn_id, error="cancelled"))
             self._harness_state = None
             return
+        except Exception as e:
+            self.store.dispatch(TurnFailed(
+                turn_id=self._turn_id, error=f"{type(e).__name__}: {e}"))
+            self._harness_state = None
+            return
         if self._cancel.is_set():
             self.store.dispatch(TurnFailed(turn_id=self._turn_id, error="cancelled"))
             self._harness_state = None
