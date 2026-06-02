@@ -6,6 +6,7 @@ with a hardcoded base_url. This module owns the actual Route assembly.
 from __future__ import annotations
 
 from poor_code.provider.auth import BearerAuth
+from poor_code.provider.capabilities import Capabilities
 from poor_code.provider.client import LLMClient
 from poor_code.provider.framing import SseFraming
 from poor_code.provider.protocols.openai_chat import OpenAICompatibleChat
@@ -13,13 +14,15 @@ from poor_code.provider.route import Route
 
 
 def configure(
-    model: str, api_key: str, base_url: str, provider_name: str = ""
+    model: str, api_key: str, base_url: str, provider_name: str = "",
+    capabilities: Capabilities = Capabilities(),
 ) -> LLMClient:
     route = Route(
         protocol=OpenAICompatibleChat(),
         endpoint="/v1/chat/completions",
         auth=BearerAuth(token=api_key),
         framing=SseFraming(),
+        capabilities=capabilities,
     )
     return LLMClient(
         route=route, base_url=base_url, model=model, provider_name=provider_name

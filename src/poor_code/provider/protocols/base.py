@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Protocol as _PyProtocol
 
+from poor_code.provider.capabilities import Capabilities
 from poor_code.provider.events import LLMEvent
 
 
@@ -17,6 +18,9 @@ class Protocol(_PyProtocol):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         model: str,
+        *,
+        capabilities: Capabilities = Capabilities(),
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
     def for_stream(self) -> "Protocol": ...
