@@ -157,6 +157,16 @@ def _dict_to_task_context(d: dict[str, Any]) -> TaskContext:
     )
 
 
+def _feedback_entry_to_dict(e: FeedbackEntry) -> dict[str, Any]:
+    return {"failure_type": e.failure_type, "symptom": e.symptom,
+            "prevention_hint": e.prevention_hint, "task_ref": e.task_ref}
+
+
+def _dict_to_feedback_entry(d: dict[str, Any]) -> FeedbackEntry:
+    return FeedbackEntry(failure_type=d["failure_type"], symptom=d["symptom"],
+                         prevention_hint=d["prevention_hint"], task_ref=d.get("task_ref"))
+
+
 def _verdict_to_dict(v: Verdict) -> dict[str, Any]:
     return {"kind": v.kind.value,
             "layer": None if v.layer is None else v.layer.value,
@@ -312,6 +322,7 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
                           else _query_to_dict(st.pending_query)),
         "interview": [_answered_to_dict(a) for a in st.interview],
         "repair_hint": st.repair_hint,
+        "feedback": [_feedback_entry_to_dict(e) for e in st.feedback.entries],
     }
 
 
@@ -346,6 +357,9 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
                            else _dict_to_query(d["pending_query"])),
             interview=tuple(_dict_to_answered(a) for a in d.get("interview", [])),
             repair_hint=d.get("repair_hint"),
+            feedback=FeedbackMemory(
+                entries=tuple(_dict_to_feedback_entry(e) for e in d.get("feedback", []))
+            ),
         )
     except (KeyError, ValueError) as e:
         raise ValueError(f"corrupt session file at {src}: {e}") from e
