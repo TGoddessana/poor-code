@@ -168,16 +168,17 @@ def _dict_to_feedback_entry(d: dict[str, Any]) -> FeedbackEntry:
 
 
 def _verdict_to_dict(v: Verdict) -> dict[str, Any]:
-    # TODO(Plan 2): serialize Verdict.query before any node emits escalate(query) into an Attempt — else it persists silently truncated.
     return {"kind": v.kind.value,
             "layer": None if v.layer is None else v.layer.value,
-            "hint": v.hint}
+            "hint": v.hint,
+            "query": v.query}
 
 
 def _dict_to_verdict(d: dict[str, Any]) -> Verdict:
     return Verdict(kind=VerdictKind(d["kind"]),
                    layer=None if d.get("layer") is None else Layer(d["layer"]),
-                   hint=d.get("hint"))
+                   hint=d.get("hint"),
+                   query=d.get("query"))
 
 
 def _change_record_to_dict(c: ChangeRecord) -> dict[str, Any]:

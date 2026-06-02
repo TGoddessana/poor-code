@@ -37,6 +37,15 @@ def test_session_state_roundtrips_feedback():
     assert back.feedback.entries == s.feedback.entries
 
 
+from poor_code.domain.session.store import _verdict_to_dict, _dict_to_verdict
+from poor_code.domain.session.models import Verdict, VerdictKind
+
+
+def test_verdict_query_roundtrips():
+    v = Verdict(kind=VerdictKind.ESCALATE, query="need human input")
+    assert _dict_to_verdict(_verdict_to_dict(v)) == v
+
+
 from poor_code.domain.session.store import SessionStore
 from poor_code.domain.session.models import (
     Plan, Task, Cursor, Phase, Attempt, AttemptStatus, ValidationResult,
