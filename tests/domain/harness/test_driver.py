@@ -102,6 +102,54 @@ async def test_driver_applies_requirement_and_routes_to_planner():
 from poor_code.domain.session.models import Verdict, VerdictKind, Layer
 
 
+import pytest
+from poor_code.domain.session.models import (
+    Plan, Task, Cursor, Phase, TaskStatus, AttemptStatus,
+    SelectedTask, Attempt, ValidationResult, FeedbackEntry, TaskCompleted,
+)
+
+
+def _apply(state, output):
+    # Driver._apply is a staticmethod; exercise it directly.
+    return Driver._apply(state, NodeResult(output=output))
+
+
+def _base():
+    plan = Plan(tasks=(Task(id="t1", title="A", purpose="p"),))
+    return SessionState(plan=plan,
+                        cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="x"))
+
+
+def test_apply_selected_task():
+    s = _apply(_base(), SelectedTask(task_id="t1"))
+    assert s.cursor.task_id == "t1"
+    assert [t for t in s.plan.tasks if t.id == "t1"][0].status is TaskStatus.ACTIVE
+
+
+def test_apply_attempt_appends():
+    s = _apply(_base().with_active_task("t1"), Attempt(id="a1"))
+    assert s.plan.tasks[0].attempts[0].id == "a1"
+    assert s.cursor.attempt_id == "a1"
+
+
+def test_apply_validation_result_attaches():
+    s = _apply(_base().with_active_task("t1").append_attempt("t1", Attempt(id="a1")),
+               ValidationResult(command="true", exit_code=0, passed=True))
+    assert s.plan.tasks[0].attempts[0].run_result.passed is True
+
+
+def test_apply_feedback_entry():
+    s = _apply(_base(), FeedbackEntry(failure_type="x", symptom="y", prevention_hint="z"))
+    assert s.feedback.entries[0].failure_type == "x"
+
+
+def test_apply_task_completed_marks_done():
+    s0 = _base().with_active_task("t1").append_attempt("t1", Attempt(id="a1"))
+    s = _apply(s0, TaskCompleted(task_id="t1", attempt_id="a1"))
+    assert s.plan.tasks[0].status is TaskStatus.DONE
+    assert s.plan.tasks[0].attempts[0].status is AttemptStatus.DONE
+
+
 class _GateNode:
     """Stateful dummy: REPAIR on first visit, ADVANCE on the second so the loop
     terminates (ADVANCE -> FORWARD interviewer -> unregistered -> park)."""

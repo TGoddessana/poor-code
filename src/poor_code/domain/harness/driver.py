@@ -11,7 +11,9 @@ from typing import Callable
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
-    CodeContext, Phase, Plan, Request, Requirement, SessionState, TriggerKind, Verdict, VerdictKind,
+    AttemptStatus, Attempt, CodeContext, FeedbackEntry, Phase, Plan, Request, Requirement,
+    SelectedTask, SessionState, TaskCompleted, TaskStatus, TriggerKind, ValidationResult,
+    Verdict, VerdictKind,
 )
 
 RouteFn = Callable[[str, NodeResult, SessionState], "str | None"]
@@ -74,6 +76,21 @@ class Driver:
             return state.with_requirement(out)
         if isinstance(out, Plan):
             return state.with_plan(out)
+        if isinstance(out, SelectedTask):
+            return state.with_active_task(out.task_id)
+        if isinstance(out, Attempt):
+            assert state.cursor is not None and state.cursor.task_id is not None
+            return state.append_attempt(state.cursor.task_id, out)
+        if isinstance(out, ValidationResult):
+            cur = state.cursor
+            assert cur is not None and cur.task_id and cur.attempt_id
+            return state.update_attempt(cur.task_id, cur.attempt_id, run_result=out)
+        if isinstance(out, FeedbackEntry):
+            return state.with_feedback_entry(out)
+        if isinstance(out, TaskCompleted):
+            return (state
+                    .update_attempt(out.task_id, out.attempt_id, status=AttemptStatus.DONE)
+                    .with_task_status(out.task_id, TaskStatus.DONE))
         return state
 
 
@@ -84,6 +101,15 @@ def _phase_for(node: str, current: Phase) -> Phase:
         "interviewer": Phase.INTERVIEWING,
         "planner": Phase.PLANNING,
         "plan_gate": Phase.PLANNING,
+        "task_selector": Phase.IMPLEMENTING,
+        "composer": Phase.IMPLEMENTING,
+        "implementer": Phase.IMPLEMENTING,
+        "eng_gate": Phase.IMPLEMENTING,
+        "validator": Phase.IMPLEMENTING,
+        "validation_runner": Phase.IMPLEMENTING,
+        "failure_analyst": Phase.IMPLEMENTING,
+        "completion_gate": Phase.IMPLEMENTING,
+        "global_validator": Phase.FINALIZING,
     }.get(node, current)
 
 
