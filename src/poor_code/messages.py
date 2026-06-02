@@ -151,3 +151,31 @@ class ProjectMapBuildFinished(Event):
 @dataclass(frozen=True)
 class ProjectMapBuildFailed(Event):
     error: str
+
+
+# --- Harness graph (S3 TUI wiring) ---
+
+
+@dataclass(frozen=True)
+class NodeEntered(Event):
+    """Driver entered a graph node. UI uses this to label the segments that follow."""
+    turn_id: str
+    node: str
+    phase: str
+
+
+@dataclass(frozen=True)
+class QueryRaised(Event):
+    """Graph suspended awaiting user input. Primitives only (no domain Query object)."""
+    turn_id: str
+    query_id: str
+    kind: str
+    prompt: str
+    options: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PlanReady(Event):
+    """Graph parked with a completed plan, pre-rendered to display lines."""
+    turn_id: str
+    lines: tuple[str, ...] = ()

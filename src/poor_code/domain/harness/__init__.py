@@ -4,6 +4,7 @@ from __future__ import annotations
 from poor_code.domain.harness.driver import Driver
 from poor_code.domain.harness.node import Node, NodeContext, NodeResult
 from poor_code.domain.harness.nodes.explorer import ExploringNode
+from poor_code.domain.harness.nodes.fast_path import FastPathNode
 from poor_code.domain.harness.nodes.gates import PlanGate, UnderstandingGate
 from poor_code.domain.harness.nodes.interviewer import Interviewer
 from poor_code.domain.harness.nodes.planner import Planner
@@ -17,14 +18,16 @@ from poor_code.domain.tool.registry import ToolRegistry
 
 __all__ = [
     "Driver", "Node", "NodeContext", "NodeResult", "NodeRegistry",
-    "Router", "ExploringNode", "Interviewer", "Planner", "PlanGate",
+    "Router", "ExploringNode", "Interviewer", "Planner", "PlanGate", "FastPathNode",
     "route", "FORWARD", "build_default_registry",
 ]
 
 
-def build_default_registry(*, llm, project_map: ProjectMap) -> NodeRegistry:
+def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeRegistry:
     """Assemble the v1 planning-layer graph. Composer and beyond are not
-    registered yet — the Driver parks there until the execution layer exists."""
+    registered yet — the Driver parks there until the execution layer exists.
+    When `agent` is provided, the lightweight leaf (fast_path) is registered;
+    otherwise a lightweight classification parks (no output)."""
     reg = NodeRegistry()
     reg.register(Router(llm))
     reg.register(ExploringNode(
@@ -34,4 +37,6 @@ def build_default_registry(*, llm, project_map: ProjectMap) -> NodeRegistry:
     reg.register(Interviewer(llm, project_map=project_map))
     reg.register(Planner(llm, project_map=project_map))
     reg.register(PlanGate())
+    if agent is not None:
+        reg.register(FastPathNode(agent))
     return reg

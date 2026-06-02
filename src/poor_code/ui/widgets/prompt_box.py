@@ -62,11 +62,14 @@ class PromptBox(Container):
         self._sync_mascot(state)
 
     def _sync_placeholder(self, state: AppState) -> None:
-        if state.is_processing == self._cached_is_processing:
+        key = (state.is_processing, getattr(state, "awaiting_input", False))
+        if key == self._cached_is_processing:
             return
-        self._cached_is_processing = state.is_processing
+        self._cached_is_processing = key
         inp = self.query_one(Input)
-        if state.is_processing:
+        if state.awaiting_input:
+            inp.placeholder = "답을 입력하세요"
+        elif state.is_processing:
             inp.placeholder = "Ctrl+C로 취소"
         else:
             inp.placeholder = self._original_placeholder
@@ -155,7 +158,8 @@ class PromptBox(Container):
 
     @on(Input.Submitted)
     def _on_submit(self, event: Input.Submitted) -> None:
-        if self.app.app_state.is_processing:
+        st = self.app.app_state
+        if st.is_processing and not getattr(st, "awaiting_input", False):
             return
         if not self._popup_open():
             text = event.value

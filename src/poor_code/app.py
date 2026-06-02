@@ -2,26 +2,35 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from textual.app import App
 from textual.reactive import reactive
 
 from poor_code.domain.agent import Agent
+from poor_code.domain.harness.sink import TurnSink
 from poor_code.domain.project_map import ProjectMapBuilder, ProjectMapStore
+from poor_code.domain.session.models import (
+    Cursor, Phase, Request, RequestKind, SessionState, UserResponse,
+)
 from poor_code.infra import paths
 from poor_code.messages import (
     ProjectMapBuildFailed,
     ProjectMapBuildFinished,
     ProjectMapBuildProgress,
     ProjectMapBuildStarted,
-    SendPrompt,
+    TurnEnded,
+    TurnFailed,
+    TurnStarted,
 )
 from poor_code.provider.client import LLMClient
 from poor_code.slash.dispatcher import SlashDispatcher
 from poor_code.ui.screens.chat import ChatScreen
-from poor_code.ui.store import AppState, ProviderChanged, PromptSubmitted, Store
+from poor_code.ui.store import (
+    AnswerSubmitted, AppState, ProviderChanged, PromptSubmitted, Store,
+)
 
 
 class PoorCodeApp(App):
@@ -36,16 +45,22 @@ class PoorCodeApp(App):
     def __init__(
         self,
         agent: Agent,
+        make_driver: Callable[[Any], Any],
         slash: SlashDispatcher | None = None,
         project_map_builder: ProjectMapBuilder | None = None,
     ) -> None:
         super().__init__()
         self.store = Store(AppState(cwd=str(Path.cwd())))
         self.agent = agent
+        self._make_driver = make_driver
+        self._harness_driver = make_driver(agent.llm)
         self.slash = slash or SlashDispatcher()
         self._cancel = asyncio.Event()
         self._project_map_builder = project_map_builder
         self._project_map_store = ProjectMapStore()
+        self._harness_state: SessionState | None = None
+        self._turn_id: str | None = None
+        self._turn_started: float = 0.0
 
     def on_mount(self) -> None:
         self.store.subscribe(lambda s: setattr(self, "app_state", s))
@@ -109,17 +124,56 @@ class PoorCodeApp(App):
             return
         if self.slash.dispatch(text, ctx=self):
             return
-        cmd = SendPrompt(text)
-        self.store.dispatch(PromptSubmitted(cmd_id=cmd.cmd_id, user_text=text))
         self._cancel = asyncio.Event()
-        self.run_worker(self._run_turn(cmd), group="turn", exclusive=True)
+        parked = self._harness_state
+        if parked is not None and parked.pending_query is not None:
+            # answer branch — continue the same long turn
+            resp = UserResponse(query_id=parked.pending_query.id, answer=text)
+            state = parked.with_user_response(resp)
+            self.store.dispatch(AnswerSubmitted(turn_id=self._turn_id, answer=text))
+        else:
+            # new-request branch — open a fresh turn
+            cmd_id = uuid.uuid4().hex
+            turn_id = uuid.uuid4().hex
+            self.store.dispatch(PromptSubmitted(cmd_id=cmd_id, user_text=text))
+            self.store.dispatch(TurnStarted(cmd_id=cmd_id, turn_id=turn_id))
+            self._turn_id = turn_id
+            self._turn_started = time.monotonic()
+            state = SessionState(
+                cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
+                request=Request(raw_text=text, kind=RequestKind.ENGINEERING),
+            )
+        self.run_worker(self._drive(state), group="turn", exclusive=True)
 
-    async def _run_turn(self, cmd: SendPrompt) -> None:
-        async for event in self.agent.run(cmd, self._cancel):
-            self.store.dispatch(event)
+    async def _drive(self, state: SessionState) -> None:
+        sink = TurnSink(self._turn_id, self.store.dispatch)
+        model = getattr(self.agent.llm, "model", "") or ""
+        try:
+            final = await self._harness_driver.run(state, self._cancel, sink=sink)
+        except asyncio.CancelledError:
+            self.store.dispatch(TurnFailed(turn_id=self._turn_id, error="cancelled"))
+            self._harness_state = None
+            return
+        if self._cancel.is_set():
+            self.store.dispatch(TurnFailed(turn_id=self._turn_id, error="cancelled"))
+            self._harness_state = None
+            return
+        self._harness_state = final
+        if final.pending_query is not None:
+            sink.query_raised(final.pending_query)
+            return  # turn stays open; reducer set awaiting_input
+        if final.plan is not None:
+            sink.plan_ready(final.plan)
+        self.store.dispatch(TurnEnded(
+            turn_id=self._turn_id,
+            duration_sec=time.monotonic() - self._turn_started,
+            model=model,
+        ))
+        self._harness_state = None
 
     def set_llm(self, llm: Any) -> None:
         self.agent.llm = llm
+        self._harness_driver = self._make_driver(llm)
         self._dispatch_provider(llm)
 
     def action_cancel_or_quit(self) -> None:

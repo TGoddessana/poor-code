@@ -5,6 +5,11 @@ from textual.widgets import Input
 
 from poor_code.app import PoorCodeApp
 from poor_code.domain.agent import Agent
+from poor_code.domain.harness.driver import Driver
+from poor_code.domain.harness.node import NodeResult
+from poor_code.domain.harness.registry import NodeRegistry
+from poor_code.domain.harness.route import route as harness_route
+from poor_code.domain.session.models import Request, RequestKind
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.infra.prompt_builder import PromptBuilder
 from poor_code.infra.turn_assembler import TurnAssembler
@@ -33,8 +38,22 @@ def _agent_text(text: str) -> Agent:
     )
 
 
-async def test_submit_routes_through_agent_and_updates_store():
-    async with PoorCodeApp(agent=_agent_text("hi there")).run_test() as pilot:
+class _RouterEng:
+    name = "router"
+    async def run(self, ctx):
+        return NodeResult(output=Request(
+            raw_text=ctx.state.request.raw_text, kind=RequestKind.ENGINEERING))
+
+
+def _make_driver(_llm):
+    reg = NodeRegistry()
+    reg.register(_RouterEng())
+    return Driver(reg, harness_route)
+
+
+async def test_submit_routes_through_driver_and_opens_turn():
+    app = PoorCodeApp(agent=_agent_text("hi there"), make_driver=_make_driver)
+    async with app.run_test() as pilot:
         await pilot.pause(); await pilot.pause()
         pilot.app.screen.query_one(Input).focus()
         await pilot.press("p", "i", "n", "g")
@@ -47,22 +66,28 @@ async def test_submit_routes_through_agent_and_updates_store():
         turn = state.turns[0]
         assert turn.user_text == "ping"
         assert turn.status == "done"
-        assert turn.assistant_text == "hi there"
         assert state.is_processing is False
 
 
 async def test_cancel_during_turn_marks_failed():
-    """Build a FakeLLMClient that yields slowly so we can cancel mid-stream."""
+    """A node that hangs until cancelled, so we can cancel mid-run."""
 
-    class _SlowLLM:
-        async def stream(self, messages, tools):
+    class _Hang:
+        name = "router"
+        async def run(self, ctx):
             for _ in range(50):
+                if ctx.cancel.is_set():
+                    raise asyncio.CancelledError("router cancelled")
                 await asyncio.sleep(0.05)
-                yield TextDelta(text=".")
-            yield FinishedReason(reason="stop")
+            return NodeResult(output=Request(raw_text="x", kind=RequestKind.ENGINEERING))
 
-    agent = Agent(llm=_SlowLLM(), tools=ToolRegistry([]), assembler=_default_assembler())
-    async with PoorCodeApp(agent=agent).run_test() as pilot:
+    def _hang_driver(_llm):
+        reg = NodeRegistry()
+        reg.register(_Hang())
+        return Driver(reg, harness_route)
+
+    app = PoorCodeApp(agent=_agent_text("x"), make_driver=_hang_driver)
+    async with app.run_test() as pilot:
         await pilot.pause(); await pilot.pause()
         pilot.app.screen.query_one(Input).focus()
         await pilot.press("x")
@@ -91,7 +116,7 @@ class _CallCounter:
 async def test_submit_slash_routes_through_dispatcher_not_agent():
     cmd = _CallCounter()
     slash = SlashDispatcher(SlashRegistry([cmd]))
-    app = PoorCodeApp(agent=_agent_text("should-not-run"), slash=slash)
+    app = PoorCodeApp(agent=_agent_text("should-not-run"), make_driver=_make_driver, slash=slash)
     async with app.run_test() as pilot:
         await pilot.pause(); await pilot.pause()
         pilot.app.screen.query_one(Input).focus()
@@ -115,7 +140,7 @@ async def test_on_mount_dispatches_provider_for_llmclient():
         tools=ToolRegistry([]),
         assembler=_default_assembler(),
     )
-    async with PoorCodeApp(agent=agent).run_test() as pilot:
+    async with PoorCodeApp(agent=agent, make_driver=_make_driver).run_test() as pilot:
         await pilot.pause(); await pilot.pause()
         state = pilot.app.store.state
         assert state.provider_name == "ollama cloud"
@@ -123,7 +148,7 @@ async def test_on_mount_dispatches_provider_for_llmclient():
 
 
 async def test_on_mount_dispatches_none_for_non_llmclient():
-    async with PoorCodeApp(agent=_agent_text("x")).run_test() as pilot:
+    async with PoorCodeApp(agent=_agent_text("x"), make_driver=_make_driver).run_test() as pilot:
         await pilot.pause(); await pilot.pause()
         state = pilot.app.store.state
         assert state.provider_name is None
@@ -131,7 +156,7 @@ async def test_on_mount_dispatches_none_for_non_llmclient():
 
 
 async def test_set_llm_dispatches_new_provider_and_model():
-    async with PoorCodeApp(agent=_agent_text("x")).run_test() as pilot:
+    async with PoorCodeApp(agent=_agent_text("x"), make_driver=_make_driver).run_test() as pilot:
         await pilot.pause(); await pilot.pause()
         new_llm = ollama_cloud.configure(model="gpt-oss:20b", api_key="k2")
         pilot.app.set_llm(new_llm)

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from poor_code.cli import _build_agent, _start_session
+from poor_code.cli import _build_agent, _initial_llm, _start_session
 from poor_code.messages import SendPrompt
 
 
@@ -11,7 +11,7 @@ async def test_build_agent_returns_runnable_agent(tmp_path, monkeypatch):
     # Force a no-provider boot by pointing auth_store at an empty home.
     monkeypatch.setenv("HOME", str(tmp_path))
     session = _start_session(tmp_path)
-    agent = _build_agent(session)
+    agent = _build_agent(session, _initial_llm())
 
     assert agent.assembler is not None
     assert agent.llm is not None

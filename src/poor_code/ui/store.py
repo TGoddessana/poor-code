@@ -13,10 +13,13 @@ from poor_code.messages import (
     AssistantMessageCompleted,
     AssistantTextDelta,
     Event,
+    NodeEntered,
+    PlanReady,
     ProjectMapBuildFailed,
     ProjectMapBuildFinished,
     ProjectMapBuildProgress,
     ProjectMapBuildStarted,
+    QueryRaised,
     ToolCallFailed,
     ToolCallFinished,
     ToolCallStarted,
@@ -50,7 +53,26 @@ class TextSegment:
     text: str
 
 
-Segment = TextSegment | ToolCallView
+@dataclass(frozen=True)
+class NodeLabelSegment:
+    """A graph-node boundary header. Streamed text/tools below it belong to this node."""
+    node: str
+    phase: str
+
+
+@dataclass(frozen=True)
+class QuerySegment:
+    prompt: str
+    options: tuple[str, ...]
+    kind: str
+
+
+@dataclass(frozen=True)
+class PlanSegment:
+    lines: tuple[str, ...]
+
+
+Segment = TextSegment | ToolCallView | NodeLabelSegment | QuerySegment | PlanSegment
 
 
 @dataclass(frozen=True)
@@ -108,6 +130,7 @@ class AppState:
     model_meta: ModelMeta | None = None
     last_turn_tokens: int = 0
     project_map: ProjectMapStatus | None = None
+    awaiting_input: bool = False
 
 
 # =========================================================================
@@ -125,6 +148,12 @@ class UIAction:
 class PromptSubmitted(UIAction):
     cmd_id: str
     user_text: str
+
+
+@dataclass(frozen=True)
+class AnswerSubmitted(UIAction):
+    turn_id: str
+    answer: str
 
 
 @dataclass(frozen=True)
@@ -356,6 +385,25 @@ def reduce(state: AppState, action: Action) -> AppState:
         case ProviderChanged(provider_name=p, model=m):
             meta = lookup(m) if m else None
             return replace(state, provider_name=p, model=m, model_meta=meta)
+
+        case NodeEntered(turn_id=tid, node=node, phase=phase):
+            return _append_segment(state, tid, NodeLabelSegment(node=node, phase=phase))
+
+        case QueryRaised(turn_id=tid, kind=kind, prompt=prompt, options=options):
+            i = _find_turn_by_id(state, tid)
+            if i is None:
+                return state
+            with_seg = _append_segment(
+                state, tid, QuerySegment(prompt=prompt, options=options, kind=kind))
+            return replace(with_seg, awaiting_input=True)
+
+        case AnswerSubmitted(turn_id=_tid, answer=_answer):
+            if not state.awaiting_input:
+                return state
+            return replace(state, awaiting_input=False)
+
+        case PlanReady(turn_id=tid, lines=lines):
+            return _append_segment(state, tid, PlanSegment(lines=lines))
 
         case _:
             return state
