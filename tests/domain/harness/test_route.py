@@ -6,9 +6,9 @@ from poor_code.domain.session.models import (
 )
 
 
-def test_router_engineering_goes_to_locator():
+def test_router_engineering_goes_to_explorer():
     res = NodeResult(output=Request(raw_text="x", kind=RequestKind.ENGINEERING))
-    assert route("router", res, SessionState()) == "locator"
+    assert route("router", res, SessionState()) == "explorer"
 
 
 def test_router_lightweight_goes_to_fast_path():
@@ -16,9 +16,9 @@ def test_router_lightweight_goes_to_fast_path():
     assert route("router", res, SessionState()) == "fast_path"
 
 
-def test_locator_forwards_to_understanding_gate():
+def test_explorer_forwards_to_understanding_gate():
     res = NodeResult(output=CodeContext())
-    assert route("locator", res, SessionState()) == "understanding_gate"
+    assert route("explorer", res, SessionState()) == "understanding_gate"
 
 
 def test_understanding_gate_advance_forwards_to_interviewer():
@@ -26,9 +26,9 @@ def test_understanding_gate_advance_forwards_to_interviewer():
     assert route("understanding_gate", res, SessionState()) == "interviewer"
 
 
-def test_understanding_gate_repair_loops_back_to_locator():
+def test_understanding_gate_repair_loops_back_to_explorer():
     res = NodeResult(output=None, verdict=Verdict(kind=VerdictKind.REPAIR, layer=Layer.UNDERSTANDING))
-    assert route("understanding_gate", res, SessionState()) == "locator"
+    assert route("understanding_gate", res, SessionState()) == "explorer"
 
 
 def test_repair_verdict_routes_to_shallowest_producer():

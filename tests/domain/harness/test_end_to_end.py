@@ -10,7 +10,7 @@ from poor_code.domain.session.models import SessionState, Cursor, Phase, Request
 from poor_code.domain.session.store import SessionStore
 from poor_code.domain.project_map.models import ProjectMap, FileEntry, Symbol, SymbolKind
 from poor_code.provider.events import (
-    ToolCallStarted, ToolCallInputDelta, ToolCallEnded, FinishedReason,
+    TextDelta, ToolCallStarted, ToolCallInputDelta, ToolCallEnded, FinishedReason,
 )
 
 
@@ -30,6 +30,11 @@ class FakeLLMClient:
 
     async def stream(self, messages, tools):
         name = tools[0]["function"]["name"]
+        if name not in self._by_tool:
+            # ExploringNode stage ① exploration round: stop without read/grep
+            yield TextDelta(text="enough")
+            yield FinishedReason(reason="stop")
+            return
         args = json.dumps(self._by_tool[name])
         yield ToolCallStarted(call_id="c1", name=name)
         yield ToolCallInputDelta(call_id="c1", json_delta=args)
@@ -75,8 +80,8 @@ async def test_engineering_request_flows_to_code_context_and_checkpoints(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_empty_candidates_bounce_back_to_locator_then_escalate(tmp_path: Path):
-    # Locator finds nothing → UnderstandingGate fires the first real back-edge.
+async def test_empty_candidates_bounce_back_to_explorer_then_escalate(tmp_path: Path):
+    # Explorer finds nothing → UnderstandingGate fires the first real back-edge.
     llm = FakeLLMClient(code_context={"candidates": [], "confusers": [], "related_tests": []})
     registry = build_default_registry(llm=llm, project_map=_map())
 
@@ -88,8 +93,8 @@ async def test_empty_candidates_bounce_back_to_locator_then_escalate(tmp_path: P
     )
     final = await driver.run(start, asyncio.Event())
 
-    # The cursor looped back to the locator (the back-edge actually fired) ...
-    assert visited.count("locator") == 2
+    # The cursor looped back to the explorer (the back-edge actually fired) ...
+    assert visited.count("explorer") == 2
     # ... and, still empty on the retry, the gate escalated to the user.
     assert final.cursor.current_node == "user"
 
@@ -129,7 +134,10 @@ class ScriptedLLM:
         elif name == "emit_plan":
             args = self._plan
         else:
-            raise AssertionError(f"unexpected tool {name}")
+            # ExploringNode stage ① exploration round: stop without read/grep
+            yield TextDelta(text="enough")
+            yield FinishedReason(reason="stop")
+            return
         payload = json.dumps(args)
         yield ToolCallStarted(call_id="c1", name=name)
         yield ToolCallInputDelta(call_id="c1", json_delta=payload)
@@ -200,3 +208,13 @@ async def test_with_user_response_guards_mismatched_query_id():
         Query(id="q1", kind=QueryKind.CLARIFY, prompt="?"))
     with pytest.raises(ValueError):
         st.with_user_response(UserResponse(query_id="nope", answer="x"))
+
+
+from poor_code.domain.harness.route import FORWARD, _SHALLOWEST
+from poor_code.domain.session.models import Layer
+
+
+def test_router_engineering_goes_to_explorer():
+    assert FORWARD[("router", "engineering")] == "explorer"
+    assert FORWARD[("explorer", None)] == "understanding_gate"
+    assert _SHALLOWEST[Layer.UNDERSTANDING] == "explorer"

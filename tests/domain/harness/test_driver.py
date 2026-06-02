@@ -15,17 +15,17 @@ class _RouterStub:
         return NodeResult(output=Request(raw_text="add x", kind=RequestKind.ENGINEERING))
 
 
-class _LocatorStub:
-    name = "locator"
+class _ExplorerStub:
+    name = "explorer"
     async def run(self, ctx: NodeContext) -> NodeResult:
         return NodeResult(output=CodeContext(candidates=(CodeRef(file="a.py", symbol="x"),)))
 
 
 @pytest.mark.asyncio
-async def test_driver_runs_router_then_locator_then_parks():
+async def test_driver_runs_router_then_explorer_then_parks():
     reg = NodeRegistry()
     reg.register(_RouterStub())
-    reg.register(_LocatorStub())  # no 'understanding_gate' registered → park there
+    reg.register(_ExplorerStub())  # no 'understanding_gate' registered → park there
 
     checkpoints: list[str] = []
     driver = Driver(reg, route, on_step=lambda s: checkpoints.append(s.cursor.current_node))
@@ -33,11 +33,11 @@ async def test_driver_runs_router_then_locator_then_parks():
     start = SessionState(cursor=Cursor(phase=Phase.ROUTING, current_node="router"))
     final = await driver.run(start, asyncio.Event())
 
-    # parked at unregistered 'understanding_gate' after locator produced understanding
+    # parked at unregistered 'understanding_gate' after explorer produced understanding
     assert final.cursor.current_node == "understanding_gate"
     assert final.request is not None and final.request.kind is RequestKind.ENGINEERING
     assert final.understanding.candidates[0].symbol == "x"
-    assert "locator" in checkpoints
+    assert "explorer" in checkpoints
 
 
 @pytest.mark.asyncio
