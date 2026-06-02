@@ -145,6 +145,28 @@ class ScriptedLLM:
         yield FinishedReason(reason="tool_calls")
 
 
+def _planning_registry(llm, pm):
+    from poor_code.domain.harness.registry import NodeRegistry
+    from poor_code.domain.harness.nodes.router import Router
+    from poor_code.domain.harness.nodes.explorer import ExploringNode
+    from poor_code.domain.harness.nodes.gates import UnderstandingGate, PlanGate
+    from poor_code.domain.harness.nodes.interviewer import Interviewer
+    from poor_code.domain.harness.nodes.planner import Planner
+    from poor_code.domain.harness.nodes.execution import TaskSelector
+    from poor_code.domain.tool.registry import ToolRegistry
+    from poor_code.domain.tool.read import ReadTool
+    from poor_code.domain.tool.grep import GrepTool
+    reg = NodeRegistry()
+    reg.register(Router(llm))
+    reg.register(ExploringNode(llm, project_map=pm, tools=ToolRegistry([ReadTool(), GrepTool()])))
+    reg.register(UnderstandingGate())
+    reg.register(Interviewer(llm, project_map=pm))
+    reg.register(Planner(llm, project_map=pm))
+    reg.register(PlanGate())
+    reg.register(TaskSelector())
+    return reg  # task_selector → composer (unregistered) → park
+
+
 @pytest.mark.asyncio
 async def test_interview_done_flows_through_planner_then_task_selector_advances_to_composer(tmp_path: Path):
     from poor_code.domain.session.models import UserResponse
@@ -172,7 +194,7 @@ async def test_interview_done_flows_through_planner_then_task_selector_advances_
             "deps": [],
         },
     )
-    registry = build_default_registry(llm=llm, project_map=_map())
+    registry = _planning_registry(llm, _map())
     driver = Driver(registry, route)
     state = SessionState(
         cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
