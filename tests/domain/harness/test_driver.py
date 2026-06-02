@@ -97,3 +97,57 @@ async def test_driver_applies_requirement_and_routes_to_planner():
 
     assert final.requirement is not None and final.requirement.summary == "done"
     assert final.cursor.current_node == "planner"   # forwarded, then parked
+
+
+from poor_code.domain.session.models import Verdict, VerdictKind, Layer
+
+
+class _GateNode:
+    """Stateful dummy: REPAIR on first visit, ADVANCE on the second so the loop
+    terminates (ADVANCE -> FORWARD interviewer -> unregistered -> park)."""
+    name = "understanding_gate"
+    def __init__(self):
+        self.calls = 0
+    async def run(self, ctx):
+        self.calls += 1
+        if self.calls == 1:
+            return NodeResult(output=None, verdict=Verdict(
+                kind=VerdictKind.REPAIR, layer=Layer.UNDERSTANDING, hint="widen X"))
+        return NodeResult(output=None, verdict=Verdict(kind=VerdictKind.ADVANCE))
+
+
+class _Explorer:
+    name = "explorer"
+    def __init__(self):
+        self.seen_hint = "UNSET"
+    async def run(self, ctx):
+        self.seen_hint = ctx.state.repair_hint           # hint reached the node
+        return NodeResult(output=CodeContext(candidates=()))
+
+
+def _fake_route(node, result, state):
+    # isolate the Driver from route.py topology: REPAIR -> explorer,
+    # explorer -> gate, gate ADVANCE -> stop (park).
+    v = result.verdict
+    if v is not None and v.kind is VerdictKind.REPAIR:
+        return "explorer"
+    if node == "explorer":
+        return "understanding_gate"
+    return None
+
+
+@pytest.mark.asyncio
+async def test_driver_sets_repair_hint_on_repair_then_clears_on_codecontext():
+    explorer = _Explorer()
+    reg = NodeRegistry()
+    reg.register(_GateNode())
+    reg.register(explorer)
+    state = SessionState(
+        understanding=CodeContext(candidates=()),
+        cursor=Cursor(phase=Phase.LOCATING, current_node="understanding_gate"),
+    )
+    # gate(call1)->REPAIR sets repair_hint; route->explorer reads it; explorer's
+    # CodeContext clears it; gate(call2)->ADVANCE-> stop (park).
+    final = await Driver(reg, _fake_route).run(state, asyncio.Event())
+    assert explorer.seen_hint == "widen X"               # hint carried to explorer
+    assert final.repair_hint is None                     # cleared on CodeContext apply
