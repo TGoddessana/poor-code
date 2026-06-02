@@ -99,3 +99,49 @@ class _OpenAIChatParser:
                 yield ToolCallEnded(call_id=call_id)
             reason = finish_reason if finish_reason in _VALID_REASONS else "stop"
             yield FinishedReason(reason=reason)
+
+
+def _split_top_level_json(s: str) -> list[str]:
+    """Split concatenated top-level JSON values into separate pieces.
+
+    A model may cram N parallel tool calls into one call's arguments as
+    `{"a":1}{"b":2}`. This splits them at depth-0 boundaries. Braces/brackets
+    inside JSON strings (and escaped quotes) are ignored. If the string is not
+    cleanly splittable (trailing garbage, unbalanced, truncated) OR contains a
+    single value, the original string is returned unchanged as `[s]` — so
+    normal calls are byte-identical."""
+    pieces: list[str] = []
+    depth = 0
+    in_str = False
+    escape = False
+    start: int | None = None
+    for i, ch in enumerate(s):
+        if start is None:
+            if ch.isspace():
+                continue
+            start = i
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+            if depth == 0:
+                pieces.append(s[start : i + 1])
+                start = None
+            elif depth < 0:
+                return [s]  # unbalanced → don't split
+    # leftover open value, trailing garbage, or unterminated string → bail
+    if start is not None or depth != 0 or in_str:
+        return [s]
+    if len(pieces) <= 1:
+        return [s]  # single value (or none) → original unchanged
+    return pieces
