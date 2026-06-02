@@ -53,9 +53,9 @@ def _state():
 
 @pytest.mark.asyncio
 async def test_explorer_extracts_code_context():
-    # stage ① stub makes NO stream call, so the only scripted round is the
-    # stage ② extraction emit.
+    # ① explore loop ends immediately (no tool calls), then ② extraction emit.
     llm = ScriptedLLM([
+        [TextDelta(text="enough"), FinishedReason(reason="stop")],
         _emit_round({"candidates": [{"file": "src/registry.py", "symbol": "build_provider"}],
                      "confusers": [], "related_tests": [], "search_notes": ""}),
     ])
@@ -70,3 +70,50 @@ async def test_explorer_output_tool_has_search_notes():
     node = ExploringNode(ScriptedLLM([]), project_map=_map(), tools=_tools())
     props = node.output_tool()["function"]["parameters"]["properties"]
     assert {"candidates", "confusers", "related_tests", "search_notes"} <= set(props)
+
+
+def _tool_round(name, args_json):
+    return [
+        ToolCallStarted(call_id="t1", name=name),
+        ToolCallInputDelta(call_id="t1", json_delta=args_json),
+        ToolCallEnded(call_id="t1"),
+        FinishedReason(reason="tool_calls"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_explore_runs_grep_then_extracts(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "registry.py").write_text("def build_provider(name):\n    return 1\n")
+    llm = ScriptedLLM([
+        _tool_round("grep", json.dumps({"pattern": "build_provider"})),  # ① round 1
+        [TextDelta(text="found it"), FinishedReason(reason="stop")],       # ① round 2: stop
+        _emit_round({"candidates": [{"file": "registry.py", "symbol": "build_provider"}],
+                     "confusers": [], "related_tests": [], "search_notes": ""}),  # ②
+    ])
+    node = ExploringNode(llm, project_map=_map(), tools=_tools())
+    res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert res.output.candidates[0].symbol == "build_provider"
+    # stage ② must have seen the grep tool result in its messages
+    extract_msgs = llm.calls[-1]["messages"]
+    assert any("build_provider" in str(m.get("content", "")) and m["role"] == "tool"
+               for m in extract_msgs)
+
+
+@pytest.mark.asyncio
+async def test_explore_injects_repair_hint(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "registry.py").write_text("x = 1\n")
+    llm = ScriptedLLM([
+        [TextDelta(text="ok"), FinishedReason(reason="stop")],   # ① stop immediately
+        _emit_round({"candidates": [], "confusers": [], "related_tests": [],
+                     "search_notes": "still nothing"}),
+    ])
+    state = SessionState(
+        request=Request(raw_text="add provider", kind=RequestKind.ENGINEERING),
+        repair_hint="grep 'provider' was empty; try registry/factory",
+    )
+    node = ExploringNode(llm, project_map=_map(), tools=_tools())
+    await node.run(NodeContext(state=state, cancel=asyncio.Event()))
+    seed_user = llm.calls[0]["messages"][1]["content"]   # stage ① user message
+    assert "grep 'provider' was empty" in seed_user
