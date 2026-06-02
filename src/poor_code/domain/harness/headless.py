@@ -126,13 +126,17 @@ async def main(instruction: str, *, stdout=None, stderr=None) -> int:
         err.write("no credentials: set OLLAMA_API_KEY + POOR_CODE_MODEL "
                   "(or run `poor-code` and /login)\n")
         return 2
-    driver = _build_driver(llm)
-    sink = StderrSink(stream=err)
-    state = SessionState(
-        cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
-        request=Request(raw_text=instruction, kind=RequestKind.ENGINEERING),
-        policy=Policy.FULL_AUTO)
-    final = await run_headless(driver, state, asyncio.Event(), sink=sink)
-    out.write(json.dumps(report_to_dict(final.report), ensure_ascii=False, indent=2) + "\n")
-    out.flush()
-    return 0
+    try:
+        driver = _build_driver(llm)
+        sink = StderrSink(stream=err)
+        state = SessionState(
+            cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
+            request=Request(raw_text=instruction, kind=RequestKind.ENGINEERING),
+            policy=Policy.FULL_AUTO)
+        final = await run_headless(driver, state, asyncio.Event(), sink=sink)
+        out.write(json.dumps(report_to_dict(final.report), ensure_ascii=False, indent=2) + "\n")
+        out.flush()
+        return 0
+    except Exception as exc:  # noqa: BLE001 — top-level headless guard: report cleanly, exit 1
+        err.write(f"error: {type(exc).__name__}: {exc}\n")
+        return 1

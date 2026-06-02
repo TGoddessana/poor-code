@@ -15,6 +15,21 @@ async def test_main_no_creds_returns_2(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_main_returns_1_and_reports_when_run_raises(monkeypatch):
+    monkeypatch.setattr(headless, "resolve_llm", lambda: object())
+    monkeypatch.setattr(headless, "_build_driver", lambda llm: object())
+
+    async def boom(driver, state, cancel, sink=None):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(headless, "run_headless", boom)
+    err = io.StringIO()
+    code = await headless.main("do something", stdout=io.StringIO(), stderr=err)
+    assert code == 1
+    assert "kaboom" in err.getvalue()
+
+
+@pytest.mark.asyncio
 async def test_main_runs_graph_and_prints_report_json(monkeypatch, tmp_path):
     from poor_code.domain.session.models import (
         Report, ReportOutcome, SessionState,
