@@ -243,3 +243,13 @@ def test_build_registry_has_code_nodes():
     for n in ("task_selector", "eng_gate", "validation_runner", "completion_gate"):
         assert reg.get(n) is not None
         assert reg.get(n).name == n
+
+
+@pytest.mark.asyncio
+async def test_run_shell_returns_exit_code_and_output(tmp_path):
+    from poor_code.domain.harness.nodes.execution import run_shell
+    import asyncio as _a
+    code, out = await run_shell("echo hello", tmp_path, _a.Event())
+    assert code == 0 and "hello" in out
+    code, _ = await run_shell("exit 7", tmp_path, _a.Event())
+    assert code == 7

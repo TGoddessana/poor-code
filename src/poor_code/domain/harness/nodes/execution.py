@@ -83,6 +83,40 @@ _OUTPUT_LIMIT = 30_000
 _DEFAULT_TIMEOUT = 120
 
 
+async def run_shell(
+    command: str, cwd: Path, cancel: asyncio.Event, timeout: int = _DEFAULT_TIMEOUT
+) -> tuple[int, str]:
+    """Run a shell command in cwd; return (exit_code, truncated combined output).
+    Honors cancel (kills the process) and a timeout (exit 124)."""
+    if cancel.is_set():
+        raise asyncio.CancelledError
+    proc = await asyncio.create_subprocess_shell(
+        command, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT, cwd=str(cwd))
+
+    async def _cancel_on_event() -> None:
+        await cancel.wait()
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+
+    cancel_task = asyncio.create_task(_cancel_on_event())
+    try:
+        try:
+            out_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return 124, f"[command timed out after {timeout}s]"
+    finally:
+        cancel_task.cancel()
+
+    if cancel.is_set():
+        raise asyncio.CancelledError
+    return proc.returncode, out_bytes.decode("utf-8", errors="replace")[:_OUTPUT_LIMIT]
+
+
 class ValidationRunner:
     """Binding pass/fail ★. Re-runs Task.how_to_validate as code; exit code decides."""
 
@@ -94,46 +128,11 @@ class ValidationRunner:
     async def run(self, ctx: NodeContext) -> NodeResult:
         task, _ = _active(ctx.state)
         command = task.how_to_validate
-        exit_code, output = await self._run_shell(command, ctx.cancel)
+        exit_code, output = await run_shell(command, self._cwd, ctx.cancel)
         passed = exit_code == 0
         result = ValidationResult(
             command=command, exit_code=exit_code, passed=passed, output=output)
         return NodeResult(output=result, branch="pass" if passed else "fail")
-
-    async def _run_shell(self, command: str, cancel: asyncio.Event) -> tuple[int, str]:
-        if cancel.is_set():
-            raise asyncio.CancelledError
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(self._cwd),
-        )
-
-        async def _cancel_on_event() -> None:
-            await cancel.wait()
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-
-        cancel_task = asyncio.create_task(_cancel_on_event())
-        try:
-            try:
-                out_bytes, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=_DEFAULT_TIMEOUT)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return 124, f"[validation timed out after {_DEFAULT_TIMEOUT}s]"
-        finally:
-            cancel_task.cancel()
-
-        if cancel.is_set():
-            raise asyncio.CancelledError
-
-        output = out_bytes.decode("utf-8", errors="replace")[:_OUTPUT_LIMIT]
-        return proc.returncode, output
 
 
 class CompletionGate:
