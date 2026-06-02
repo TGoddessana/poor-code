@@ -35,6 +35,19 @@ class Session:
 
 
 @dataclass(frozen=True, slots=True)
+class FeedbackEntry:
+    failure_type: str
+    symptom: str
+    prevention_hint: str
+    task_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackMemory:
+    entries: tuple[FeedbackEntry, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class SessionState:
     status: SessionStatus = SessionStatus.READY
     active_task_id: str | None = None
@@ -47,6 +60,7 @@ class SessionState:
     pending_query: "Query | None" = None
     interview: "tuple[AnsweredQuery, ...]" = ()
     repair_hint: str | None = None
+    feedback: FeedbackMemory = field(default_factory=FeedbackMemory)
 
     def with_request(self, request: Request) -> "SessionState":
         return replace(self, request=request)
@@ -66,6 +80,86 @@ class SessionState:
     def with_repair_hint(self, hint: str | None) -> "SessionState":
         return replace(self, repair_hint=hint)
 
+    def with_feedback_entry(self, entry: "FeedbackEntry") -> "SessionState":
+        return replace(
+            self,
+            feedback=replace(self.feedback, entries=self.feedback.entries + (entry,)),
+        )
+
+    def _with_task(self, task_id: str, **changes) -> "SessionState":
+        assert self.plan is not None, "no plan to update tasks in"
+        if not any(t.id == task_id for t in self.plan.tasks):
+            raise ValueError(f"task {task_id!r} not found in plan")
+        tasks = tuple(
+            replace(t, **changes) if t.id == task_id else t
+            for t in self.plan.tasks
+        )
+        return replace(self, plan=replace(self.plan, tasks=tasks))
+
+    def with_active_task(self, task_id: str) -> "SessionState":
+        st = self._with_task(task_id, status=TaskStatus.ACTIVE)
+        st = replace(st, active_task_id=task_id)
+        if st.cursor is None:
+            return st
+        return replace(st, cursor=replace(st.cursor, task_id=task_id))
+
+    def with_task_status(self, task_id: str, status: "TaskStatus") -> "SessionState":
+        return self._with_task(task_id, status=status)
+
+    def append_attempt(self, task_id: str, attempt: "Attempt") -> "SessionState":
+        assert self.plan is not None, "no plan to append attempts to"
+        if not any(t.id == task_id for t in self.plan.tasks):
+            raise ValueError(f"task {task_id!r} not found in plan")
+        tasks = tuple(
+            replace(t, attempts=t.attempts + (attempt,)) if t.id == task_id else t
+            for t in self.plan.tasks
+        )
+        st = replace(self, plan=replace(self.plan, tasks=tasks))
+        if st.cursor is None:
+            return st
+        return replace(st, cursor=replace(st.cursor, attempt_id=attempt.id))
+
+    def update_attempt(self, task_id: str, attempt_id: str, **changes) -> "SessionState":
+        assert self.plan is not None, "no plan to update attempts in"
+        task = next((t for t in self.plan.tasks if t.id == task_id), None)
+        if task is None:
+            raise ValueError(f"task {task_id!r} not found in plan")
+        if not any(a.id == attempt_id for a in task.attempts):
+            raise ValueError(f"attempt {attempt_id!r} not found in task {task_id!r}")
+
+        def upd(t):
+            if t.id != task_id:
+                return t
+            atts = tuple(
+                replace(a, **changes) if a.id == attempt_id else a
+                for a in t.attempts
+            )
+            return replace(t, attempts=atts)
+
+        tasks = tuple(upd(t) for t in self.plan.tasks)
+        return replace(self, plan=replace(self.plan, tasks=tasks))
+
+    def with_task_context(self, task_id: str, context: "TaskContext") -> "SessionState":
+        return self._with_task(task_id, context=context)
+
+    def upsert_attempt(self, task_id: str, attempt: "Attempt") -> "SessionState":
+        """Append the attempt, or replace the existing one with the same id
+        (in-place adversarial refinement). Sets cursor.attempt_id either way."""
+        assert self.plan is not None, "no plan to upsert attempts in"
+        task = next((t for t in self.plan.tasks if t.id == task_id), None)
+        if task is None:
+            raise ValueError(f"task {task_id!r} not found in plan")
+        if any(a.id == attempt.id for a in task.attempts):
+            attempts = tuple(attempt if a.id == attempt.id else a for a in task.attempts)
+        else:
+            attempts = task.attempts + (attempt,)
+        tasks = tuple(replace(t, attempts=attempts) if t.id == task_id else t
+                      for t in self.plan.tasks)
+        st = replace(self, plan=replace(self.plan, tasks=tasks))
+        if st.cursor is None:
+            return st
+        return replace(st, cursor=replace(st.cursor, attempt_id=attempt.id))
+
     def with_user_response(self, resp: "UserResponse") -> "SessionState":
         assert self.pending_query is not None, "no pending query to answer"
         if resp.query_id != self.pending_query.id:
@@ -80,9 +174,12 @@ class SessionState:
     ) -> "SessionState":
         prev = self.cursor.current_node if self.cursor else ""
         tr = Transition(from_node=prev, to_node=node, trigger=trigger, reason=reason, ts_iso=ts_iso)
+        cur_task_id = self.cursor.task_id if self.cursor is not None else None
+        cur_attempt_id = self.cursor.attempt_id if self.cursor is not None else None
         return replace(
             self,
-            cursor=Cursor(phase=phase, current_node=node),
+            cursor=Cursor(phase=phase, current_node=node,
+                          task_id=cur_task_id, attempt_id=cur_attempt_id),
             history=self.history + (tr,),
         )
 
@@ -194,11 +291,6 @@ class TaskContext:
 
 
 @dataclass(frozen=True, slots=True)
-class Attempt:
-    status: TaskStatus = TaskStatus.PENDING
-
-
-@dataclass(frozen=True, slots=True)
 class Task:
     id: str
     title: str
@@ -223,12 +315,69 @@ class Plan:
     deps: tuple[Dependency, ...] = ()
 
 
+class AttemptStatus(str, Enum):
+    ACTIVE = "active"
+    DONE = "done"
+    ABANDONED = "abandoned"
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationResult:
+    """run_result — pass/fail 구속 ★. validation_runner(코드)만 생성."""
+    command: str
+    exit_code: int
+    passed: bool
+    output: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeRecord:
+    """직접변경 결과. diff는 git에서 사후추출."""
+    files: tuple[str, ...] = ()
+    diff: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeSet:
+    aggregate_diff: str = ""
+    per_task: tuple[tuple[str, str], ...] = ()   # (task_id, diff)
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedTask:
+    """task_selector → Driver 제어 신호. task_selector가 None을 반환하면 'done' 분기."""
+    # NOTE: no store serializer yet — added in Plan 2 when first persisted.
+    task_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class TaskCompleted:
+    """completion_gate → Driver 제어 신호: 이 Task가 검증 통과로 완료됨.
+    control-only — store에 직렬화하지 않음(상태는 Task.status/Attempt.status로 영속)."""
+    task_id: str
+    attempt_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class Attempt:
+    """한 번의 구현-검증 시도. 실행층의 안쪽 사이클 단위."""
+    id: str
+    patch: ChangeRecord | None = None             # ~생성~
+    assumptions: tuple[str, ...] = ()
+    validator_verdict: Verdict | None = None      # ~생성~ 자문(권한X)
+    run_result: ValidationResult | None = None    # 구속 ★ runner만
+    gate_verdict: Verdict | None = None
+    adversarial_rounds: int = 0                   # 적대적 캡 카운터
+    status: AttemptStatus = AttemptStatus.ACTIVE
+
+
 class Phase(str, Enum):
     ROUTING = "routing"
     LOCATING = "locating"
     INTERVIEWING = "interviewing"
     PLANNING = "planning"
-    # S7~ 가 IMPLEMENTING/… 추가
+    IMPLEMENTING = "implementing"
+    FINALIZING = "finalizing"
 
 
 class TriggerKind(str, Enum):

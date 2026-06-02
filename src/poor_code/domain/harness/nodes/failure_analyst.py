@@ -1,0 +1,62 @@
+"""failure_analyst [A] — runs after a binding runner failure. Distills the
+failure into a FeedbackEntry that the implementer reads on later attempts. It
+holds no authority; it only writes to FeedbackMemory (Driver._apply handles it)."""
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel
+
+from poor_code.domain.harness.node import AgentNode
+from poor_code.domain.session.models import FeedbackEntry, SessionState
+
+_TOOL_NAME = "emit_feedback"
+
+_SYSTEM = (
+    "You are the Failure Analyst. A validation command just failed. From the patch "
+    "and the failure output, distill ONE concise, reusable lesson: the failure_type, "
+    "the symptom, and a prevention_hint the implementer can apply next time. "
+    "Call emit_feedback once."
+)
+
+
+class _FeedbackOut(BaseModel):
+    failure_type: str = ""
+    symptom: str = ""
+    prevention_hint: str = ""
+
+
+class FailureAnalyst(AgentNode):
+    name = "failure_analyst"
+
+    def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
+        task = next((t for t in (state.plan.tasks if state.plan else ())
+                     if t.id == state.cursor.task_id), None)
+        attempt = task.attempts[-1] if (task and task.attempts) else None
+        rr = attempt.run_result if attempt else None
+        diff = attempt.patch.diff if (attempt and attempt.patch) else ""
+        out = "" if rr is None else rr.output
+        return [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": (
+                f"TASK: {task.title if task else '?'}\n\nPATCH:\n{diff or '(empty)'}\n\n"
+                f"FAILURE OUTPUT:\n{out[:2000] or '(none)'}")},
+        ]
+
+    def output_tool(self) -> dict[str, Any]:
+        return {"type": "function",
+                "function": {"name": _TOOL_NAME,
+                             "description": "Emit one reusable failure lesson.",
+                             "parameters": _FeedbackOut.model_json_schema()}}
+
+    def parse(self, args_json: str) -> FeedbackEntry:
+        out = _FeedbackOut.model_validate_json(args_json)
+        return FeedbackEntry(failure_type=out.failure_type, symptom=out.symptom,
+                             prevention_hint=out.prevention_hint, task_ref=self._task_ref)
+
+    # the active task id is stamped onto the entry; set by run() override below
+    _task_ref: str | None = None
+
+    async def run(self, ctx):
+        self._task_ref = ctx.state.cursor.task_id if ctx.state.cursor else None
+        return await super().run(ctx)

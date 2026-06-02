@@ -137,12 +137,12 @@ def test_session_state_with_plan_is_immutable():
 
 
 def test_task_context_and_attempt_stubs_exist():
-    from poor_code.domain.session.models import Attempt, TaskContext, TaskStatus
+    from poor_code.domain.session.models import Attempt, AttemptStatus, TaskContext
 
     ctx = TaskContext()
-    attempt = Attempt()
+    attempt = Attempt(id="a0")
     assert ctx.refs == ()
-    assert attempt.status is TaskStatus.PENDING
+    assert attempt.status is AttemptStatus.ACTIVE
 
 
 def test_phase_has_planning():

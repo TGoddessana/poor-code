@@ -10,10 +10,19 @@ from typing import Any
 from poor_code.domain.session import paths
 from poor_code.domain.session.models import (
     AnsweredQuery,
+    ChangeSet,
     CodeContext,
     CodeRef,
     Cursor,
     Attempt,
+    AttemptStatus,
+    ChangeRecord,
+    ValidationResult,
+    Verdict,
+    VerdictKind,
+    Layer,
+    FeedbackEntry,
+    FeedbackMemory,
     Dependency,
     EditScope,
     Phase,
@@ -149,12 +158,84 @@ def _dict_to_task_context(d: dict[str, Any]) -> TaskContext:
     )
 
 
+def _feedback_entry_to_dict(e: FeedbackEntry) -> dict[str, Any]:
+    return {"failure_type": e.failure_type, "symptom": e.symptom,
+            "prevention_hint": e.prevention_hint, "task_ref": e.task_ref}
+
+
+def _dict_to_feedback_entry(d: dict[str, Any]) -> FeedbackEntry:
+    return FeedbackEntry(failure_type=d["failure_type"], symptom=d["symptom"],
+                         prevention_hint=d["prevention_hint"], task_ref=d.get("task_ref"))
+
+
+def _verdict_to_dict(v: Verdict) -> dict[str, Any]:
+    return {"kind": v.kind.value,
+            "layer": None if v.layer is None else v.layer.value,
+            "hint": v.hint,
+            "query": v.query}
+
+
+def _dict_to_verdict(d: dict[str, Any]) -> Verdict:
+    return Verdict(kind=VerdictKind(d["kind"]),
+                   layer=None if d.get("layer") is None else Layer(d["layer"]),
+                   hint=d.get("hint"),
+                   query=d.get("query"))
+
+
+def _change_record_to_dict(c: ChangeRecord) -> dict[str, Any]:
+    return {"files": list(c.files), "diff": c.diff}
+
+
+def _dict_to_change_record(d: dict[str, Any]) -> ChangeRecord:
+    return ChangeRecord(files=tuple(d.get("files", ())), diff=d.get("diff", ""))
+
+
+def _changeset_to_dict(c: ChangeSet) -> dict[str, Any]:
+    return {"aggregate_diff": c.aggregate_diff,
+            "per_task": [[tid, diff] for (tid, diff) in c.per_task]}
+
+
+def _dict_to_changeset(d: dict[str, Any]) -> ChangeSet:
+    return ChangeSet(
+        aggregate_diff=d.get("aggregate_diff", ""),
+        per_task=tuple((row[0], row[1]) for row in d.get("per_task", ())),
+    )
+
+
+def _validation_result_to_dict(r: ValidationResult) -> dict[str, Any]:
+    return {"command": r.command, "exit_code": r.exit_code,
+            "passed": r.passed, "output": r.output}
+
+
+def _dict_to_validation_result(d: dict[str, Any]) -> ValidationResult:
+    return ValidationResult(command=d["command"], exit_code=d["exit_code"],
+                            passed=d["passed"], output=d.get("output", ""))
+
+
 def _attempt_to_dict(a: Attempt) -> dict[str, Any]:
-    return {"status": a.status.value}
+    return {
+        "id": a.id,
+        "patch": None if a.patch is None else _change_record_to_dict(a.patch),
+        "assumptions": list(a.assumptions),
+        "validator_verdict": None if a.validator_verdict is None else _verdict_to_dict(a.validator_verdict),
+        "run_result": None if a.run_result is None else _validation_result_to_dict(a.run_result),
+        "gate_verdict": None if a.gate_verdict is None else _verdict_to_dict(a.gate_verdict),
+        "adversarial_rounds": a.adversarial_rounds,
+        "status": a.status.value,
+    }
 
 
 def _dict_to_attempt(d: dict[str, Any]) -> Attempt:
-    return Attempt(status=TaskStatus(d["status"]))
+    return Attempt(
+        id=d["id"],
+        patch=None if d.get("patch") is None else _dict_to_change_record(d["patch"]),
+        assumptions=tuple(d.get("assumptions", ())),
+        validator_verdict=None if d.get("validator_verdict") is None else _dict_to_verdict(d["validator_verdict"]),
+        run_result=None if d.get("run_result") is None else _dict_to_validation_result(d["run_result"]),
+        gate_verdict=None if d.get("gate_verdict") is None else _dict_to_verdict(d["gate_verdict"]),
+        adversarial_rounds=d.get("adversarial_rounds", 0),
+        status=AttemptStatus(d.get("status", AttemptStatus.ACTIVE.value)),
+    )
 
 
 def _plan_task_to_dict(t: Task) -> dict[str, Any]:
@@ -256,6 +337,7 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
                           else _query_to_dict(st.pending_query)),
         "interview": [_answered_to_dict(a) for a in st.interview],
         "repair_hint": st.repair_hint,
+        "feedback": [_feedback_entry_to_dict(e) for e in st.feedback.entries],
     }
 
 
@@ -290,6 +372,9 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
                            else _dict_to_query(d["pending_query"])),
             interview=tuple(_dict_to_answered(a) for a in d.get("interview", [])),
             repair_hint=d.get("repair_hint"),
+            feedback=FeedbackMemory(
+                entries=tuple(_dict_to_feedback_entry(e) for e in d.get("feedback", []))
+            ),
         )
     except (KeyError, ValueError) as e:
         raise ValueError(f"corrupt session file at {src}: {e}") from e
@@ -382,3 +467,27 @@ class SessionStore:
 
     def work_item_dir(self, session_id: str, task_id: str) -> Path:
         return paths.work_item_dir(self._root, session_id, task_id)
+
+    def write_changeset(self, session_id: str, changeset: ChangeSet) -> None:
+        _atomic_write_json(
+            paths.changeset_json(self._root, session_id),
+            _changeset_to_dict(changeset),
+        )
+
+    def write_attempt_artifacts(self, session_id: str, state: SessionState) -> None:
+        """Dump per-attempt human-inspection artifacts (diff.patch, run_result.json).
+        Restore authority remains state.json/plan.json; these are read-only mirrors."""
+        if state.plan is None:
+            return
+        for task in state.plan.tasks:
+            for attempt in task.attempts:
+                if attempt.patch is None and attempt.run_result is None:
+                    continue
+                d = paths.attempt_dir(self._root, session_id, task.id, attempt.id)
+                d.mkdir(parents=True, exist_ok=True)
+                if attempt.patch is not None:
+                    (d / "diff.patch").write_text(attempt.patch.diff, encoding="utf-8")
+                if attempt.run_result is not None:
+                    _atomic_write_json(
+                        d / "run_result.json",
+                        _validation_result_to_dict(attempt.run_result))
