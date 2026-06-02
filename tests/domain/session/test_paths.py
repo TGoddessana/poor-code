@@ -16,15 +16,15 @@ def test_session_state_json(tmp_path: Path):
 
 
 def test_task_dir(tmp_path: Path):
-    assert paths.task_dir(tmp_path, "sid1", "tid1") == tmp_path / "sessions" / "sid1" / "tasks" / "tid1"
+    assert paths.work_item_dir(tmp_path, "sid1", "tid1") == tmp_path / "sessions" / "sid1" / "tasks" / "tid1"
 
 
-def test_task_request_json(tmp_path: Path):
-    assert paths.task_request_json(tmp_path, "sid1", "tid1") == tmp_path / "sessions" / "sid1" / "tasks" / "tid1" / "request.json"
+def test_work_item_request_json(tmp_path: Path):
+    assert paths.work_item_request_json(tmp_path, "sid1", "tid1") == tmp_path / "sessions" / "sid1" / "tasks" / "tid1" / "request.json"
 
 
-def test_task_state_json(tmp_path: Path):
-    assert paths.task_state_json(tmp_path, "sid1", "tid1") == tmp_path / "sessions" / "sid1" / "tasks" / "tid1" / "state.json"
+def test_work_item_state_json(tmp_path: Path):
+    assert paths.work_item_state_json(tmp_path, "sid1", "tid1") == tmp_path / "sessions" / "sid1" / "tasks" / "tid1" / "state.json"
 
 
 def test_project_map_json(tmp_path: Path):

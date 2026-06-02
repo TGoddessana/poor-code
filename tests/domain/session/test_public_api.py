@@ -3,25 +3,25 @@
 
 def test_public_imports():
     from poor_code.domain.session import (
-        Policies,
+        WorkItemPolicies,
         Session,
         SessionService,
         SessionState,
         SessionStatus,
-        Task,
-        TaskState,
-        TaskStatus,
+        WorkItem,
+        WorkItemState,
+        WorkItemStatus,
     )
 
     # Touch each to keep linters honest.
     assert SessionService is not None
     assert SessionStatus.READY.value == "ready"
-    assert TaskStatus.PENDING.value == "pending"
-    assert Policies().implementation_locked is True
+    assert WorkItemStatus.PENDING.value == "pending"
+    assert WorkItemPolicies().implementation_locked is True
     assert Session is not None
     assert SessionState is not None
-    assert Task is not None
-    assert TaskState is not None
+    assert WorkItem is not None
+    assert WorkItemState is not None
 
 
 def test_public_surface_locked_to_all():
@@ -29,14 +29,14 @@ def test_public_surface_locked_to_all():
     import poor_code.domain.session as session_pkg
 
     expected = {
-        "Policies",
+        "WorkItemPolicies",
         "Session",
         "SessionService",
         "SessionState",
         "SessionStatus",
-        "Task",
-        "TaskState",
-        "TaskStatus",
+        "WorkItem",
+        "WorkItemState",
+        "WorkItemStatus",
     }
     assert set(session_pkg.__all__) == expected
 

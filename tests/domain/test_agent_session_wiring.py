@@ -2,8 +2,8 @@
 
 Per S1 wiring decision:
 - session=None must remain valid (test-friendly; existing 348 tests unchanged)
-- First user message in a session opens a Task
-- Subsequent messages in the same Agent instance are folded into that Task
+- First user message in a session opens a WorkItem
+- Subsequent messages in the same Agent instance are folded into that WorkItem
 - Agent does NOT end_task on TurnEnded — task ends only via future S9 signals
 """
 from __future__ import annotations

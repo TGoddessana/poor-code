@@ -13,7 +13,7 @@ class SessionStatus(str, Enum):
     CLOSED = "closed"
 
 
-class TaskStatus(str, Enum):
+class WorkItemStatus(str, Enum):
     PENDING = "pending"
     DONE = "done"
     ABORTED = "aborted"
@@ -21,7 +21,7 @@ class TaskStatus(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class Policies:
+class WorkItemPolicies:
     implementation_locked: bool = True
 
 
@@ -80,7 +80,7 @@ class SessionState:
 
 
 @dataclass(frozen=True, slots=True)
-class Task:
+class WorkItem:
     task_id: str
     session_id: str
     raw_request: str
@@ -88,9 +88,9 @@ class Task:
 
 
 @dataclass(frozen=True, slots=True)
-class TaskState:
-    status: TaskStatus = TaskStatus.PENDING
-    policies: Policies = field(default_factory=Policies)
+class WorkItemState:
+    status: WorkItemStatus = WorkItemStatus.PENDING
+    policies: WorkItemPolicies = field(default_factory=WorkItemPolicies)
 
 
 # ----- harness value objects (graph cycle) -----

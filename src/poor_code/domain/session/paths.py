@@ -16,16 +16,16 @@ def session_state_json(root: Path, session_id: str) -> Path:
     return session_dir(root, session_id) / "state.json"
 
 
-def task_dir(root: Path, session_id: str, task_id: str) -> Path:
+def work_item_dir(root: Path, session_id: str, task_id: str) -> Path:
     return session_dir(root, session_id) / "tasks" / task_id
 
 
-def task_request_json(root: Path, session_id: str, task_id: str) -> Path:
-    return task_dir(root, session_id, task_id) / "request.json"
+def work_item_request_json(root: Path, session_id: str, task_id: str) -> Path:
+    return work_item_dir(root, session_id, task_id) / "request.json"
 
 
-def task_state_json(root: Path, session_id: str, task_id: str) -> Path:
-    return task_dir(root, session_id, task_id) / "state.json"
+def work_item_state_json(root: Path, session_id: str, task_id: str) -> Path:
+    return work_item_dir(root, session_id, task_id) / "state.json"
 
 
 def project_map_json(root: Path) -> Path:

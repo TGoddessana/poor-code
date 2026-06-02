@@ -112,41 +112,41 @@ def test_read_session_malformed_raises_value_error_with_path(tmp_path: Path):
 
 
 from poor_code.domain.session.models import (
-    Policies,
-    Task,
-    TaskState,
-    TaskStatus,
+    WorkItemPolicies,
+    WorkItem,
+    WorkItemState,
+    WorkItemStatus,
 )
 
 
 def test_task_round_trip(tmp_path: Path):
     store = SessionStore(tmp_path)
-    t = Task(
+    t = WorkItem(
         task_id="tid1",
         session_id="sid1",
         raw_request="refactor auth",
         created_at=datetime(2026, 5, 26, 12, 0, tzinfo=UTC),
     )
-    store.write_task(t)
-    loaded = store.read_task("sid1", "tid1")
+    store.write_work_item(t)
+    loaded = store.read_work_item("sid1", "tid1")
     assert loaded == t
 
 
 def test_task_state_round_trip_with_defaults(tmp_path: Path):
     store = SessionStore(tmp_path)
-    ts = TaskState()
-    store.write_task_state("sid1", "tid1", ts)
-    loaded = store.read_task_state("sid1", "tid1")
+    ts = WorkItemState()
+    store.write_work_item_state("sid1", "tid1", ts)
+    loaded = store.read_work_item_state("sid1", "tid1")
     assert loaded == ts
     assert loaded.policies.implementation_locked is True
-    assert loaded.status is TaskStatus.PENDING
+    assert loaded.status is WorkItemStatus.PENDING
 
 
 def test_task_state_with_done_status_round_trip(tmp_path: Path):
     store = SessionStore(tmp_path)
-    ts = TaskState(status=TaskStatus.DONE, policies=Policies(implementation_locked=False))
-    store.write_task_state("sid1", "tid1", ts)
-    loaded = store.read_task_state("sid1", "tid1")
+    ts = WorkItemState(status=WorkItemStatus.DONE, policies=WorkItemPolicies(implementation_locked=False))
+    store.write_work_item_state("sid1", "tid1", ts)
+    loaded = store.read_work_item_state("sid1", "tid1")
     assert loaded == ts
 
 
@@ -176,4 +176,4 @@ def test_ensure_project_map_does_not_overwrite_existing(tmp_path: Path):
 
 def test_store_task_dir_returns_expected_path(tmp_path: Path):
     store = SessionStore(tmp_path)
-    assert store.task_dir("sid1", "tid1") == tmp_path / "sessions" / "sid1" / "tasks" / "tid1"
+    assert store.work_item_dir("sid1", "tid1") == tmp_path / "sessions" / "sid1" / "tasks" / "tid1"

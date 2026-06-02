@@ -3,13 +3,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from poor_code.domain.session.models import (
-    Policies,
+    WorkItemPolicies,
     Session,
     SessionState,
     SessionStatus,
-    Task,
-    TaskState,
-    TaskStatus,
+    WorkItem,
+    WorkItemState,
+    WorkItemStatus,
 )
 
 
@@ -32,18 +32,18 @@ def test_session_state_defaults_to_ready_no_task():
 
 
 def test_task_state_defaults_to_pending_with_locked_policies():
-    ts = TaskState()
-    assert ts.status is TaskStatus.PENDING
+    ts = WorkItemState()
+    assert ts.status is WorkItemStatus.PENDING
     assert ts.policies.implementation_locked is True
 
 
 def test_task_status_terminal_values_exist():
-    assert TaskStatus.DONE.value == "done"
-    assert TaskStatus.ABORTED.value == "aborted"
+    assert WorkItemStatus.DONE.value == "done"
+    assert WorkItemStatus.ABORTED.value == "aborted"
 
 
 def test_policies_is_value_object():
-    p1 = Policies()
-    p2 = Policies()
+    p1 = WorkItemPolicies()
+    p2 = WorkItemPolicies()
     assert p1 == p2
     assert p1 is not p2

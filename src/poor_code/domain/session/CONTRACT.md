@@ -10,8 +10,8 @@ The dataclass body in `models.py` is the schema. Disk JSON is its serialization.
 | `project_map.json` | (not a session dataclass — see S2) | yes | `SessionService.start_session` writes placeholder if missing |
 | `sessions/<sid>/session.json` | `Session` | no | `SessionService.start_session` |
 | `sessions/<sid>/state.json` | `SessionState` | yes | `SessionService.start_session`, updated by `begin_task` / `end_task` |
-| `sessions/<sid>/tasks/<tid>/request.json` | `Task` | no | `SessionService.begin_task` |
-| `sessions/<sid>/tasks/<tid>/state.json` | `TaskState` | yes | `SessionService.begin_task`, updated by `end_task` |
+| `sessions/<sid>/tasks/<tid>/request.json` | `WorkItem` | no | `SessionService.begin_task` |
+| `sessions/<sid>/tasks/<tid>/state.json` | `WorkItemState` | yes | `SessionService.begin_task`, updated by `end_task` |
 
 ## Serialization conventions
 
@@ -25,7 +25,7 @@ The dataclass body in `models.py` is the schema. Disk JSON is its serialization.
 Downstream code (S2~S9) imports only from `poor_code.domain.session`:
 
 ```python
-from poor_code.domain.session import SessionService, Task, TaskStatus  # etc.
+from poor_code.domain.session import SessionService, WorkItem, WorkItemStatus  # etc.
 ```
 
 `store`, `paths` are package-internal. Path resolution outside the package goes through

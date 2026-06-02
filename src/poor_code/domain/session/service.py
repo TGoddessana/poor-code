@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Literal
 
 from poor_code.domain.session.models import (
-    Policies,
+    WorkItemPolicies,
     Session,
     SessionState,
     SessionStatus,
-    Task,
-    TaskState,
-    TaskStatus,
+    WorkItem,
+    WorkItemState,
+    WorkItemStatus,
 )
 from poor_code.domain.session.store import SessionStore
 
@@ -23,8 +23,8 @@ class SessionService:
         self._store = store
         self._session: Session | None = None
         self._session_state: SessionState | None = None
-        self._active_task: Task | None = None
-        self._active_task_state: TaskState | None = None
+        self._active_task: WorkItem | None = None
+        self._active_task_state: WorkItemState | None = None
 
     # ----- bootstrap -----
 
@@ -53,28 +53,28 @@ class SessionService:
         if self._session_state.active_task_id is None:
             return "new"
         assert self._active_task_state is not None
-        if self._active_task_state.status in {TaskStatus.DONE, TaskStatus.ABORTED}:
+        if self._active_task_state.status in {WorkItemStatus.DONE, WorkItemStatus.ABORTED}:
             return "new"
         return "continuation"
 
-    def begin_task(self, raw_request: str) -> Task:
+    def begin_task(self, raw_request: str) -> WorkItem:
         if self._session is None or self._session_state is None:
             raise RuntimeError("session not started")
         if self._session_state.active_task_id is not None:
             assert self._active_task_state is not None
-            if self._active_task_state.status not in {TaskStatus.DONE, TaskStatus.ABORTED}:
+            if self._active_task_state.status not in {WorkItemStatus.DONE, WorkItemStatus.ABORTED}:
                 raise RuntimeError("active task already in progress")
 
-        t = Task(
+        t = WorkItem(
             task_id=str(uuid.uuid4()),
             session_id=self._session.session_id,
             raw_request=raw_request,
             created_at=datetime.now(UTC),
         )
-        ts = TaskState()  # PENDING + locked policies
+        ts = WorkItemState()  # PENDING + locked policies
 
-        self._store.write_task(t)
-        self._store.write_task_state(self._session.session_id, t.task_id, ts)
+        self._store.write_work_item(t)
+        self._store.write_work_item_state(self._session.session_id, t.task_id, ts)
 
         new_session_state = SessionState(status=SessionStatus.BUSY, active_task_id=t.task_id)
         self._store.write_session_state(self._session.session_id, new_session_state)
@@ -84,8 +84,8 @@ class SessionService:
         self._session_state = new_session_state
         return t
 
-    def end_task(self, task_id: str, status: TaskStatus) -> None:
-        if status not in {TaskStatus.DONE, TaskStatus.ABORTED}:
+    def end_task(self, task_id: str, status: WorkItemStatus) -> None:
+        if status not in {WorkItemStatus.DONE, WorkItemStatus.ABORTED}:
             raise ValueError("end_task requires terminal status (DONE or ABORTED)")
         if (
             self._session is None
@@ -95,11 +95,11 @@ class SessionService:
         ):
             raise ValueError("task is not active")
 
-        new_task_state = TaskState(
+        new_task_state = WorkItemState(
             status=status,
             policies=self._active_task_state.policies,
         )
-        self._store.write_task_state(self._session.session_id, task_id, new_task_state)
+        self._store.write_work_item_state(self._session.session_id, task_id, new_task_state)
 
         new_session_state = SessionState(status=SessionStatus.READY, active_task_id=None)
         self._store.write_session_state(self._session.session_id, new_session_state)
@@ -115,10 +115,10 @@ class SessionService:
             raise RuntimeError("session not started")
         return self._session
 
-    def active_task(self) -> Task | None:
+    def active_task(self) -> WorkItem | None:
         return self._active_task
 
-    def policies(self) -> Policies | None:
+    def policies(self) -> WorkItemPolicies | None:
         if self._active_task_state is None:
             return None
         return self._active_task_state.policies
@@ -126,4 +126,4 @@ class SessionService:
     def task_dir(self, task_id: str) -> Path:
         if self._session is None:
             raise RuntimeError("session not started")
-        return self._store.task_dir(self._session.session_id, task_id)
+        return self._store.work_item_dir(self._session.session_id, task_id)

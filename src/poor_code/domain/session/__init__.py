@@ -3,23 +3,23 @@
 Downstream code must import from this module only. `store`, `paths` are internal.
 """
 from poor_code.domain.session.models import (
-    Policies,
+    WorkItemPolicies,
     Session,
     SessionState,
     SessionStatus,
-    Task,
-    TaskState,
-    TaskStatus,
+    WorkItem,
+    WorkItemState,
+    WorkItemStatus,
 )
 from poor_code.domain.session.service import SessionService
 
 __all__ = [
-    "Policies",
+    "WorkItemPolicies",
     "Session",
     "SessionService",
     "SessionState",
     "SessionStatus",
-    "Task",
-    "TaskState",
-    "TaskStatus",
+    "WorkItem",
+    "WorkItemState",
+    "WorkItemStatus",
 ]
