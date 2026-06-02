@@ -12,8 +12,8 @@ from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
     AttemptStatus, Attempt, CodeContext, FeedbackEntry, Phase, Plan, Request, Requirement,
-    SelectedTask, SessionState, TaskCompleted, TaskStatus, TriggerKind, ValidationResult,
-    Verdict, VerdictKind,
+    SelectedTask, SessionState, TaskCompleted, TaskContext, TaskStatus, TriggerKind,
+    ValidationResult, Verdict, VerdictKind,
 )
 
 RouteFn = Callable[[str, NodeResult, SessionState], "str | None"]
@@ -78,9 +78,12 @@ class Driver:
             return state.with_plan(out)
         if isinstance(out, SelectedTask):
             return state.with_active_task(out.task_id)
+        if isinstance(out, TaskContext):
+            assert state.cursor is not None and state.cursor.task_id is not None
+            return state.with_task_context(state.cursor.task_id, out)
         if isinstance(out, Attempt):
             assert state.cursor is not None and state.cursor.task_id is not None
-            return state.append_attempt(state.cursor.task_id, out)
+            return state.upsert_attempt(state.cursor.task_id, out).with_repair_hint(None)
         if isinstance(out, ValidationResult):
             cur = state.cursor
             assert cur is not None and cur.task_id and cur.attempt_id

@@ -199,3 +199,29 @@ async def test_driver_sets_repair_hint_on_repair_then_clears_on_codecontext():
     final = await Driver(reg, _fake_route).run(state, asyncio.Event())
     assert explorer.seen_hint == "widen X"               # hint carried to explorer
     assert final.repair_hint is None                     # cleared on CodeContext apply
+
+
+@pytest.mark.asyncio
+async def test_apply_task_context_and_upsert_attempt_and_clears_hint():
+    from poor_code.domain.harness.driver import Driver
+    from poor_code.domain.harness.node import NodeResult
+    from poor_code.domain.session.models import (
+        SessionState, Plan, Task, EditScope, Cursor, Phase, TaskStatus,
+        TaskContext, CodeRef, Attempt, ChangeRecord)
+    st = SessionState(
+        plan=Plan(tasks=(Task(id="t1", title="x", purpose="p",
+                              edit_scope=EditScope(editable=("a.txt",)),
+                              how_to_validate="test -f a.txt", status=TaskStatus.ACTIVE),)),
+        cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="composer", task_id="t1"),
+        repair_hint="old hint")
+    # TaskContext applied
+    st = Driver._apply(st, NodeResult(output=TaskContext(refs=(CodeRef(file="a.txt"),))))
+    assert st.plan.tasks[0].context.refs[0].file == "a.txt"
+    # Attempt upserted AND repair_hint cleared
+    st = Driver._apply(st, NodeResult(output=Attempt(id="t1-a1", patch=ChangeRecord(files=("a.txt",)))))
+    assert len(st.plan.tasks[0].attempts) == 1
+    assert st.repair_hint is None
+    # same-id Attempt replaces in place
+    st = Driver._apply(st, NodeResult(output=Attempt(id="t1-a1", adversarial_rounds=1)))
+    assert len(st.plan.tasks[0].attempts) == 1
+    assert st.plan.tasks[0].attempts[0].adversarial_rounds == 1
