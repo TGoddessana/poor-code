@@ -7,7 +7,7 @@ from textual.widget import Widget
 from textual.widgets import Markdown, Static
 
 from poor_code.ui.store import (
-    AppState, NodeLabelSegment, TextSegment, ToolCallView,
+    AppState, NodeLabelSegment, QuerySegment, TextSegment, ToolCallView,
 )
 from poor_code.ui.widgets.banner import Banner
 from poor_code.ui.widgets.streaming_markdown import StreamingMarkdown
@@ -18,6 +18,11 @@ __all__ = ["ChatLog", "TurnBlock", "ToolCallEntry", "StaticSegment", "SPINNER_FR
 def _render_segment(seg) -> str:
     if isinstance(seg, NodeLabelSegment):
         return f"▸ {seg.node}"
+    if isinstance(seg, QuerySegment):
+        lines = [f"❓ {seg.prompt}"]
+        for i, opt in enumerate(seg.options, start=1):
+            lines.append(f"   [{i}] {opt}")
+        return "\n".join(lines)
     return str(seg)
 
 
@@ -273,7 +278,7 @@ class TurnBlock(Widget):
                     self.app.call_later(w.write_delta, seg.text)
                 elif isinstance(seg, ToolCallView) and isinstance(w, ToolCallEntry):
                     w.refresh_from(seg)
-                elif isinstance(seg, NodeLabelSegment) and isinstance(w, StaticSegment):
+                elif isinstance(seg, (NodeLabelSegment, QuerySegment)) and isinstance(w, StaticSegment):
                     w.refresh_from(seg)
                 else:
                     # Kind mismatch — replace.
