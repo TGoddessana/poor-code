@@ -46,6 +46,7 @@ class SessionState:
     plan: "Plan | None" = None
     pending_query: "Query | None" = None
     interview: "tuple[AnsweredQuery, ...]" = ()
+    repair_hint: str | None = None
 
     def with_request(self, request: Request) -> "SessionState":
         return replace(self, request=request)
@@ -61,6 +62,9 @@ class SessionState:
 
     def with_pending_query(self, q: "Query") -> "SessionState":
         return replace(self, pending_query=q)
+
+    def with_repair_hint(self, hint: str | None) -> "SessionState":
+        return replace(self, repair_hint=hint)
 
     def with_user_response(self, resp: "UserResponse") -> "SessionState":
         assert self.pending_query is not None, "no pending query to answer"
@@ -123,6 +127,7 @@ class CodeContext:
     candidates: tuple[CodeRef, ...] = ()
     confusers: tuple[CodeRef, ...] = ()
     related_tests: tuple[CodeRef, ...] = ()
+    search_notes: str = ""        # explorer 자기진단(빈손일 때 채움)
 
 
 class QueryKind(str, Enum):
