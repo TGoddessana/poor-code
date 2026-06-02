@@ -473,3 +473,21 @@ class SessionStore:
             paths.changeset_json(self._root, session_id),
             _changeset_to_dict(changeset),
         )
+
+    def write_attempt_artifacts(self, session_id: str, state: SessionState) -> None:
+        """Dump per-attempt human-inspection artifacts (diff.patch, run_result.json).
+        Restore authority remains state.json/plan.json; these are read-only mirrors."""
+        if state.plan is None:
+            return
+        for task in state.plan.tasks:
+            for attempt in task.attempts:
+                if attempt.patch is None and attempt.run_result is None:
+                    continue
+                d = paths.attempt_dir(self._root, session_id, task.id, attempt.id)
+                d.mkdir(parents=True, exist_ok=True)
+                if attempt.patch is not None:
+                    (d / "diff.patch").write_text(attempt.patch.diff, encoding="utf-8")
+                if attempt.run_result is not None:
+                    _atomic_write_json(
+                        d / "run_result.json",
+                        _validation_result_to_dict(attempt.run_result))

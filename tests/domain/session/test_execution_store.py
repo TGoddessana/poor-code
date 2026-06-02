@@ -87,3 +87,36 @@ def test_write_changeset_writes_file(tmp_path):
     data = json.loads(p.read_text())
     assert data["aggregate_diff"] == "D"
     assert data["per_task"] == [["t1", "d1"]]
+
+
+def test_write_attempt_artifacts(tmp_path):
+    from poor_code.domain.session.store import SessionStore
+    from poor_code.domain.session import paths
+    from poor_code.domain.session.models import (
+        SessionState, Plan, Task, EditScope, Attempt, ChangeRecord, ValidationResult)
+    state = SessionState(plan=Plan(tasks=(
+        Task(id="t1", title="x", purpose="p", edit_scope=EditScope(editable=("a.txt",)),
+             attempts=(Attempt(
+                 id="t1-a1",
+                 patch=ChangeRecord(files=("a.txt",), diff="--- diff text ---"),
+                 run_result=ValidationResult(command="test -f a.txt", exit_code=0,
+                                             passed=True, output="ok")),)),)))
+    store = SessionStore(tmp_path)
+    store.write_attempt_artifacts("sid1", state)
+    d = paths.attempt_dir(tmp_path, "sid1", "t1", "t1-a1")
+    assert (d / "diff.patch").read_text() == "--- diff text ---"
+    import json
+    rr = json.loads((d / "run_result.json").read_text())
+    assert rr["passed"] is True and rr["exit_code"] == 0
+
+
+def test_write_attempt_artifacts_skips_empty(tmp_path):
+    from poor_code.domain.session.store import SessionStore
+    from poor_code.domain.session import paths
+    from poor_code.domain.session.models import (
+        SessionState, Plan, Task, EditScope, Attempt)
+    state = SessionState(plan=Plan(tasks=(
+        Task(id="t1", title="x", purpose="p", edit_scope=EditScope(editable=("a.txt",)),
+             attempts=(Attempt(id="t1-a1"),)),)))  # no patch, no run_result
+    SessionStore(tmp_path).write_attempt_artifacts("sid1", state)
+    assert not paths.attempt_dir(tmp_path, "sid1", "t1", "t1-a1").exists()
