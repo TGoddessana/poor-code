@@ -223,6 +223,53 @@ class Plan:
     deps: tuple[Dependency, ...] = ()
 
 
+class AttemptStatus(str, Enum):
+    ACTIVE = "active"
+    DONE = "done"
+    ABANDONED = "abandoned"
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationResult:
+    """run_result — pass/fail 구속 ★. validation_runner(코드)만 생성."""
+    command: str
+    exit_code: int
+    passed: bool
+    output: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeRecord:
+    """직접변경 결과. diff는 git에서 사후추출."""
+    files: tuple[str, ...] = ()
+    diff: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackEntry:
+    failure_type: str
+    symptom: str
+    prevention_hint: str
+    task_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackMemory:
+    entries: tuple[FeedbackEntry, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ChangeSet:
+    aggregate_diff: str = ""
+    per_task: tuple[tuple[str, str], ...] = ()   # (task_id, diff)
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedTask:
+    """task_selector → Driver 제어 신호. task_selector가 None을 반환하면 'done' 분기."""
+    task_id: str
+
+
 class Phase(str, Enum):
     ROUTING = "routing"
     LOCATING = "locating"
