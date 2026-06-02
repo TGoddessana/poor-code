@@ -22,6 +22,7 @@ class NodeResult:
     output: object | None = None
     verdict: Verdict | None = None
     query: Query | None = None
+    branch: str | None = None
 
 
 @dataclass

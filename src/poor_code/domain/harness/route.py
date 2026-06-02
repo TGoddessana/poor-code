@@ -42,4 +42,5 @@ def route(node: str, result: NodeResult, state: SessionState) -> str | None:
             return _SHALLOWEST[v.layer]
         if v.kind is VerdictKind.ESCALATE:
             return "user"
-    return FORWARD.get((node, _branch(node, result)))
+    branch = result.branch if result.branch is not None else _branch(node, result)
+    return FORWARD.get((node, branch))
