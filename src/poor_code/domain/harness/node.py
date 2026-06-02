@@ -10,6 +10,7 @@ from poor_code.domain.session.models import Query, SessionState, Verdict
 from poor_code.provider.events import (
     FinishedReason,
     LLMEvent,
+    TextDelta,
     ToolCallEnded,
     ToolCallInputDelta,
     ToolCallStarted,
@@ -81,6 +82,9 @@ class AgentNode:
             if ctx.cancel.is_set():
                 raise asyncio.CancelledError(f"{self.name} cancelled")
             match ev:
+                case TextDelta(text=t):
+                    if ctx.sink is not None:
+                        ctx.sink.text_delta(t)
                 case ToolCallStarted(call_id=cid):
                     args_by_call[cid] = ""
                     order.append(cid)
