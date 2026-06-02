@@ -60,7 +60,14 @@ class NodeLabelSegment:
     phase: str
 
 
-Segment = TextSegment | ToolCallView | NodeLabelSegment
+@dataclass(frozen=True)
+class QuerySegment:
+    prompt: str
+    options: tuple[str, ...]
+    kind: str
+
+
+Segment = TextSegment | ToolCallView | NodeLabelSegment | QuerySegment
 
 
 @dataclass(frozen=True)
@@ -118,6 +125,7 @@ class AppState:
     model_meta: ModelMeta | None = None
     last_turn_tokens: int = 0
     project_map: ProjectMapStatus | None = None
+    awaiting_input: bool = False
 
 
 # =========================================================================
@@ -375,6 +383,19 @@ def reduce(state: AppState, action: Action) -> AppState:
 
         case NodeEntered(turn_id=tid, node=node, phase=phase):
             return _append_segment(state, tid, NodeLabelSegment(node=node, phase=phase))
+
+        case QueryRaised(turn_id=tid, kind=kind, prompt=prompt, options=options):
+            i = _find_turn_by_id(state, tid)
+            if i is None:
+                return state
+            with_seg = _append_segment(
+                state, tid, QuerySegment(prompt=prompt, options=options, kind=kind))
+            return replace(with_seg, awaiting_input=True)
+
+        case AnswerSubmitted(turn_id=_tid, answer=_answer):
+            if not state.awaiting_input:
+                return state
+            return replace(state, awaiting_input=False)
 
         case _:
             return state
