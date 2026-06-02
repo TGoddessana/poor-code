@@ -228,7 +228,8 @@ class Phase(str, Enum):
     LOCATING = "locating"
     INTERVIEWING = "interviewing"
     PLANNING = "planning"
-    # S7~ 가 IMPLEMENTING/… 추가
+    IMPLEMENTING = "implementing"
+    FINALIZING = "finalizing"
 
 
 class TriggerKind(str, Enum):
