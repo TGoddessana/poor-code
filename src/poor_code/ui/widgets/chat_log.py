@@ -6,11 +6,40 @@ from textual.containers import VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Markdown, Static
 
-from poor_code.ui.store import AppState, TextSegment, ToolCallView
+from poor_code.ui.store import (
+    AppState, NodeLabelSegment, TextSegment, ToolCallView,
+)
 from poor_code.ui.widgets.banner import Banner
 from poor_code.ui.widgets.streaming_markdown import StreamingMarkdown
 
-__all__ = ["ChatLog", "TurnBlock", "ToolCallEntry", "SPINNER_FRAMES"]
+__all__ = ["ChatLog", "TurnBlock", "ToolCallEntry", "StaticSegment", "SPINNER_FRAMES"]
+
+
+def _render_segment(seg) -> str:
+    if isinstance(seg, NodeLabelSegment):
+        return f"▸ {seg.node}"
+    return str(seg)
+
+
+class StaticSegment(Widget):
+    """Immutable, append-once segment (node label / query / plan). Re-renders only on change."""
+
+    DEFAULT_CSS = "StaticSegment { height: auto; }"
+
+    def __init__(self, seg) -> None:
+        super().__init__(classes="static-segment")
+        self._seg = seg
+
+    def compose(self) -> ComposeResult:
+        yield Static(_render_segment(self._seg), classes="static-segment-body")
+
+    def refresh_from(self, seg) -> None:
+        if seg == self._seg:
+            return
+        self._seg = seg
+        self.remove_children()
+        for child in self.compose():
+            self.mount(child)
 
 SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
@@ -205,7 +234,9 @@ class TurnBlock(Widget):
             md = StreamingMarkdown(seg.text, classes="assistant-msg")
             self._apply_assistant_status_class(md, self._turn.status)
             return md
-        return ToolCallEntry(seg)
+        if isinstance(seg, ToolCallView):
+            return ToolCallEntry(seg)
+        return StaticSegment(seg)
 
     @staticmethod
     def _apply_assistant_status_class(md, status: str) -> None:
@@ -221,7 +252,8 @@ class TurnBlock(Widget):
 
         # Existing segment widgets in DOM order.
         existing_segs: list[Widget] = [
-            c for c in self.children if isinstance(c, (Markdown, ToolCallEntry))
+            c for c in self.children
+            if isinstance(c, (Markdown, ToolCallEntry, StaticSegment))
         ]
         # Anchor for new segment mounts — segments must stay above both the
         # error trailer and the per-turn footer. The footer is mounted during
@@ -240,6 +272,8 @@ class TurnBlock(Widget):
                 if isinstance(seg, TextSegment) and isinstance(w, StreamingMarkdown):
                     self.app.call_later(w.write_delta, seg.text)
                 elif isinstance(seg, ToolCallView) and isinstance(w, ToolCallEntry):
+                    w.refresh_from(seg)
+                elif isinstance(seg, NodeLabelSegment) and isinstance(w, StaticSegment):
                     w.refresh_from(seg)
                 else:
                     # Kind mismatch — replace.
