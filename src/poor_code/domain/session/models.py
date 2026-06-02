@@ -43,6 +43,7 @@ class SessionState:
     understanding: CodeContext | None = None
     history: tuple[Transition, ...] = ()
     requirement: "Requirement | None" = None
+    plan: "Plan | None" = None
     pending_query: "Query | None" = None
     interview: "tuple[AnsweredQuery, ...]" = ()
 
@@ -54,6 +55,9 @@ class SessionState:
 
     def with_requirement(self, r: "Requirement") -> "SessionState":
         return replace(self, requirement=r)
+
+    def with_plan(self, p: "Plan") -> "SessionState":
+        return replace(self, plan=p)
 
     def with_pending_query(self, q: "Query") -> "SessionState":
         return replace(self, pending_query=q)
@@ -163,11 +167,63 @@ class Requirement:
     open_questions: tuple[str, ...] = ()
 
 
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    DONE = "done"
+    BLOCKED = "blocked"
+    ABANDONED = "abandoned"
+
+
+@dataclass(frozen=True, slots=True)
+class EditScope:
+    editable: tuple[str, ...] = ()
+    readonly: tuple[str, ...] = ()
+    forbidden: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TaskContext:
+    refs: tuple[CodeRef, ...] = ()
+    snippet: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Attempt:
+    status: TaskStatus = TaskStatus.PENDING
+
+
+@dataclass(frozen=True, slots=True)
+class Task:
+    id: str
+    title: str
+    purpose: str
+    description: str = ""
+    edit_scope: EditScope = field(default_factory=EditScope)
+    how_to_validate: str = ""
+    status: TaskStatus = TaskStatus.PENDING
+    context: TaskContext | None = None
+    attempts: tuple[Attempt, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Dependency:
+    task_id: str
+    depends_on: str
+
+
+@dataclass(frozen=True, slots=True)
+class Plan:
+    tasks: tuple[Task, ...] = ()
+    deps: tuple[Dependency, ...] = ()
+
+
 class Phase(str, Enum):
     ROUTING = "routing"
     LOCATING = "locating"
     INTERVIEWING = "interviewing"
-    # S5~ 가 PLANNING/… 추가
+    PLANNING = "planning"
+    # S7~ 가 IMPLEMENTING/… 추가
 
 
 class TriggerKind(str, Enum):

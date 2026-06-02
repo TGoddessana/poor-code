@@ -68,3 +68,37 @@ def test_round_trip_pending_query_requirement_interview(tmp_path):
     assert len(back.interview) == 1
     assert back.interview[0].query.options == ("new", "extend")
     assert back.interview[0].response.chosen_option == "new"
+
+
+def test_round_trip_plan(tmp_path):
+    from poor_code.domain.session.models import (
+        Dependency,
+        EditScope,
+        Plan,
+        SessionState,
+        Task,
+    )
+
+    plan = Plan(
+        tasks=(
+            Task(
+                id="t1",
+                title="Add provider file",
+                purpose="Implement Google auth provider",
+                description="Create provider module.",
+                edit_scope=EditScope(
+                    editable=("src/poor_code/provider/providers/google.py",),
+                    readonly=("src/poor_code/provider/providers/ollama_cloud.py",),
+                    forbidden=("src/poor_code/messages.py",),
+                ),
+                how_to_validate="pytest tests/provider/test_google.py",
+            ),
+        ),
+        deps=(Dependency(task_id="t1", depends_on="t0"),),
+    )
+    store = SessionStore(tmp_path)
+    store.write_session_state("sid1", SessionState(plan=plan))
+    back = store.read_session_state("sid1")
+
+    assert back.plan == plan
+    assert back.plan.tasks[0].edit_scope.forbidden == ("src/poor_code/messages.py",)

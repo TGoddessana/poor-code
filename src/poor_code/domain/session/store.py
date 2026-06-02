@@ -13,7 +13,11 @@ from poor_code.domain.session.models import (
     CodeContext,
     CodeRef,
     Cursor,
+    Attempt,
+    Dependency,
+    EditScope,
     Phase,
+    Plan,
     WorkItemPolicies,
     Query,
     QueryKind,
@@ -23,6 +27,9 @@ from poor_code.domain.session.models import (
     Session,
     SessionState,
     SessionStatus,
+    Task,
+    TaskContext,
+    TaskStatus,
     WorkItem,
     WorkItemState,
     WorkItemStatus,
@@ -115,6 +122,90 @@ def _dict_to_requirement(d: dict[str, Any]) -> Requirement:
                        open_questions=tuple(d.get("open_questions", ())))
 
 
+def _edit_scope_to_dict(s: EditScope) -> dict[str, Any]:
+    return {
+        "editable": list(s.editable),
+        "readonly": list(s.readonly),
+        "forbidden": list(s.forbidden),
+    }
+
+
+def _dict_to_edit_scope(d: dict[str, Any]) -> EditScope:
+    return EditScope(
+        editable=tuple(d.get("editable", ())),
+        readonly=tuple(d.get("readonly", ())),
+        forbidden=tuple(d.get("forbidden", ())),
+    )
+
+
+def _task_context_to_dict(c: TaskContext) -> dict[str, Any]:
+    return {"refs": [_ref_to_dict(r) for r in c.refs], "snippet": c.snippet}
+
+
+def _dict_to_task_context(d: dict[str, Any]) -> TaskContext:
+    return TaskContext(
+        refs=tuple(_dict_to_ref(r) for r in d.get("refs", ())),
+        snippet=d.get("snippet"),
+    )
+
+
+def _attempt_to_dict(a: Attempt) -> dict[str, Any]:
+    return {"status": a.status.value}
+
+
+def _dict_to_attempt(d: dict[str, Any]) -> Attempt:
+    return Attempt(status=TaskStatus(d["status"]))
+
+
+def _plan_task_to_dict(t: Task) -> dict[str, Any]:
+    return {
+        "id": t.id,
+        "title": t.title,
+        "purpose": t.purpose,
+        "description": t.description,
+        "edit_scope": _edit_scope_to_dict(t.edit_scope),
+        "how_to_validate": t.how_to_validate,
+        "status": t.status.value,
+        "context": None if t.context is None else _task_context_to_dict(t.context),
+        "attempts": [_attempt_to_dict(a) for a in t.attempts],
+    }
+
+
+def _dict_to_plan_task(d: dict[str, Any]) -> Task:
+    ctx = d.get("context")
+    return Task(
+        id=d["id"],
+        title=d["title"],
+        purpose=d["purpose"],
+        description=d.get("description", ""),
+        edit_scope=_dict_to_edit_scope(d.get("edit_scope", {})),
+        how_to_validate=d.get("how_to_validate", ""),
+        status=TaskStatus(d.get("status", TaskStatus.PENDING.value)),
+        context=None if ctx is None else _dict_to_task_context(ctx),
+        attempts=tuple(_dict_to_attempt(a) for a in d.get("attempts", ())),
+    )
+
+
+def _plan_to_dict(p: Plan) -> dict[str, Any]:
+    return {
+        "tasks": [_plan_task_to_dict(t) for t in p.tasks],
+        "deps": [
+            {"task_id": d.task_id, "depends_on": d.depends_on}
+            for d in p.deps
+        ],
+    }
+
+
+def _dict_to_plan(d: dict[str, Any]) -> Plan:
+    return Plan(
+        tasks=tuple(_dict_to_plan_task(t) for t in d.get("tasks", ())),
+        deps=tuple(
+            Dependency(task_id=x["task_id"], depends_on=x["depends_on"])
+            for x in d.get("deps", ())
+        ),
+    )
+
+
 def _answered_to_dict(a: AnsweredQuery) -> dict[str, Any]:
     return {"query": _query_to_dict(a.query),
             "response": {"query_id": a.response.query_id, "answer": a.response.answer,
@@ -159,6 +250,7 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
         ],
         "requirement": (None if st.requirement is None
                         else _requirement_to_dict(st.requirement)),
+        "plan": (None if st.plan is None else _plan_to_dict(st.plan)),
         "pending_query": (None if st.pending_query is None
                           else _query_to_dict(st.pending_query)),
         "interview": [_answered_to_dict(a) for a in st.interview],
@@ -190,6 +282,7 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
             ),
             requirement=(None if d.get("requirement") is None
                          else _dict_to_requirement(d["requirement"])),
+            plan=(None if d.get("plan") is None else _dict_to_plan(d["plan"])),
             pending_query=(None if d.get("pending_query") is None
                            else _dict_to_query(d["pending_query"])),
             interview=tuple(_dict_to_answered(a) for a in d.get("interview", [])),

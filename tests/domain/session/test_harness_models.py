@@ -98,3 +98,54 @@ def test_with_user_response_rejects_mismatched_id():
         Query(id="q1", kind=QueryKind.CLARIFY, prompt="?"))
     with pytest.raises(ValueError):
         st.with_user_response(UserResponse(query_id="WRONG", answer="x"))
+
+
+def test_plan_task_value_objects():
+    from poor_code.domain.session.models import (
+        Dependency,
+        EditScope,
+        Plan,
+        Task,
+        TaskStatus,
+    )
+    scope = EditScope(editable=("src/auth.py",), readonly=("tests/test_auth.py",))
+    task = Task(
+        id="t1",
+        title="Update auth flow",
+        purpose="Support provider login",
+        description="Wire provider selection into login.",
+        edit_scope=scope,
+        how_to_validate="pytest tests/test_auth.py",
+    )
+    plan = Plan(tasks=(task,), deps=(Dependency(task_id="t1", depends_on="t0"),))
+
+    assert task.status is TaskStatus.PENDING
+    assert task.context is None
+    assert task.attempts == ()
+    assert plan.tasks[0].edit_scope.editable == ("src/auth.py",)
+
+
+def test_session_state_with_plan_is_immutable():
+    from poor_code.domain.session.models import Plan, SessionState, Task
+
+    plan = Plan(tasks=(Task(id="t1", title="A", purpose="B"),))
+    state = SessionState()
+    next_state = state.with_plan(plan)
+
+    assert state.plan is None
+    assert next_state.plan == plan
+
+
+def test_task_context_and_attempt_stubs_exist():
+    from poor_code.domain.session.models import Attempt, TaskContext, TaskStatus
+
+    ctx = TaskContext()
+    attempt = Attempt()
+    assert ctx.refs == ()
+    assert attempt.status is TaskStatus.PENDING
+
+
+def test_phase_has_planning():
+    from poor_code.domain.session.models import Phase
+
+    assert Phase.PLANNING.value == "planning"
