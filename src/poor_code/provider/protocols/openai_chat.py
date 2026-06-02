@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Iterable
 
+from poor_code.provider.capabilities import Capabilities
 from poor_code.provider.events import (
     FinishedReason,
     LLMEvent,
@@ -28,6 +29,9 @@ class OpenAICompatibleChat:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         model: str,
+        *,
+        capabilities: Capabilities = Capabilities(),
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": model,
@@ -37,6 +41,8 @@ class OpenAICompatibleChat:
         }
         if tools:
             body["tools"] = tools
+        if response_format is not None and capabilities.response_format:
+            body["response_format"] = response_format
         return body
 
     def for_stream(self) -> "_OpenAIChatParser":
