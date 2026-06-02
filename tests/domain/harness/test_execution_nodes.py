@@ -100,3 +100,39 @@ async def test_eng_gate_repairs_on_out_of_scope_edit():
     r = await EngGate().run(_ctx(_state_with_attempt(a, editable=("src/a.py",),
                                                      forbidden=("src/forbidden.py",))))
     assert r.verdict.kind is VerdictKind.REPAIR
+
+
+from pathlib import Path
+from poor_code.domain.harness.nodes.execution import ValidationRunner
+from poor_code.domain.session.models import ValidationResult
+
+
+def _runner_state(how_to_validate, tmp_path):
+    plan = Plan(tasks=(Task(id="t1", title="A", purpose="p",
+                            how_to_validate=how_to_validate,
+                            attempts=(Attempt(id="a1"),)),))
+    cur = Cursor(phase=Phase.IMPLEMENTING, current_node="validation_runner",
+                 task_id="t1", attempt_id="a1")
+    return SessionState(plan=plan, cursor=cur)
+
+
+@pytest.mark.asyncio
+async def test_validation_runner_pass(tmp_path):
+    r = await ValidationRunner(cwd=tmp_path).run(_ctx(_runner_state("true", tmp_path)))
+    assert isinstance(r.output, ValidationResult)
+    assert r.output.passed is True and r.output.exit_code == 0
+    assert r.branch == "pass"
+
+
+@pytest.mark.asyncio
+async def test_validation_runner_fail(tmp_path):
+    r = await ValidationRunner(cwd=tmp_path).run(_ctx(_runner_state("false", tmp_path)))
+    assert r.output.passed is False and r.output.exit_code != 0
+    assert r.branch == "fail"
+
+
+@pytest.mark.asyncio
+async def test_validation_runner_runs_in_cwd(tmp_path):
+    (tmp_path / "marker.txt").write_text("hi")
+    r = await ValidationRunner(cwd=tmp_path).run(_ctx(_runner_state("test -f marker.txt", tmp_path)))
+    assert r.output.passed is True
