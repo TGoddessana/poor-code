@@ -42,3 +42,24 @@ def test_attempt_status_values():
     assert AttemptStatus.ACTIVE.value == "active"
     assert AttemptStatus.DONE.value == "done"
     assert AttemptStatus.ABANDONED.value == "abandoned"
+
+
+from poor_code.domain.session.models import Attempt, Verdict, VerdictKind
+
+
+def test_attempt_defaults():
+    a = Attempt(id="a1")
+    assert a.id == "a1"
+    assert a.patch is None
+    assert a.run_result is None
+    assert a.validator_verdict is None
+    assert a.gate_verdict is None
+    assert a.adversarial_rounds == 0
+    assert a.status == AttemptStatus.ACTIVE
+    assert a.assumptions == ()
+
+
+def test_attempt_carries_run_result():
+    rr = ValidationResult(command="true", exit_code=0, passed=True)
+    a = Attempt(id="a1", run_result=rr, status=AttemptStatus.DONE)
+    assert a.run_result.passed is True and a.status == AttemptStatus.DONE

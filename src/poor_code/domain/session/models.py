@@ -194,11 +194,6 @@ class TaskContext:
 
 
 @dataclass(frozen=True, slots=True)
-class Attempt:
-    status: TaskStatus = TaskStatus.PENDING
-
-
-@dataclass(frozen=True, slots=True)
 class Task:
     id: str
     title: str
@@ -268,6 +263,19 @@ class ChangeSet:
 class SelectedTask:
     """task_selector → Driver 제어 신호. task_selector가 None을 반환하면 'done' 분기."""
     task_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class Attempt:
+    """한 번의 구현-검증 시도. 실행층의 안쪽 사이클 단위."""
+    id: str
+    patch: ChangeRecord | None = None             # ~생성~
+    assumptions: tuple[str, ...] = ()
+    validator_verdict: Verdict | None = None      # ~생성~ 자문(권한X)
+    run_result: ValidationResult | None = None    # 구속 ★ runner만
+    gate_verdict: Verdict | None = None
+    adversarial_rounds: int = 0                   # 적대적 캡 카운터
+    status: AttemptStatus = AttemptStatus.ACTIVE
 
 
 class Phase(str, Enum):
