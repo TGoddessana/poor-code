@@ -25,14 +25,28 @@ from poor_code.provider.events import (
 class AlwaysRepairLLM:
     """Implementer writes out.txt then stops; validator ALWAYS says repair_impl.
     The adversarial cap must force advance → runner passes → task done."""
+
+    def __init__(self):
+        # Toggle: True means next write-branch call emits the tool call,
+        # False means it emits text + stop (so the implementer loop exits).
+        self._writing = True
+
     async def stream(self, messages, tools):
         name = tools[0]["function"]["name"]
         if name == "write":
-            yield ToolCallStarted(call_id="w", name="write")
-            yield ToolCallInputDelta(call_id="w",
-                                     json_delta='{"path":"out.txt","content":"ok"}')
-            yield ToolCallEnded(call_id="w")
-            yield FinishedReason(reason="tool_calls")
+            if self._writing:
+                # Round 1: emit the write tool call
+                self._writing = False
+                yield ToolCallStarted(call_id="w", name="write")
+                yield ToolCallInputDelta(call_id="w",
+                                         json_delta='{"path":"out.txt","content":"ok"}')
+                yield ToolCallEnded(call_id="w")
+                yield FinishedReason(reason="tool_calls")
+            else:
+                # Round 2: no tool call → implementer loop exits
+                self._writing = True
+                yield TextDelta(text="done")
+                yield FinishedReason(reason="stop")
             return
         if name == "judge":
             yield ToolCallStarted(call_id="j", name="judge")
@@ -82,3 +96,9 @@ async def test_adversarial_loop_caps_and_completes(tmp_path):
     assert final.plan.tasks[0].status is TaskStatus.DONE
     # validator pushed back exactly MAX_ADVERSARIAL_ROUNDS times before forced advance
     assert final.plan.tasks[0].attempts[-1].adversarial_rounds == MAX_ADVERSARIAL_ROUNDS
+
+    # Traversal proof: implementer and validator each run once per adversarial round,
+    # and the loop terminates at reporter.
+    assert visited.count("implementer") == MAX_ADVERSARIAL_ROUNDS + 1
+    assert visited.count("validator") == MAX_ADVERSARIAL_ROUNDS + 1
+    assert visited[-1] == "reporter"
