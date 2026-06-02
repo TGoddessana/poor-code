@@ -146,7 +146,7 @@ class ScriptedLLM:
 
 
 @pytest.mark.asyncio
-async def test_interview_done_flows_through_planner_and_plan_gate_then_parks_at_composer(tmp_path: Path):
+async def test_interview_done_flows_through_planner_then_task_selector_advances_to_composer(tmp_path: Path):
     from poor_code.domain.session.models import UserResponse
     llm = ScriptedLLM(
         kind="engineering",

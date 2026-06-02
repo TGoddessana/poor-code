@@ -325,8 +325,8 @@ class ChangeSet:
 
 @dataclass(frozen=True, slots=True)
 class SelectedTask:
-    # NOTE: no store serializer yet — added in Plan 2 when first persisted.
     """task_selector → Driver 제어 신호. task_selector가 None을 반환하면 'done' 분기."""
+    # NOTE: no store serializer yet — added in Plan 2 when first persisted.
     task_id: str
 
 
