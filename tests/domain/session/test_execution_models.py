@@ -126,6 +126,14 @@ def test_update_attempt_attaches_run_result():
     assert a.run_result.passed is True and a.status == AttemptStatus.DONE
 
 
+from poor_code.domain.session.models import TaskCompleted
+
+
+def test_task_completed_carries_ids():
+    tc = TaskCompleted(task_id="t1", attempt_id="a1")
+    assert tc.task_id == "t1" and tc.attempt_id == "a1"
+
+
 # Fix 1: unknown task_id raises ValueError
 
 def test_with_active_task_unknown_id_raises():

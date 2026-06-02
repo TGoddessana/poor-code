@@ -328,6 +328,14 @@ class SelectedTask:
 
 
 @dataclass(frozen=True, slots=True)
+class TaskCompleted:
+    """completion_gate → Driver 제어 신호: 이 Task가 검증 통과로 완료됨.
+    control-only — store에 직렬화하지 않음(상태는 Task.status/Attempt.status로 영속)."""
+    task_id: str
+    attempt_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class Attempt:
     """한 번의 구현-검증 시도. 실행층의 안쪽 사이클 단위."""
     id: str
