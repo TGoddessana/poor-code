@@ -25,7 +25,8 @@ MAX_ATTEMPTS = 3  # implementer retries per Task before escalate (spec §5 cap)
 def _active(state):
     """Return (task, latest_attempt) for the cursor's active task. attempt may be None."""
     assert state.plan is not None and state.cursor is not None
-    task = next(t for t in state.plan.tasks if t.id == state.cursor.task_id)
+    task = next((t for t in state.plan.tasks if t.id == state.cursor.task_id), None)
+    assert task is not None, f"cursor task_id {state.cursor.task_id!r} not in plan"
     attempt = task.attempts[-1] if task.attempts else None
     return task, attempt
 
@@ -43,7 +44,7 @@ class TaskSelector:
         for d in plan.deps:
             deps.setdefault(d.task_id, []).append(d.depends_on)
         for t in plan.tasks:
-            if t.status is not TaskStatus.PENDING:
+            if t.status not in (TaskStatus.PENDING, TaskStatus.ACTIVE):
                 continue
             if all(dep in done for dep in deps.get(t.id, ())):
                 return NodeResult(output=SelectedTask(task_id=t.id), branch="task")
@@ -108,6 +109,15 @@ class ValidationRunner:
             stderr=asyncio.subprocess.STDOUT,
             cwd=str(self._cwd),
         )
+
+        async def _cancel_on_event() -> None:
+            await cancel.wait()
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+        cancel_task = asyncio.create_task(_cancel_on_event())
         try:
             try:
                 out_bytes, _ = await asyncio.wait_for(
@@ -117,7 +127,11 @@ class ValidationRunner:
                 await proc.wait()
                 return 124, f"[validation timed out after {_DEFAULT_TIMEOUT}s]"
         finally:
-            pass
+            cancel_task.cancel()
+
+        if cancel.is_set():
+            raise asyncio.CancelledError
+
         output = out_bytes.decode("utf-8", errors="replace")[:_OUTPUT_LIMIT]
         return proc.returncode, output
 

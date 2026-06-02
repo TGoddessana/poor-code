@@ -64,6 +64,15 @@ async def test_task_selector_done_branch_when_no_pending():
     assert r.output is None and r.branch == "done"
 
 
+@pytest.mark.asyncio
+async def test_task_selector_resumes_active_task():
+    """A plan whose only task is ACTIVE must be re-selected (resume safety)."""
+    plan = Plan(tasks=(Task(id="t1", title="A", purpose="p", status=TaskStatus.ACTIVE),))
+    r = await TaskSelector().run(_ctx(SessionState(plan=plan)))
+    assert isinstance(r.output, SelectedTask) and r.output.task_id == "t1"
+    assert r.branch == "task"
+
+
 from poor_code.domain.harness.nodes.execution import EngGate
 from poor_code.domain.session.models import (
     Attempt, ChangeRecord, EditScope, VerdictKind, Layer,
@@ -136,6 +145,27 @@ async def test_validation_runner_runs_in_cwd(tmp_path):
     (tmp_path / "marker.txt").write_text("hi")
     r = await ValidationRunner(cwd=tmp_path).run(_ctx(_runner_state("test -f marker.txt", tmp_path)))
     assert r.output.passed is True
+
+
+@pytest.mark.asyncio
+async def test_validation_runner_cancel_mid_run(tmp_path):
+    """Cancel event set mid-run must kill the subprocess and raise CancelledError
+    well before the 120s timeout. Uses asyncio.wait_for with a 10s bound."""
+    cancel = asyncio.Event()
+    state = _runner_state("sleep 30", tmp_path)
+    ctx = NodeContext(state=state, cancel=cancel)
+
+    async def _run_and_cancel():
+        # Set cancel shortly after the subprocess is spawned
+        async def _set_cancel():
+            await asyncio.sleep(0.1)
+            cancel.set()
+
+        asyncio.create_task(_set_cancel())
+        await ValidationRunner(cwd=tmp_path).run(ctx)
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(_run_and_cancel(), timeout=10)
 
 
 from poor_code.domain.harness.nodes.execution import CompletionGate, MAX_ATTEMPTS
