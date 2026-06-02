@@ -35,3 +35,24 @@ def test_session_state_roundtrips_feedback():
     )
     back = _dict_to_session_state(_session_state_to_dict(s), Path("x"))
     assert back.feedback.entries == s.feedback.entries
+
+
+from poor_code.domain.session.store import SessionStore
+from poor_code.domain.session.models import (
+    Plan, Task, Cursor, Phase, Attempt, AttemptStatus, ValidationResult,
+)
+
+
+def test_store_roundtrips_plan_with_attempts(tmp_path):
+    store = SessionStore(tmp_path)
+    plan = Plan(tasks=(Task(id="t1", title="A", purpose="p", how_to_validate="true"),))
+    s = (SessionState(plan=plan,
+                      cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="implementer"))
+         .with_active_task("t1")
+         .append_attempt("t1", Attempt(
+             id="a1",
+             run_result=ValidationResult(command="true", exit_code=0, passed=True),
+             status=AttemptStatus.DONE)))
+    store.write_session_state("sid", s)
+    back = store.read_session_state("sid")
+    assert back == s
