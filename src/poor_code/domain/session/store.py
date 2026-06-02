@@ -241,6 +241,7 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
                 "candidates": [_ref_to_dict(r) for r in cc.candidates],
                 "confusers": [_ref_to_dict(r) for r in cc.confusers],
                 "related_tests": [_ref_to_dict(r) for r in cc.related_tests],
+                "search_notes": cc.search_notes,
             }
         ),
         "history": [
@@ -254,6 +255,7 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
         "pending_query": (None if st.pending_query is None
                           else _query_to_dict(st.pending_query)),
         "interview": [_answered_to_dict(a) for a in st.interview],
+        "repair_hint": st.repair_hint,
     }
 
 
@@ -273,7 +275,8 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
             understanding=(None if cc is None else CodeContext(
                 candidates=tuple(_dict_to_ref(r) for r in cc["candidates"]),
                 confusers=tuple(_dict_to_ref(r) for r in cc["confusers"]),
-                related_tests=tuple(_dict_to_ref(r) for r in cc["related_tests"]))),
+                related_tests=tuple(_dict_to_ref(r) for r in cc["related_tests"]),
+                search_notes=cc.get("search_notes", ""))),
             history=tuple(
                 Transition(from_node=t["from_node"], to_node=t["to_node"],
                            trigger=TriggerKind(t["trigger"]), reason=t["reason"],
@@ -286,6 +289,7 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
             pending_query=(None if d.get("pending_query") is None
                            else _dict_to_query(d["pending_query"])),
             interview=tuple(_dict_to_answered(a) for a in d.get("interview", [])),
+            repair_hint=d.get("repair_hint"),
         )
     except (KeyError, ValueError) as e:
         raise ValueError(f"corrupt session file at {src}: {e}") from e
