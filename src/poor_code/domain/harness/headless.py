@@ -6,14 +6,21 @@ run-loop (run_headless), Driver is unchanged."""
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, TextIO
 
-from poor_code.infra import auth_store
+from poor_code.infra import auth_store, paths
 from poor_code.provider.providers import ollama_cloud
-from poor_code.domain.harness.nodes.reporter import build_report
-from poor_code.domain.session.models import ReportOutcome, SessionState, UserResponse
+from poor_code.domain.harness.nodes.reporter import build_report, report_to_dict
+from poor_code.domain.project_map import ProjectMap, ProjectMapStore
+from poor_code.domain.session.models import (
+    Cursor, Phase, Policy, Request, RequestKind,
+    ReportOutcome, SessionState, UserResponse,
+)
 
 
 class StderrSink:
@@ -91,3 +98,41 @@ async def run_headless(driver, state: SessionState, cancel: "asyncio.Event",
     if state.report is None:
         state = state.with_report(build_report(state, ReportOutcome.ABANDONED))
     return state
+
+
+def _load_project_map(cwd: Path) -> ProjectMap:
+    try:
+        return ProjectMapStore().read(paths.config_dir(cwd))
+    except (FileNotFoundError, ValueError):
+        return ProjectMap(version=2, generated_at=datetime.now(UTC),
+                          cwd=cwd, files=(), parse_errors=())
+
+
+def _build_driver(llm) -> object:
+    from poor_code.domain.harness import build_default_registry
+    from poor_code.domain.harness.driver import Driver
+    from poor_code.domain.harness.route import route
+
+    cwd = Path.cwd()
+    registry = build_default_registry(llm=llm, project_map=_load_project_map(cwd))
+    return Driver(registry, route)
+
+
+async def main(instruction: str, *, stdout=None, stderr=None) -> int:
+    out = stdout if stdout is not None else sys.stdout
+    err = stderr if stderr is not None else sys.stderr
+    llm = resolve_llm()
+    if llm is None:
+        err.write("no credentials: set OLLAMA_API_KEY + POOR_CODE_MODEL "
+                  "(or run `poor-code` and /login)\n")
+        return 2
+    driver = _build_driver(llm)
+    sink = StderrSink(stream=err)
+    state = SessionState(
+        cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
+        request=Request(raw_text=instruction, kind=RequestKind.ENGINEERING),
+        policy=Policy.FULL_AUTO)
+    final = await run_headless(driver, state, asyncio.Event(), sink=sink)
+    out.write(json.dumps(report_to_dict(final.report), ensure_ascii=False, indent=2) + "\n")
+    out.flush()
+    return 0

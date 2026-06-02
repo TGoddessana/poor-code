@@ -98,6 +98,17 @@ def _make_driver_factory(project_map: ProjectMap, session: SessionService):
 
 
 def main() -> None:
+    import sys
+    argv = sys.argv[1:]
+    if "--headless" in argv:
+        import asyncio
+        from poor_code.domain.harness import headless
+        rest = [a for a in argv if a != "--headless"]
+        instruction = " ".join(rest).strip()
+        if not instruction:
+            sys.stderr.write('usage: poor-code --headless "<instruction>"\n')
+            raise SystemExit(2)
+        raise SystemExit(asyncio.run(headless.main(instruction)))
     cwd = Path.cwd()
     session = _start_session(cwd)
     agent = _build_agent(session, _initial_llm())
