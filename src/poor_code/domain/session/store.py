@@ -10,6 +10,7 @@ from typing import Any
 from poor_code.domain.session import paths
 from poor_code.domain.session.models import (
     AnsweredQuery,
+    ChangeSet,
     CodeContext,
     CodeRef,
     Cursor,
@@ -187,6 +188,18 @@ def _change_record_to_dict(c: ChangeRecord) -> dict[str, Any]:
 
 def _dict_to_change_record(d: dict[str, Any]) -> ChangeRecord:
     return ChangeRecord(files=tuple(d.get("files", ())), diff=d.get("diff", ""))
+
+
+def _changeset_to_dict(c: ChangeSet) -> dict[str, Any]:
+    return {"aggregate_diff": c.aggregate_diff,
+            "per_task": [[tid, diff] for (tid, diff) in c.per_task]}
+
+
+def _dict_to_changeset(d: dict[str, Any]) -> ChangeSet:
+    return ChangeSet(
+        aggregate_diff=d.get("aggregate_diff", ""),
+        per_task=tuple((row[0], row[1]) for row in d.get("per_task", ())),
+    )
 
 
 def _validation_result_to_dict(r: ValidationResult) -> dict[str, Any]:
@@ -454,3 +467,9 @@ class SessionStore:
 
     def work_item_dir(self, session_id: str, task_id: str) -> Path:
         return paths.work_item_dir(self._root, session_id, task_id)
+
+    def write_changeset(self, session_id: str, changeset: ChangeSet) -> None:
+        _atomic_write_json(
+            paths.changeset_json(self._root, session_id),
+            _changeset_to_dict(changeset),
+        )

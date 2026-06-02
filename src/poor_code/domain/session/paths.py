@@ -28,5 +28,13 @@ def work_item_state_json(root: Path, session_id: str, task_id: str) -> Path:
     return work_item_dir(root, session_id, task_id) / "state.json"
 
 
+def changeset_json(root: Path, session_id: str) -> Path:
+    return session_dir(root, session_id) / "changeset.json"
+
+
+def attempt_dir(root: Path, session_id: str, task_id: str, attempt_id: str) -> Path:
+    return work_item_dir(root, session_id, task_id) / "attempts" / attempt_id
+
+
 def project_map_json(root: Path) -> Path:
     return root / "project_map.json"

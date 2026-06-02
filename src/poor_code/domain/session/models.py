@@ -339,7 +339,6 @@ class ChangeRecord:
 
 @dataclass(frozen=True, slots=True)
 class ChangeSet:
-    # NOTE: no store serializer yet — added in Plan 2 when first persisted.
     aggregate_diff: str = ""
     per_task: tuple[tuple[str, str], ...] = ()   # (task_id, diff)
 
