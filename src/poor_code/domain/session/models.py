@@ -153,9 +153,12 @@ class SessionState:
     ) -> "SessionState":
         prev = self.cursor.current_node if self.cursor else ""
         tr = Transition(from_node=prev, to_node=node, trigger=trigger, reason=reason, ts_iso=ts_iso)
+        cur_task_id = self.cursor.task_id if self.cursor is not None else None
+        cur_attempt_id = self.cursor.attempt_id if self.cursor is not None else None
         return replace(
             self,
-            cursor=Cursor(phase=phase, current_node=node),
+            cursor=Cursor(phase=phase, current_node=node,
+                          task_id=cur_task_id, attempt_id=cur_attempt_id),
             history=self.history + (tr,),
         )
 
