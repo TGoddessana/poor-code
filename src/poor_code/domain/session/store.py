@@ -168,6 +168,7 @@ def _dict_to_feedback_entry(d: dict[str, Any]) -> FeedbackEntry:
 
 
 def _verdict_to_dict(v: Verdict) -> dict[str, Any]:
+    # TODO(Plan 2): serialize Verdict.query before any node emits escalate(query) into an Attempt — else it persists silently truncated.
     return {"kind": v.kind.value,
             "layer": None if v.layer is None else v.layer.value,
             "hint": v.hint}
