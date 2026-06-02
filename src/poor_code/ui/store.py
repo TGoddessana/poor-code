@@ -13,10 +13,13 @@ from poor_code.messages import (
     AssistantMessageCompleted,
     AssistantTextDelta,
     Event,
+    NodeEntered,
+    PlanReady,
     ProjectMapBuildFailed,
     ProjectMapBuildFinished,
     ProjectMapBuildProgress,
     ProjectMapBuildStarted,
+    QueryRaised,
     ToolCallFailed,
     ToolCallFinished,
     ToolCallStarted,
@@ -50,7 +53,14 @@ class TextSegment:
     text: str
 
 
-Segment = TextSegment | ToolCallView
+@dataclass(frozen=True)
+class NodeLabelSegment:
+    """A graph-node boundary header. Streamed text/tools below it belong to this node."""
+    node: str
+    phase: str
+
+
+Segment = TextSegment | ToolCallView | NodeLabelSegment
 
 
 @dataclass(frozen=True)
@@ -362,6 +372,9 @@ def reduce(state: AppState, action: Action) -> AppState:
         case ProviderChanged(provider_name=p, model=m):
             meta = lookup(m) if m else None
             return replace(state, provider_name=p, model=m, model_meta=meta)
+
+        case NodeEntered(turn_id=tid, node=node, phase=phase):
+            return _append_segment(state, tid, NodeLabelSegment(node=node, phase=phase))
 
         case _:
             return state
