@@ -112,10 +112,11 @@ async def test_lightweight_request_parks_at_fast_path(tmp_path: Path):
 
 class ScriptedLLM:
     """Routes by tool name; interview_step pops a scripted step per call."""
-    def __init__(self, *, kind, code_context, interview_steps):
+    def __init__(self, *, kind, code_context, interview_steps, plan):
         self._kind = kind
         self._cc = code_context
         self._steps = list(interview_steps)
+        self._plan = plan
 
     async def stream(self, messages, tools):
         name = tools[0]["function"]["name"]
@@ -125,6 +126,8 @@ class ScriptedLLM:
             args = self._cc
         elif name == "interview_step":
             args = self._steps.pop(0)
+        elif name == "emit_plan":
+            args = self._plan
         else:
             raise AssertionError(f"unexpected tool {name}")
         payload = json.dumps(args)
@@ -135,7 +138,7 @@ class ScriptedLLM:
 
 
 @pytest.mark.asyncio
-async def test_interview_suspends_resumes_then_parks_at_planner(tmp_path: Path):
+async def test_interview_done_flows_through_planner_and_plan_gate_then_parks_at_composer(tmp_path: Path):
     from poor_code.domain.session.models import UserResponse
     llm = ScriptedLLM(
         kind="engineering",
@@ -149,6 +152,17 @@ async def test_interview_suspends_resumes_then_parks_at_planner(tmp_path: Path):
             {"action": "done", "requirement": {"summary": "add google login",
                                                 "acceptance": ["providers/google.py"]}},
         ],
+        plan={
+            "tasks": [
+                {
+                    "title": "Add Google provider",
+                    "purpose": "Support google login",
+                    "edit_scope": {"editable": ["src/provider/google.py"]},
+                    "how_to_validate": "pytest tests/test_auth.py",
+                },
+            ],
+            "deps": [],
+        },
     )
     registry = build_default_registry(llm=llm, project_map=_map())
     driver = Driver(registry, route)
@@ -171,8 +185,12 @@ async def test_interview_suspends_resumes_then_parks_at_planner(tmp_path: Path):
     assert questions_asked == 2
     assert state.requirement is not None
     assert state.requirement.summary == "add google login"
+    assert state.plan is not None
+    assert state.plan.tasks[0].id == "t1"
+    assert state.plan.tasks[0].edit_scope.editable == ("src/provider/google.py",)
     assert len(state.interview) == 2
-    assert state.cursor.current_node == "planner"   # parked after Requirement
+    assert state.cursor.current_node == "composer"   # parked after planning layer
+    assert state.cursor.phase is Phase.PLANNING
 
 
 @pytest.mark.asyncio
