@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from poor_code.provider.auth import Auth
+from poor_code.provider.capabilities import Capabilities
 from poor_code.provider.framing import Framing
 
 if TYPE_CHECKING:
@@ -20,3 +21,4 @@ class Route:
     endpoint: str       # URL path, e.g. "/api/chat"
     auth: Auth
     framing: Framing
+    capabilities: Capabilities = Capabilities()
