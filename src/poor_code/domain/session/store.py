@@ -14,6 +14,14 @@ from poor_code.domain.session.models import (
     CodeRef,
     Cursor,
     Attempt,
+    AttemptStatus,
+    ChangeRecord,
+    ValidationResult,
+    Verdict,
+    VerdictKind,
+    Layer,
+    FeedbackEntry,
+    FeedbackMemory,
     Dependency,
     EditScope,
     Phase,
@@ -149,12 +157,60 @@ def _dict_to_task_context(d: dict[str, Any]) -> TaskContext:
     )
 
 
+def _verdict_to_dict(v: Verdict) -> dict[str, Any]:
+    return {"kind": v.kind.value,
+            "layer": None if v.layer is None else v.layer.value,
+            "hint": v.hint}
+
+
+def _dict_to_verdict(d: dict[str, Any]) -> Verdict:
+    return Verdict(kind=VerdictKind(d["kind"]),
+                   layer=None if d.get("layer") is None else Layer(d["layer"]),
+                   hint=d.get("hint"))
+
+
+def _change_record_to_dict(c: ChangeRecord) -> dict[str, Any]:
+    return {"files": list(c.files), "diff": c.diff}
+
+
+def _dict_to_change_record(d: dict[str, Any]) -> ChangeRecord:
+    return ChangeRecord(files=tuple(d.get("files", ())), diff=d.get("diff", ""))
+
+
+def _validation_result_to_dict(r: ValidationResult) -> dict[str, Any]:
+    return {"command": r.command, "exit_code": r.exit_code,
+            "passed": r.passed, "output": r.output}
+
+
+def _dict_to_validation_result(d: dict[str, Any]) -> ValidationResult:
+    return ValidationResult(command=d["command"], exit_code=d["exit_code"],
+                            passed=d["passed"], output=d.get("output", ""))
+
+
 def _attempt_to_dict(a: Attempt) -> dict[str, Any]:
-    return {"status": a.status.value}
+    return {
+        "id": a.id,
+        "patch": None if a.patch is None else _change_record_to_dict(a.patch),
+        "assumptions": list(a.assumptions),
+        "validator_verdict": None if a.validator_verdict is None else _verdict_to_dict(a.validator_verdict),
+        "run_result": None if a.run_result is None else _validation_result_to_dict(a.run_result),
+        "gate_verdict": None if a.gate_verdict is None else _verdict_to_dict(a.gate_verdict),
+        "adversarial_rounds": a.adversarial_rounds,
+        "status": a.status.value,
+    }
 
 
 def _dict_to_attempt(d: dict[str, Any]) -> Attempt:
-    return Attempt(status=TaskStatus(d["status"]))
+    return Attempt(
+        id=d["id"],
+        patch=None if d.get("patch") is None else _dict_to_change_record(d["patch"]),
+        assumptions=tuple(d.get("assumptions", ())),
+        validator_verdict=None if d.get("validator_verdict") is None else _dict_to_verdict(d["validator_verdict"]),
+        run_result=None if d.get("run_result") is None else _dict_to_validation_result(d["run_result"]),
+        gate_verdict=None if d.get("gate_verdict") is None else _dict_to_verdict(d["gate_verdict"]),
+        adversarial_rounds=d.get("adversarial_rounds", 0),
+        status=AttemptStatus(d.get("status", AttemptStatus.ACTIVE.value)),
+    )
 
 
 def _plan_task_to_dict(t: Task) -> dict[str, Any]:
