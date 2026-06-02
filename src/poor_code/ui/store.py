@@ -67,7 +67,12 @@ class QuerySegment:
     kind: str
 
 
-Segment = TextSegment | ToolCallView | NodeLabelSegment | QuerySegment
+@dataclass(frozen=True)
+class PlanSegment:
+    lines: tuple[str, ...]
+
+
+Segment = TextSegment | ToolCallView | NodeLabelSegment | QuerySegment | PlanSegment
 
 
 @dataclass(frozen=True)
@@ -396,6 +401,9 @@ def reduce(state: AppState, action: Action) -> AppState:
             if not state.awaiting_input:
                 return state
             return replace(state, awaiting_input=False)
+
+        case PlanReady(turn_id=tid, lines=lines):
+            return _append_segment(state, tid, PlanSegment(lines=lines))
 
         case _:
             return state
