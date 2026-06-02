@@ -177,3 +177,39 @@ async def test_completion_gate_escalates_at_cap():
     r = await CompletionGate().run(_ctx(_completion_state(attempts)))
     assert r.verdict.kind is VerdictKind.ESCALATE
     assert r.verdict.query is not None
+
+
+from poor_code.domain.harness.route import FORWARD
+
+
+def test_execution_forward_edges_present():
+    assert FORWARD[("plan_gate", None)] == "task_selector"
+    assert FORWARD[("task_selector", "task")] == "composer"
+    assert FORWARD[("task_selector", "done")] == "global_validator"
+    assert FORWARD[("composer", None)] == "implementer"
+    assert FORWARD[("implementer", None)] == "eng_gate"
+    assert FORWARD[("eng_gate", None)] == "validator"
+    assert FORWARD[("validator", None)] == "validation_runner"
+    assert FORWARD[("validation_runner", "pass")] == "completion_gate"
+    assert FORWARD[("validation_runner", "fail")] == "failure_analyst"
+    assert FORWARD[("failure_analyst", None)] == "completion_gate"
+    assert FORWARD[("completion_gate", "done")] == "task_selector"
+    assert FORWARD[("global_validator", "pass")] == "reporter"
+
+
+def test_build_registry_has_code_nodes():
+    from datetime import UTC, datetime
+    from poor_code.domain.project_map.models import ProjectMap
+    from poor_code.domain.harness import build_default_registry
+
+    class _LLM:
+        async def stream(self, messages, tools):
+            if False:
+                yield None
+
+    pm = ProjectMap(version=2, generated_at=datetime.now(UTC), cwd=Path("."),
+                    files=(), parse_errors=())
+    reg = build_default_registry(llm=_LLM(), project_map=pm)
+    for n in ("task_selector", "eng_gate", "validation_runner", "completion_gate"):
+        assert reg.get(n) is not None
+        assert reg.get(n).name == n

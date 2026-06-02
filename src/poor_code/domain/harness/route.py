@@ -16,7 +16,18 @@ FORWARD: dict[tuple[str, str | None], str] = {
     ("understanding_gate", None): "interviewer",  # gate ADVANCE falls through here
     ("interviewer", None): "planner",
     ("planner", None): "plan_gate",
-    ("plan_gate", None): "composer",              # plan done → composer (unregistered → park)
+    ("plan_gate", None): "task_selector",
+    ("task_selector", "task"): "composer",
+    ("task_selector", "done"): "global_validator",
+    ("composer", None): "implementer",
+    ("implementer", None): "eng_gate",
+    ("eng_gate", None): "validator",
+    ("validator", None): "validation_runner",
+    ("validation_runner", "pass"): "completion_gate",
+    ("validation_runner", "fail"): "failure_analyst",
+    ("failure_analyst", None): "completion_gate",
+    ("completion_gate", "done"): "task_selector",
+    ("global_validator", "pass"): "reporter",
 }
 
 # back-edge target per broken layer (fail-to-shallowest, design.md §6/§18).

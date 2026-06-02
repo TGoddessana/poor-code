@@ -197,8 +197,8 @@ async def test_interview_done_flows_through_planner_and_plan_gate_then_parks_at_
     assert state.plan.tasks[0].id == "t1"
     assert state.plan.tasks[0].edit_scope.editable == ("src/provider/google.py",)
     assert len(state.interview) == 2
-    assert state.cursor.current_node == "composer"   # parked after planning layer
-    assert state.cursor.phase is Phase.PLANNING
+    assert state.cursor.current_node == "composer"   # parked after task_selector (Plan 2: now IMPLEMENTING)
+    assert state.cursor.phase is Phase.IMPLEMENTING
 
 
 @pytest.mark.asyncio

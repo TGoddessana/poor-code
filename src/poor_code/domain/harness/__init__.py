@@ -1,8 +1,13 @@
-"""harness — the graph runtime (control). Imports domain/session (data), never ui/."""
+"""harness — the graph runtime (control). Imports domain/session (data), never ui/.
+The graph parks at 'composer' (unregistered) — reached via task_selector — until
+Plan 3 adds the agent nodes."""
 from __future__ import annotations
 
 from poor_code.domain.harness.driver import Driver
 from poor_code.domain.harness.node import Node, NodeContext, NodeResult
+from poor_code.domain.harness.nodes.execution import (
+    TaskSelector, EngGate, ValidationRunner, CompletionGate,
+)
 from poor_code.domain.harness.nodes.explorer import ExploringNode
 from poor_code.domain.harness.nodes.fast_path import FastPathNode
 from poor_code.domain.harness.nodes.gates import PlanGate, UnderstandingGate
@@ -19,13 +24,15 @@ from poor_code.domain.tool.registry import ToolRegistry
 __all__ = [
     "Driver", "Node", "NodeContext", "NodeResult", "NodeRegistry",
     "Router", "ExploringNode", "Interviewer", "Planner", "PlanGate", "FastPathNode",
+    "TaskSelector", "EngGate", "ValidationRunner", "CompletionGate",
     "route", "FORWARD", "build_default_registry",
 ]
 
 
 def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeRegistry:
-    """Assemble the v1 planning-layer graph. Composer and beyond are not
-    registered yet — the Driver parks there until the execution layer exists.
+    """Assemble the v1 planning+execution-layer graph. Agent nodes (composer,
+    implementer, validator, failure_analyst, global_validator) are not registered
+    yet — the Driver parks at 'composer' until Plan 3 adds them.
     When `agent` is provided, the lightweight leaf (fast_path) is registered;
     otherwise a lightweight classification parks (no output)."""
     reg = NodeRegistry()
@@ -37,6 +44,10 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     reg.register(Interviewer(llm, project_map=project_map))
     reg.register(Planner(llm, project_map=project_map))
     reg.register(PlanGate())
+    reg.register(TaskSelector())
+    reg.register(EngGate())
+    reg.register(ValidationRunner(cwd=project_map.cwd))
+    reg.register(CompletionGate())
     if agent is not None:
         reg.register(FastPathNode(agent))
     return reg
