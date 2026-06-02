@@ -136,3 +136,44 @@ async def test_validation_runner_runs_in_cwd(tmp_path):
     (tmp_path / "marker.txt").write_text("hi")
     r = await ValidationRunner(cwd=tmp_path).run(_ctx(_runner_state("test -f marker.txt", tmp_path)))
     assert r.output.passed is True
+
+
+from poor_code.domain.harness.nodes.execution import CompletionGate, MAX_ATTEMPTS
+from poor_code.domain.session.models import TaskCompleted
+
+
+def _completion_state(attempts):
+    plan = Plan(tasks=(Task(id="t1", title="A", purpose="p", attempts=tuple(attempts)),))
+    cur = Cursor(phase=Phase.IMPLEMENTING, current_node="completion_gate",
+                 task_id="t1", attempt_id=attempts[-1].id)
+    return SessionState(plan=plan, cursor=cur)
+
+
+def _passed(aid):
+    return Attempt(id=aid, run_result=ValidationResult(command="true", exit_code=0, passed=True))
+
+
+def _failed(aid):
+    return Attempt(id=aid, run_result=ValidationResult(command="false", exit_code=1, passed=False))
+
+
+@pytest.mark.asyncio
+async def test_completion_gate_done_on_pass():
+    r = await CompletionGate().run(_ctx(_completion_state([_passed("a1")])))
+    assert isinstance(r.output, TaskCompleted) and r.output.task_id == "t1"
+    assert r.branch == "done"
+
+
+@pytest.mark.asyncio
+async def test_completion_gate_repairs_below_cap():
+    r = await CompletionGate().run(_ctx(_completion_state([_failed("a1")])))
+    assert r.verdict.kind is VerdictKind.REPAIR
+    assert r.verdict.layer is Layer.IMPLEMENTATION
+
+
+@pytest.mark.asyncio
+async def test_completion_gate_escalates_at_cap():
+    attempts = [_failed(f"a{i}") for i in range(MAX_ATTEMPTS)]
+    r = await CompletionGate().run(_ctx(_completion_state(attempts)))
+    assert r.verdict.kind is VerdictKind.ESCALATE
+    assert r.verdict.query is not None
