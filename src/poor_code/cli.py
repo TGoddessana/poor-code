@@ -68,9 +68,9 @@ def _start_session(cwd: Path) -> SessionService:
     return service
 
 
-def _build_agent(session: SessionService) -> Agent:
+def _build_agent(session: SessionService, llm) -> Agent:
     return Agent(
-        llm=_initial_llm(),
+        llm=llm,
         tools=ToolRegistry([ReadTool(), WriteTool(), EditTool(), BashTool()]),
         assembler=_build_assembler(),
         session=session,
@@ -89,9 +89,10 @@ def _load_project_map(cwd: Path) -> ProjectMap:
                           cwd=cwd, files=(), parse_errors=())
 
 
-def _make_driver_factory(project_map: ProjectMap):
+def _make_driver_factory(project_map: ProjectMap, session: SessionService):
     def make(llm):
-        registry = build_default_registry(llm=llm, project_map=project_map)
+        registry = build_default_registry(
+            llm=llm, project_map=project_map, agent=_build_agent(session, llm))
         return Driver(registry, route)
     return make
 
@@ -99,10 +100,10 @@ def _make_driver_factory(project_map: ProjectMap):
 def main() -> None:
     cwd = Path.cwd()
     session = _start_session(cwd)
-    agent = _build_agent(session)
+    agent = _build_agent(session, _initial_llm())
     slash = SlashDispatcher(SlashRegistry([LoginCommand()]))
     builder = _build_project_map_builder()
-    make_driver = _make_driver_factory(_load_project_map(cwd))
+    make_driver = _make_driver_factory(_load_project_map(cwd), session)
     PoorCodeApp(
         agent=agent, make_driver=make_driver, slash=slash,
         project_map_builder=builder,
