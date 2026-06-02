@@ -86,6 +86,49 @@ class SessionState:
             feedback=replace(self.feedback, entries=self.feedback.entries + (entry,)),
         )
 
+    def _with_task(self, task_id: str, **changes) -> "SessionState":
+        assert self.plan is not None, "no plan to update tasks in"
+        tasks = tuple(
+            replace(t, **changes) if t.id == task_id else t
+            for t in self.plan.tasks
+        )
+        return replace(self, plan=replace(self.plan, tasks=tasks))
+
+    def with_active_task(self, task_id: str) -> "SessionState":
+        st = self._with_task(task_id, status=TaskStatus.ACTIVE)
+        if st.cursor is None:
+            return st
+        return replace(st, cursor=replace(st.cursor, task_id=task_id))
+
+    def with_task_status(self, task_id: str, status: "TaskStatus") -> "SessionState":
+        return self._with_task(task_id, status=status)
+
+    def append_attempt(self, task_id: str, attempt: "Attempt") -> "SessionState":
+        assert self.plan is not None, "no plan to append attempts to"
+        tasks = tuple(
+            replace(t, attempts=t.attempts + (attempt,)) if t.id == task_id else t
+            for t in self.plan.tasks
+        )
+        st = replace(self, plan=replace(self.plan, tasks=tasks))
+        if st.cursor is None:
+            return st
+        return replace(st, cursor=replace(st.cursor, attempt_id=attempt.id))
+
+    def update_attempt(self, task_id: str, attempt_id: str, **changes) -> "SessionState":
+        assert self.plan is not None, "no plan to update attempts in"
+
+        def upd(t):
+            if t.id != task_id:
+                return t
+            atts = tuple(
+                replace(a, **changes) if a.id == attempt_id else a
+                for a in t.attempts
+            )
+            return replace(t, attempts=atts)
+
+        tasks = tuple(upd(t) for t in self.plan.tasks)
+        return replace(self, plan=replace(self.plan, tasks=tasks))
+
     def with_user_response(self, resp: "UserResponse") -> "SessionState":
         assert self.pending_query is not None, "no pending query to answer"
         if resp.query_id != self.pending_query.id:

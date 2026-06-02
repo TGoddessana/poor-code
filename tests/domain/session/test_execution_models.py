@@ -78,3 +78,45 @@ def test_with_feedback_entry_appends_immutably():
     s1 = s0.with_feedback_entry(e)
     assert s0.feedback.entries == ()          # original untouched
     assert s1.feedback.entries == (e,)
+
+
+from poor_code.domain.session.models import (
+    Plan, Task, TaskStatus, Cursor, Phase,
+)
+
+
+def _state_with_two_tasks():
+    plan = Plan(tasks=(Task(id="t1", title="A", purpose="p"),
+                       Task(id="t2", title="B", purpose="p")))
+    cur = Cursor(phase=Phase.IMPLEMENTING, current_node="task_selector")
+    return SessionState(plan=plan, cursor=cur)
+
+
+def test_with_active_task_sets_status_and_cursor():
+    s = _state_with_two_tasks().with_active_task("t2")
+    t2 = [t for t in s.plan.tasks if t.id == "t2"][0]
+    assert t2.status == TaskStatus.ACTIVE
+    assert s.cursor.task_id == "t2"
+
+
+def test_with_task_status_changes_one_task():
+    s = _state_with_two_tasks().with_task_status("t1", TaskStatus.DONE)
+    by_id = {t.id: t for t in s.plan.tasks}
+    assert by_id["t1"].status == TaskStatus.DONE
+    assert by_id["t2"].status == TaskStatus.PENDING
+
+
+def test_append_attempt_adds_and_sets_cursor():
+    s = _state_with_two_tasks().with_active_task("t1")
+    s = s.append_attempt("t1", Attempt(id="a1"))
+    t1 = [t for t in s.plan.tasks if t.id == "t1"][0]
+    assert len(t1.attempts) == 1 and t1.attempts[0].id == "a1"
+    assert s.cursor.attempt_id == "a1"
+
+
+def test_update_attempt_attaches_run_result():
+    s = _state_with_two_tasks().with_active_task("t1").append_attempt("t1", Attempt(id="a1"))
+    rr = ValidationResult(command="true", exit_code=0, passed=True)
+    s = s.update_attempt("t1", "a1", run_result=rr, status=AttemptStatus.DONE)
+    a = [t for t in s.plan.tasks if t.id == "t1"][0].attempts[0]
+    assert a.run_result.passed is True and a.status == AttemptStatus.DONE
