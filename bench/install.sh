@@ -18,4 +18,4 @@ else
         echo "WARNING: poor-code source not found at /agent and not on PyPI"
 fi
 
-poor-code --help >/dev/null 2>&1 || echo "WARNING: poor-code not on PATH after install"
+command -v poor-code >/dev/null 2>&1 || echo "WARNING: poor-code not on PATH after install"
