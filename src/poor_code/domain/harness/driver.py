@@ -11,7 +11,7 @@ from typing import Callable
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
-    CodeContext, Phase, Request, Requirement, SessionState, TriggerKind, Verdict,
+    CodeContext, Phase, Plan, Request, Requirement, SessionState, TriggerKind, Verdict,
 )
 
 RouteFn = Callable[[str, NodeResult, SessionState], "str | None"]
@@ -65,11 +65,18 @@ class Driver:
             return state.with_understanding(out)
         if isinstance(out, Requirement):
             return state.with_requirement(out)
+        if isinstance(out, Plan):
+            return state.with_plan(out)
         return state
 
 
 def _phase_for(node: str, current: Phase) -> Phase:
-    return {"locator": Phase.LOCATING, "interviewer": Phase.INTERVIEWING}.get(node, current)
+    return {
+        "locator": Phase.LOCATING,
+        "interviewer": Phase.INTERVIEWING,
+        "planner": Phase.PLANNING,
+        "plan_gate": Phase.PLANNING,
+    }.get(node, current)
 
 
 def _trigger_for(verdict: Verdict | None) -> TriggerKind:
