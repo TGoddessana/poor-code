@@ -1,15 +1,28 @@
-from poor_code.domain.session.models import Phase
+import pytest
+
+from poor_code.domain.session.models import (
+    Attempt,
+    AttemptStatus,
+    ChangeRecord,
+    ChangeSet,
+    Cursor,
+    FeedbackEntry,
+    FeedbackMemory,
+    Phase,
+    Plan,
+    SelectedTask,
+    SessionState,
+    Task,
+    TaskStatus,
+    ValidationResult,
+    Verdict,
+    VerdictKind,
+)
 
 
 def test_phase_has_execution_values():
     assert Phase.IMPLEMENTING.value == "implementing"
     assert Phase.FINALIZING.value == "finalizing"
-
-
-from poor_code.domain.session.models import (
-    AttemptStatus, ValidationResult, ChangeRecord,
-    FeedbackEntry, FeedbackMemory, ChangeSet, SelectedTask,
-)
 
 
 def test_validation_result_passed_field():
@@ -44,9 +57,6 @@ def test_attempt_status_values():
     assert AttemptStatus.ABANDONED.value == "abandoned"
 
 
-from poor_code.domain.session.models import Attempt, Verdict, VerdictKind
-
-
 def test_attempt_defaults():
     a = Attempt(id="a1")
     assert a.id == "a1"
@@ -65,9 +75,6 @@ def test_attempt_carries_run_result():
     assert a.run_result.passed is True and a.status == AttemptStatus.DONE
 
 
-from poor_code.domain.session.models import SessionState
-
-
 def test_session_state_feedback_starts_empty():
     assert SessionState().feedback.entries == ()
 
@@ -78,11 +85,6 @@ def test_with_feedback_entry_appends_immutably():
     s1 = s0.with_feedback_entry(e)
     assert s0.feedback.entries == ()          # original untouched
     assert s1.feedback.entries == (e,)
-
-
-from poor_code.domain.session.models import (
-    Plan, Task, TaskStatus, Cursor, Phase,
-)
 
 
 def _state_with_two_tasks():
@@ -97,6 +99,8 @@ def test_with_active_task_sets_status_and_cursor():
     t2 = [t for t in s.plan.tasks if t.id == "t2"][0]
     assert t2.status == TaskStatus.ACTIVE
     assert s.cursor.task_id == "t2"
+    # Fix 2: active_task_id must stay in sync with cursor.task_id
+    assert s.active_task_id == "t2"
 
 
 def test_with_task_status_changes_one_task():
@@ -120,3 +124,35 @@ def test_update_attempt_attaches_run_result():
     s = s.update_attempt("t1", "a1", run_result=rr, status=AttemptStatus.DONE)
     a = [t for t in s.plan.tasks if t.id == "t1"][0].attempts[0]
     assert a.run_result.passed is True and a.status == AttemptStatus.DONE
+
+
+# Fix 1: unknown task_id raises ValueError
+
+def test_with_active_task_unknown_id_raises():
+    s = _state_with_two_tasks()
+    with pytest.raises(ValueError, match="task 'nope' not found in plan"):
+        s.with_active_task("nope")
+
+
+def test_with_task_status_unknown_id_raises():
+    s = _state_with_two_tasks()
+    with pytest.raises(ValueError, match="task 'nope' not found in plan"):
+        s.with_task_status("nope", TaskStatus.DONE)
+
+
+def test_append_attempt_unknown_task_raises():
+    s = _state_with_two_tasks()
+    with pytest.raises(ValueError, match="task 'nope' not found in plan"):
+        s.append_attempt("nope", Attempt(id="a1"))
+
+
+def test_update_attempt_unknown_task_raises():
+    s = _state_with_two_tasks().with_active_task("t1").append_attempt("t1", Attempt(id="a1"))
+    with pytest.raises(ValueError, match="task 'nope' not found in plan"):
+        s.update_attempt("nope", "a1")
+
+
+def test_update_attempt_unknown_attempt_raises():
+    s = _state_with_two_tasks().with_active_task("t1").append_attempt("t1", Attempt(id="a1"))
+    with pytest.raises(ValueError, match="attempt 'nope' not found in task 't1'"):
+        s.update_attempt("t1", "nope")

@@ -88,6 +88,8 @@ class SessionState:
 
     def _with_task(self, task_id: str, **changes) -> "SessionState":
         assert self.plan is not None, "no plan to update tasks in"
+        if not any(t.id == task_id for t in self.plan.tasks):
+            raise ValueError(f"task {task_id!r} not found in plan")
         tasks = tuple(
             replace(t, **changes) if t.id == task_id else t
             for t in self.plan.tasks
@@ -96,6 +98,7 @@ class SessionState:
 
     def with_active_task(self, task_id: str) -> "SessionState":
         st = self._with_task(task_id, status=TaskStatus.ACTIVE)
+        st = replace(st, active_task_id=task_id)
         if st.cursor is None:
             return st
         return replace(st, cursor=replace(st.cursor, task_id=task_id))
@@ -105,6 +108,8 @@ class SessionState:
 
     def append_attempt(self, task_id: str, attempt: "Attempt") -> "SessionState":
         assert self.plan is not None, "no plan to append attempts to"
+        if not any(t.id == task_id for t in self.plan.tasks):
+            raise ValueError(f"task {task_id!r} not found in plan")
         tasks = tuple(
             replace(t, attempts=t.attempts + (attempt,)) if t.id == task_id else t
             for t in self.plan.tasks
@@ -116,6 +121,11 @@ class SessionState:
 
     def update_attempt(self, task_id: str, attempt_id: str, **changes) -> "SessionState":
         assert self.plan is not None, "no plan to update attempts in"
+        task = next((t for t in self.plan.tasks if t.id == task_id), None)
+        if task is None:
+            raise ValueError(f"task {task_id!r} not found in plan")
+        if not any(a.id == attempt_id for a in task.attempts):
+            raise ValueError(f"attempt {attempt_id!r} not found in task {task_id!r}")
 
         def upd(t):
             if t.id != task_id:
@@ -305,12 +315,14 @@ class ChangeRecord:
 
 @dataclass(frozen=True, slots=True)
 class ChangeSet:
+    # NOTE: no store serializer yet — added in Plan 2 when first persisted.
     aggregate_diff: str = ""
     per_task: tuple[tuple[str, str], ...] = ()   # (task_id, diff)
 
 
 @dataclass(frozen=True, slots=True)
 class SelectedTask:
+    # NOTE: no store serializer yet — added in Plan 2 when first persisted.
     """task_selector → Driver 제어 신호. task_selector가 None을 반환하면 'done' 분기."""
     task_id: str
 
