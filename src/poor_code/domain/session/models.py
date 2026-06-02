@@ -35,6 +35,19 @@ class Session:
 
 
 @dataclass(frozen=True, slots=True)
+class FeedbackEntry:
+    failure_type: str
+    symptom: str
+    prevention_hint: str
+    task_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackMemory:
+    entries: tuple[FeedbackEntry, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class SessionState:
     status: SessionStatus = SessionStatus.READY
     active_task_id: str | None = None
@@ -47,6 +60,7 @@ class SessionState:
     pending_query: "Query | None" = None
     interview: "tuple[AnsweredQuery, ...]" = ()
     repair_hint: str | None = None
+    feedback: FeedbackMemory = field(default_factory=FeedbackMemory)
 
     def with_request(self, request: Request) -> "SessionState":
         return replace(self, request=request)
@@ -65,6 +79,12 @@ class SessionState:
 
     def with_repair_hint(self, hint: str | None) -> "SessionState":
         return replace(self, repair_hint=hint)
+
+    def with_feedback_entry(self, entry: "FeedbackEntry") -> "SessionState":
+        return replace(
+            self,
+            feedback=replace(self.feedback, entries=self.feedback.entries + (entry,)),
+        )
 
     def with_user_response(self, resp: "UserResponse") -> "SessionState":
         assert self.pending_query is not None, "no pending query to answer"
@@ -238,19 +258,6 @@ class ChangeRecord:
     """직접변경 결과. diff는 git에서 사후추출."""
     files: tuple[str, ...] = ()
     diff: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class FeedbackEntry:
-    failure_type: str
-    symptom: str
-    prevention_hint: str
-    task_ref: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class FeedbackMemory:
-    entries: tuple[FeedbackEntry, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

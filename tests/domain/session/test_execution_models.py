@@ -63,3 +63,18 @@ def test_attempt_carries_run_result():
     rr = ValidationResult(command="true", exit_code=0, passed=True)
     a = Attempt(id="a1", run_result=rr, status=AttemptStatus.DONE)
     assert a.run_result.passed is True and a.status == AttemptStatus.DONE
+
+
+from poor_code.domain.session.models import SessionState
+
+
+def test_session_state_feedback_starts_empty():
+    assert SessionState().feedback.entries == ()
+
+
+def test_with_feedback_entry_appends_immutably():
+    s0 = SessionState()
+    e = FeedbackEntry(failure_type="x", symptom="y", prevention_hint="z")
+    s1 = s0.with_feedback_entry(e)
+    assert s0.feedback.entries == ()          # original untouched
+    assert s1.feedback.entries == (e,)
