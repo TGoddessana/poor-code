@@ -5,12 +5,15 @@ build_default_registry + Driver as the TUI; policy divergence lives only in the
 run-loop (run_headless), Driver is unchanged."""
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from typing import Any, TextIO
 
 from poor_code.infra import auth_store
 from poor_code.provider.providers import ollama_cloud
+from poor_code.domain.harness.nodes.reporter import build_report
+from poor_code.domain.session.models import ReportOutcome, SessionState, UserResponse
 
 
 class StderrSink:
@@ -66,3 +69,21 @@ def resolve_llm():
     if creds and creds.get("api_key") and creds.get("model"):
         return ollama_cloud.configure(model=creds["model"], api_key=creds["api_key"])
     return None
+
+
+_CANNED_ANSWER = "Proceed using your best judgment. Do not ask further questions."
+
+
+async def run_headless(driver, state: SessionState, cancel: "asyncio.Event",
+                       sink: object | None = None) -> SessionState:
+    """FULL_AUTO walk: auto-answer queries; stamp ABANDONED on any non-success park."""
+    while True:
+        state = await driver.run(state, cancel, sink=sink)
+        if state.pending_query is not None:
+            state = state.with_user_response(
+                UserResponse(query_id=state.pending_query.id, answer=_CANNED_ANSWER))
+            continue
+        break
+    if state.report is None:
+        state = state.with_report(build_report(state, ReportOutcome.ABANDONED))
+    return state
