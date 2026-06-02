@@ -28,7 +28,9 @@ class Driver:
         self._route = route
         self._on_step = on_step or (lambda _s: None)
 
-    async def run(self, state: SessionState, cancel: asyncio.Event) -> SessionState:
+    async def run(
+        self, state: SessionState, cancel: asyncio.Event, *, sink: object | None = None
+    ) -> SessionState:
         while True:
             assert state.cursor is not None, "Driver requires a cursor"
             node = self._registry.get(state.cursor.current_node)
@@ -37,7 +39,9 @@ class Driver:
             if cancel.is_set():
                 return state
 
-            result = await node.run(NodeContext(state=state, cancel=cancel))
+            if sink is not None:
+                sink.node_entered(node.name, state.cursor.phase.value)
+            result = await node.run(NodeContext(state=state, cancel=cancel, sink=sink))
             if result.query is not None:                   # suspend: await user
                 state = state.with_pending_query(result.query)
                 self._on_step(state)                       # checkpoint with pending query

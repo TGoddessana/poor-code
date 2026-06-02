@@ -27,6 +27,7 @@ class NodeResult:
 class NodeContext:
     state: SessionState
     cancel: asyncio.Event
+    sink: Any = None
 
 
 @runtime_checkable
