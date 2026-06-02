@@ -30,8 +30,8 @@ async def test_repairs_understanding_when_no_candidates():
 
 @pytest.mark.asyncio
 async def test_escalates_after_repair_budget_exhausted():
-    # A prior gate-triggered bounce back to the locator already happened.
-    prior = Transition(from_node="understanding_gate", to_node="locator",
+    # A prior gate-triggered bounce back to the explorer already happened.
+    prior = Transition(from_node="understanding_gate", to_node="explorer",
                        trigger=TriggerKind.GATE, reason="repair", ts_iso="t")
     state = SessionState(understanding=CodeContext(), history=(prior,))
     res = await UnderstandingGate().run(_ctx(state))
@@ -98,4 +98,33 @@ async def test_plan_gate_escalates_after_repair_budget_exhausted():
     prior = Transition(from_node="plan_gate", to_node="planner",
                        trigger=TriggerKind.GATE, reason="repair", ts_iso="t")
     res = await PlanGate().run(_ctx(SessionState(plan=Plan(), history=(prior,))))
+    assert res.verdict.kind is VerdictKind.ESCALATE
+
+
+@pytest.mark.asyncio
+async def test_understanding_gate_repair_hint_uses_search_notes():
+    state = SessionState(understanding=CodeContext(
+        candidates=(), search_notes="grep reconnect 0건; try stream/close"))
+    res = await UnderstandingGate().run(_ctx(state))
+    assert res.verdict.kind is VerdictKind.REPAIR
+    assert res.verdict.layer is Layer.UNDERSTANDING
+    assert "stream/close" in res.verdict.hint
+
+
+@pytest.mark.asyncio
+async def test_understanding_gate_falls_back_when_no_notes():
+    res = await UnderstandingGate().run(
+        _ctx(SessionState(understanding=CodeContext(candidates=()))))
+    assert res.verdict.kind is VerdictKind.REPAIR
+    assert res.verdict.hint  # non-empty fallback
+
+
+@pytest.mark.asyncio
+async def test_understanding_gate_escalates_after_explorer_bounce():
+    state = SessionState(
+        understanding=CodeContext(candidates=()),
+        history=(Transition(from_node="understanding_gate", to_node="explorer",
+                            trigger=TriggerKind.GATE, reason="r", ts_iso="t"),),
+    )
+    res = await UnderstandingGate().run(_ctx(state))
     assert res.verdict.kind is VerdictKind.ESCALATE
