@@ -8,6 +8,7 @@ import asyncio
 from pathlib import Path
 
 from poor_code.domain.harness.node import NodeContext, NodeResult
+from poor_code.domain.harness.nodes.validator import MAX_ADVERSARIAL_ROUNDS
 from poor_code.domain.session.models import (
     AttemptStatus,
     Layer,
@@ -62,6 +63,11 @@ class EngGate:
         hint = self._invalid_hint(task, attempt)
         if hint is None:
             return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
+        if attempt is not None and attempt.adversarial_rounds >= MAX_ADVERSARIAL_ROUNDS:
+            return NodeResult(verdict=Verdict(
+                kind=VerdictKind.ESCALATE,
+                query=(f"eng_gate: implementation still structurally invalid after "
+                       f"{MAX_ADVERSARIAL_ROUNDS} refinements: {hint}")))
         return NodeResult(verdict=Verdict(
             kind=VerdictKind.REPAIR, layer=Layer.IMPLEMENTATION, hint=hint))
 

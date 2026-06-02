@@ -253,3 +253,34 @@ async def test_run_shell_returns_exit_code_and_output(tmp_path):
     assert code == 0 and "hello" in out
     code, _ = await run_shell("exit 7", tmp_path, _a.Event())
     assert code == 7
+
+
+@pytest.mark.asyncio
+async def test_eng_gate_repairs_below_cap_then_escalates_at_cap():
+    from poor_code.domain.harness.node import NodeContext
+    from poor_code.domain.harness.nodes.execution import EngGate
+    from poor_code.domain.harness.nodes.validator import MAX_ADVERSARIAL_ROUNDS
+    from poor_code.domain.session.models import (
+        SessionState, Plan, Task, EditScope, Cursor, Phase, TaskStatus,
+        Attempt, VerdictKind, Layer)
+    import asyncio as _a
+
+    def _state(rounds):
+        # attempt with NO patch → structurally invalid → eng_gate wants repair
+        att = Attempt(id="t1-a1", patch=None, adversarial_rounds=rounds)
+        return SessionState(
+            plan=Plan(tasks=(Task(id="t1", title="x", purpose="p",
+                                  edit_scope=EditScope(editable=("a.txt",)),
+                                  how_to_validate="true", status=TaskStatus.ACTIVE,
+                                  attempts=(att,)),)),
+            cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="eng_gate",
+                          task_id="t1", attempt_id="t1-a1"))
+
+    # below cap → repair (implementation)
+    res = await EngGate().run(NodeContext(state=_state(0), cancel=_a.Event()))
+    assert res.verdict.kind is VerdictKind.REPAIR
+    assert res.verdict.layer is Layer.IMPLEMENTATION
+
+    # at cap → escalate (terminates the eng_gate↔implementer loop)
+    res = await EngGate().run(NodeContext(state=_state(MAX_ADVERSARIAL_ROUNDS), cancel=_a.Event()))
+    assert res.verdict.kind is VerdictKind.ESCALATE
