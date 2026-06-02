@@ -5,8 +5,12 @@ build_default_registry + Driver as the TUI; policy divergence lives only in the
 run-loop (run_headless), Driver is unchanged."""
 from __future__ import annotations
 
+import os
 import sys
 from typing import Any, TextIO
+
+from poor_code.infra import auth_store
+from poor_code.provider.providers import ollama_cloud
 
 
 class StderrSink:
@@ -50,3 +54,15 @@ class StderrSink:
 
     def forward(self, event: Any) -> None:
         pass
+
+
+def resolve_llm():
+    """Env first (container has no auth.json), then on-disk auth_store. None = no creds."""
+    key = os.environ.get("OLLAMA_API_KEY")
+    model = os.environ.get("POOR_CODE_MODEL")
+    if key and model:
+        return ollama_cloud.configure(model=model, api_key=key)
+    creds = auth_store.get("ollama_cloud")
+    if creds and creds.get("api_key") and creds.get("model"):
+        return ollama_cloud.configure(model=creds["model"], api_key=creds["api_key"])
+    return None
