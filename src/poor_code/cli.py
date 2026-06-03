@@ -28,7 +28,7 @@ from poor_code.infra.settings import SettingsLoader
 from poor_code.infra.system_prompt import SystemPromptComposer
 from poor_code.infra.turn_assembler import TurnAssembler
 from poor_code.domain.project_map import make_default_builder
-from poor_code.provider.providers import ollama_cloud
+from poor_code.provider.providers import PROVIDER_LABELS, build_llm
 from poor_code.slash.commands.login import LoginCommand
 from poor_code.slash.dispatcher import SlashDispatcher
 from poor_code.slash.registry import SlashRegistry
@@ -47,9 +47,15 @@ class NoAuthLLM:
 
 
 def _initial_llm():
-    creds = auth_store.get("ollama_cloud")
-    if creds and creds.get("api_key") and creds.get("model"):
-        return ollama_cloud.configure(model=creds["model"], api_key=creds["api_key"])
+    active = auth_store.get_active()
+    # Try the active provider first, then any configured provider in label order.
+    ordered = ([active] if active else []) + [
+        pid for pid, _ in PROVIDER_LABELS if pid != active
+    ]
+    for pid in ordered:
+        creds = auth_store.get(pid) if pid else None
+        if creds and creds.get("api_key") and creds.get("model"):
+            return build_llm(pid, model=creds["model"], api_key=creds["api_key"])
     return NoAuthLLM()
 
 
