@@ -146,7 +146,7 @@ class Implementer:
             feedback = "\nPAST FAILURES TO AVOID:\n" + "\n".join(
                 f"  - {e.failure_type}: {e.prevention_hint}" for e in state.feedback.entries)
         hint = f"\nREPAIR HINT: {state.repair_hint}" if state.repair_hint else ""
-        header = f"{render_position('implementer', state)}\n\n"
+        header = f"{render_position(self.name, state)}\n\n"
         if state.request is not None:
             header += f"ORIGINAL REQUEST:\n{state.request.raw_text}\n"
         if state.requirement is not None:

@@ -101,7 +101,7 @@ class Interviewer(AgentNode):
         return [
             {"role": "system", "content": system},
             {"role": "user", "content":
-                f"{render_position('interviewer', state)}\n\n"
+                f"{render_position(self.name, state)}\n\n"
                 f"REQUEST:\n{state.request.raw_text}\n\n"
                 f"CODE CONTEXT:\n{self._context_digest(state)}\n\n"
                 f"INTERVIEW SO FAR:\n{self._interview_digest(state.interview)}"},

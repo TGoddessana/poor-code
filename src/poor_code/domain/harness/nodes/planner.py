@@ -97,7 +97,7 @@ class Planner(AgentNode):
             {
                 "role": "user",
                 "content": (
-                    f"{render_position('planner', state)}\n\n"
+                    f"{render_position(self.name, state)}\n\n"
                     "REQUIREMENT:\n"
                     f"summary: {req.summary}\n"
                     f"acceptance:\n{self._bullets(req.acceptance)}\n"

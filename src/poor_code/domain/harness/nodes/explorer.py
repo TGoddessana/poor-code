@@ -107,7 +107,7 @@ class ExploringNode(AgentNode):
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": _EXPLORE_SYSTEM},
             {"role": "user", "content":
-                f"{render_position('explorer', state)}\n\n"
+                f"{render_position(self.name, state)}\n\n"
                 f"REQUEST:\n{state.request.raw_text}\n\nCODE MAP:\n{self._map_digest()}{hint}"},
         ]
         tool_ctx = ToolContext(
