@@ -263,6 +263,7 @@ class CodeContext:
     grounding: GroundingStatus = GroundingStatus.NOT_FOUND  # 빈손 해석에만 의미
     summary: str = ""             # explorer 합성 브리핑 (한 단락)
     excerpts: tuple[FileExcerpt, ...] = ()  # explorer가 실제로 읽은 본문
+    environment: str = ""         # explorer가 1회 probe한 OS/런타임/툴체인 스냅샷
 
 
 class QueryKind(str, Enum):

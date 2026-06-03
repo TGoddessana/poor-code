@@ -173,6 +173,10 @@ class Planner(AgentNode):
                 "MODE: greenfield (create-from-scratch — no existing code to ground; "
                 "absence of candidates is expected, not a failure)."
             )
+        if cc.environment:
+            lines.append(
+                "ENVIRONMENT (choose a stack/runtime that is actually AVAILABLE here; "
+                f"do not assume a runtime that is absent):\n{cc.environment}")
         if cc.summary:
             lines.append(f"summary: {cc.summary}")
         for label, refs in (

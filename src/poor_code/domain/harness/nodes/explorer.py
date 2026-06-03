@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from poor_code.domain.harness.env_probe import probe_environment
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output,
 )
@@ -101,22 +102,25 @@ class ExploringNode(AgentNode):
         self._tools = tools
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        history, excerpts = await self._explore(ctx)
+        environment = await probe_environment(Path.cwd())
+        history, excerpts = await self._explore(ctx, environment)
         args_json = await self._dispatch(ctx, extra_messages=history)
-        return NodeResult(output=self.parse(args_json, excerpts))
+        return NodeResult(output=self.parse(args_json, excerpts, environment=environment))
 
     # stage ① — the read/grep tool loop
-    async def _explore(self, ctx: NodeContext) -> tuple[list[dict[str, Any]], tuple[FileExcerpt, ...]]:
+    async def _explore(self, ctx: NodeContext, environment: str = "") -> tuple[list[dict[str, Any]], tuple[FileExcerpt, ...]]:
         state = ctx.state
         assert state.request is not None, "ExploringNode requires state.request"
         hint = ""
         if state.repair_hint:
             hint = f"\n\nRE-SEARCH: previous exploration failed — {state.repair_hint}. Widen the search."
+        env_block = f"\n\nENVIRONMENT (available OS/runtimes/tools):\n{environment}" if environment else ""
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": _EXPLORE_SYSTEM},
             {"role": "user", "content":
                 f"{render_position(self.name, state)}\n\n"
-                f"REQUEST:\n{state.request.raw_text}\n\nCODE MAP:\n{self._map_digest()}{hint}"},
+                f"REQUEST:\n{state.request.raw_text}\n\nCODE MAP:\n{self._map_digest()}"
+                f"{env_block}{hint}"},
         ]
         tool_ctx = ToolContext(
             turn_id="explore", cancel=ctx.cancel, cwd=Path.cwd(), ask=allow_all)
@@ -221,7 +225,8 @@ class ExploringNode(AgentNode):
     def output_model(self) -> type[BaseModel]:
         return _CodeContextOut
 
-    def parse(self, args_json: str, excerpts: tuple[FileExcerpt, ...] = ()) -> CodeContext:
+    def parse(self, args_json: str, excerpts: tuple[FileExcerpt, ...] = (),
+              environment: str = "") -> CodeContext:
         out = validate_output(_CodeContextOut, args_json, node=self.name)
         to_ref = lambda r: CodeRef(file=r.file, symbol=r.symbol, lineno=r.lineno)
         grounding = GroundingStatus(out.grounding)
@@ -240,6 +245,7 @@ class ExploringNode(AgentNode):
             grounding=grounding,
             summary=out.summary,
             excerpts=excerpts,
+            environment=environment,
         )
 
     def _map_digest(self) -> str:

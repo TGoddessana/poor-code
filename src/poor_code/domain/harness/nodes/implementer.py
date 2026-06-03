@@ -151,6 +151,9 @@ class Implementer:
             header += f"ORIGINAL REQUEST:\n{state.request.raw_text}\n"
         if state.requirement is not None:
             header += f"OVERALL GOAL:\n{state.requirement.summary}\n"
+        if state.understanding is not None and state.understanding.environment:
+            header += ("ENVIRONMENT (use only runtimes/tools available here; verify with "
+                       f"the bash tool before relying on one):\n{state.understanding.environment}\n")
         return (f"{header}"
                 f"TASK: {task.title}\nPURPOSE: {task.purpose}\n"
                 f"DETAILS: {task.description}\nEDITABLE PATHS: {scope}\n"
