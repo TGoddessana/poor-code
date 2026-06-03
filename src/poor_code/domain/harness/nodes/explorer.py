@@ -17,7 +17,8 @@ from poor_code.domain.harness.node import (
 )
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
-from poor_code.domain.session.models import CodeContext, CodeRef, GroundingStatus, SessionState
+from poor_code.domain.session.models import (
+    CodeContext, CodeRef, FileExcerpt, GroundingStatus, SessionState)
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
@@ -26,6 +27,7 @@ from poor_code.provider.events import (
 
 _TOOL_NAME = "emit_code_context"
 MAX_ITERATIONS = 20
+MAX_EXCERPT_CHARS = 4000
 
 _EXPLORE_SYSTEM = (
     "You are the Explorer, the codebase-reconnaissance step of a larger pipeline. "
@@ -58,7 +60,11 @@ _EXTRACT_SYSTEM = (
     "no existing code to ground (an empty or unrelated CODE MAP is strong evidence); "
     "'not_found' when code that SHOULD exist could not be located — then write a "
     "precise search_notes diagnosis (what you searched, what was empty, where to look "
-    "next). Call emit_code_context once."
+    "next). Also write `summary`: ONE paragraph of the key facts you observed — what "
+    "the request actually requires, what exists vs. is missing, concrete data facts "
+    "(file dimensions/format), and the command that ACTUALLY validates the result "
+    "(behavioral, not a string check). Do NOT retype file bodies; the harness "
+    "attaches what you read. Call emit_code_context once."
 )
 
 
@@ -74,6 +80,7 @@ class _CodeContextOut(BaseModel):
     related_tests: list[_CodeRefOut] = []
     search_notes: str = ""
     grounding: Literal["not_found", "greenfield"] = "not_found"
+    summary: str = ""
 
 
 class ExploringNode(AgentNode):
@@ -85,12 +92,12 @@ class ExploringNode(AgentNode):
         self._tools = tools
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        history = await self._explore(ctx)
+        history, excerpts = await self._explore(ctx)
         args_json = await self._dispatch(ctx, extra_messages=history)
-        return NodeResult(output=self.parse(args_json))
+        return NodeResult(output=self.parse(args_json, excerpts))
 
     # stage ① — the read/grep tool loop
-    async def _explore(self, ctx: NodeContext) -> list[dict[str, Any]]:
+    async def _explore(self, ctx: NodeContext) -> tuple[list[dict[str, Any]], tuple[FileExcerpt, ...]]:
         state = ctx.state
         assert state.request is not None, "ExploringNode requires state.request"
         hint = ""
@@ -103,6 +110,7 @@ class ExploringNode(AgentNode):
         ]
         tool_ctx = ToolContext(
             turn_id="explore", cancel=ctx.cancel, cwd=Path.cwd(), ask=allow_all)
+        excerpts: dict[str, FileExcerpt] = {}
 
         for _ in range(MAX_ITERATIONS):
             if ctx.cancel.is_set():
@@ -122,6 +130,7 @@ class ExploringNode(AgentNode):
                 if ctx.sink is not None:
                     ctx.sink.tool_started(cid, name, _safe_args(args))
                 output = await self._run_tool(name, args, tool_ctx)
+                self._maybe_record_excerpt(name, args, output, excerpts)
                 if ctx.sink is not None:
                     if output.startswith("ERROR:"):
                         ctx.sink.tool_failed(cid, output)
@@ -131,7 +140,7 @@ class ExploringNode(AgentNode):
                     "role": "tool", "tool_call_id": cid, "content": output,
                 })
         # hand the whole exploration (minus its own system prompt) to stage ②
-        return messages[1:]
+        return messages[1:], tuple(excerpts.values())
 
     async def _stream_round(self, messages: list[dict[str, Any]], sink: object | None = None):
         text = ""
@@ -164,6 +173,24 @@ class ExploringNode(AgentNode):
         except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
             return f"ERROR: {type(e).__name__}: {e}"
 
+    @staticmethod
+    def _maybe_record_excerpt(name: str, args_json: str, output: str,
+                              excerpts: dict[str, FileExcerpt]) -> None:
+        """Capture `read` tool outputs as ground-truth excerpts (last read of a
+        path wins). grep results and tool errors are not file bodies → skipped."""
+        if name != "read" or output.startswith("ERROR:"):
+            return
+        try:
+            path = json.loads(args_json or "{}").get("path")
+        except (ValueError, TypeError):
+            path = None
+        if not path:
+            return
+        text, truncated = output, False
+        if len(text) > MAX_EXCERPT_CHARS:
+            text, truncated = text[:MAX_EXCERPT_CHARS], True
+        excerpts[path] = FileExcerpt(path=path, text=text, truncated=truncated)
+
     # stage ② — extraction (build_messages provides system+user envelope)
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         return [
@@ -184,7 +211,7 @@ class ExploringNode(AgentNode):
     def output_model(self) -> type[BaseModel]:
         return _CodeContextOut
 
-    def parse(self, args_json: str) -> CodeContext:
+    def parse(self, args_json: str, excerpts: tuple[FileExcerpt, ...] = ()) -> CodeContext:
         out = validate_output(_CodeContextOut, args_json, node=self.name)
         to_ref = lambda r: CodeRef(file=r.file, symbol=r.symbol, lineno=r.lineno)
         return CodeContext(
@@ -193,6 +220,8 @@ class ExploringNode(AgentNode):
             related_tests=tuple(to_ref(r) for r in out.related_tests),
             search_notes=out.search_notes,
             grounding=GroundingStatus(out.grounding),
+            summary=out.summary,
+            excerpts=excerpts,
         )
 
     def _map_digest(self) -> str:
