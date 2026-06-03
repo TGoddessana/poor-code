@@ -233,7 +233,7 @@ def test_build_registry_has_code_nodes():
     from poor_code.domain.harness import build_default_registry
 
     class _LLM:
-        async def stream(self, messages, tools):
+        async def stream(self, messages, tools, response_format=None):
             if False:
                 yield None
 

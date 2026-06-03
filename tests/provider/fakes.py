@@ -29,6 +29,7 @@ class FakeLLMClient:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        response_format: dict[str, Any] | None = None,
     ) -> AsyncIterator[LLMEvent]:
         self.calls.append({"messages": list(messages), "tools": list(tools)})
         if not self._rounds:

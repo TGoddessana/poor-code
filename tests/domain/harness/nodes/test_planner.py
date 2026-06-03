@@ -29,7 +29,7 @@ class FakeLLM:
         self.seen_messages = None
         self.seen_tools = None
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         self.seen_messages = messages
         self.seen_tools = tools
         yield ToolCallStarted(call_id="c1", name=tools[0]["function"]["name"])

@@ -14,7 +14,7 @@ from poor_code.provider.events import (
 class _FeedbackLLM:
     def __init__(self, payload):
         self._args = json.dumps(payload)
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         yield ToolCallStarted(call_id="f1", name=tools[0]["function"]["name"])
         yield ToolCallInputDelta(call_id="f1", json_delta=self._args)
         yield ToolCallEnded(call_id="f1")

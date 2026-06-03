@@ -9,7 +9,7 @@ from poor_code.provider.events import (
 
 
 class _LLM:
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         yield TextDelta(text="think ")
         yield TextDelta(text="hard")
         yield ToolCallStarted(call_id="c1", name=tools[0]["function"]["name"])

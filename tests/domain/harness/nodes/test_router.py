@@ -14,7 +14,7 @@ class FakeLLMClient:
     def __init__(self, args_obj):
         self._args = json.dumps(args_obj)
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         assert len(tools) == 1
         yield ToolCallStarted(call_id="c1", name=tools[0]["function"]["name"])
         yield ToolCallInputDelta(call_id="c1", json_delta=self._args)
@@ -24,7 +24,7 @@ class FakeLLMClient:
 
 class SilentLLMClient:
     """Never calls the output tool — exercises the deterministic fallback."""
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         yield FinishedReason(reason="stop")
 
 

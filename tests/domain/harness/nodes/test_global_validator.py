@@ -15,7 +15,7 @@ from poor_code.provider.events import (
 class _AnalyzeLLM:
     def __init__(self, hint="task t2 broke t1"):
         self._args = json.dumps({"hint": hint})
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         yield ToolCallStarted(call_id="a1", name=tools[0]["function"]["name"])
         yield ToolCallInputDelta(call_id="a1", json_delta=self._args)
         yield ToolCallEnded(call_id="a1")
@@ -23,7 +23,7 @@ class _AnalyzeLLM:
 
 
 class _NoLLM:
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         raise AssertionError("LLM must not be called when all validations pass")
         yield  # pragma: no cover
 

@@ -28,7 +28,7 @@ class FakeLLMClient:
                                          "rationale": "scope is ambiguous"}},
         }
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         name = tools[0]["function"]["name"]
         if name not in self._by_tool:
             # ExploringNode stage ① exploration round: stop without read/grep
@@ -123,7 +123,7 @@ class ScriptedLLM:
         self._steps = list(interview_steps)
         self._plan = plan
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         name = tools[0]["function"]["name"]
         if name == "classify_request":
             args = {"kind": self._kind, "reason": "t"}

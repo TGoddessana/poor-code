@@ -14,7 +14,7 @@ from poor_code.provider.events import (
 class _JudgeLLM:
     def __init__(self, verdict, hint="h"):
         self._args = json.dumps({"verdict": verdict, "hint": hint})
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         yield ToolCallStarted(call_id="j1", name=tools[0]["function"]["name"])
         yield ToolCallInputDelta(call_id="j1", json_delta=self._args)
         yield ToolCallEnded(call_id="j1")
@@ -60,7 +60,7 @@ async def test_validator_repair_plan():
 @pytest.mark.asyncio
 async def test_validator_forces_advance_at_cap_without_calling_llm():
     class _Boom:
-        async def stream(self, messages, tools):
+        async def stream(self, messages, tools, response_format=None):
             raise AssertionError("LLM must not be called at the cap")
             yield  # pragma: no cover
     res = await Validator(_Boom()).run(

@@ -21,7 +21,7 @@ class ScriptedLLM:
     def __init__(self, rounds):
         self._rounds = list(rounds)
         self.calls = []
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         self.calls.append({"messages": list(messages), "tools": list(tools)})
         for ev in self._rounds.pop(0):
             yield ev

@@ -31,7 +31,7 @@ class AlwaysRepairLLM:
         # False means it emits text + stop (so the implementer loop exits).
         self._writing = True
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         name = tools[0]["function"]["name"]
         if name == "write":
             if self._writing:

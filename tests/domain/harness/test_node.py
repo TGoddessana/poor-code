@@ -43,7 +43,7 @@ from poor_code.provider.events import (
 class _CaptureLLM:
     def __init__(self):
         self.seen_messages = None
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         self.seen_messages = messages
         yield ToolCallStarted(call_id="c1", name=tools[0]["function"]["name"])
         yield ToolCallInputDelta(call_id="c1", json_delta="{}")
@@ -169,4 +169,46 @@ async def test_dispatch_rerolls_on_schema_invalid_args():
             NodeContext(state=SessionState(), cancel=asyncio.Event()))
     assert llm.calls == MAX_DISPATCH_ATTEMPTS
     assert "ok" in exc.value.detail   # points at the bad field
+
+
+# --- response_format json_schema forcing (closes the no-tool-call gap) ---
+
+
+class _RFCaptureLLM:
+    """Captures the response_format the dispatch sends; still returns a tool call."""
+    def __init__(self):
+        self.seen_rf = "UNSET"
+
+    async def stream(self, messages, tools, response_format=None):
+        self.seen_rf = response_format
+        yield ToolCallStarted(call_id="c1", name=tools[0]["function"]["name"])
+        yield ToolCallInputDelta(call_id="c1", json_delta="{}")
+        yield ToolCallEnded(call_id="c1")
+        yield FinishedReason(reason="tool_calls")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_sends_response_format_built_from_output_tool():
+    llm = _RFCaptureLLM()
+    await _Probe(llm)._dispatch(NodeContext(state=SessionState(), cancel=asyncio.Event()))
+    rf = llm.seen_rf
+    assert rf is not None and rf["type"] == "json_schema"
+    assert rf["json_schema"]["name"] == "out"     # from _Probe.output_tool()
+    assert rf["json_schema"]["schema"] == {}       # _Probe's parameters
+
+
+class _ContentJSONLLM:
+    """Honors response_format: emits schema-valid JSON as content, never a tool call."""
+    async def stream(self, messages, tools, response_format=None):
+        yield TextDelta(text='{"ok": 7}')
+        yield FinishedReason(reason="stop")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_accepts_validated_content_json_without_tool_call():
+    # response_format mode: the JSON arrives as content, not a tool call. With an
+    # output_model to validate against, it is accepted (prose would fail validation).
+    out = await _ValidatedProbe(_ContentJSONLLM())._dispatch(
+        NodeContext(state=SessionState(), cancel=asyncio.Event()))
+    assert json.loads(out) == {"ok": 7}
 

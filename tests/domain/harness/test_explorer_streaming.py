@@ -37,7 +37,7 @@ class _ExploreThenEmitLLM:
     """Round 1: a grep tool call. Round 2 (extraction): emit_code_context."""
     def __init__(self):
         self.calls = 0
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         self.calls += 1
         if self.calls == 1:
             yield TextDelta(text="searching ")

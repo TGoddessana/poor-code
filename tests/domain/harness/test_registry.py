@@ -24,7 +24,7 @@ def test_execution_agent_nodes_are_registered():
     from poor_code.domain.project_map.models import ProjectMap
 
     class _LLM:
-        async def stream(self, messages, tools):
+        async def stream(self, messages, tools, response_format=None):
             if False:
                 yield None
 
@@ -43,7 +43,7 @@ def test_reporter_is_registered():
     from poor_code.domain.project_map.models import ProjectMap
 
     class _LLM:
-        async def stream(self, messages, tools):
+        async def stream(self, messages, tools, response_format=None):
             if False:
                 yield None
 

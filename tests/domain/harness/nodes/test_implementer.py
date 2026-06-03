@@ -19,7 +19,7 @@ class _WriteThenStopLLM:
     def __init__(self, content="hi"):
         self.calls = 0
         self._content = content
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         self.calls += 1
         if self.calls == 1:
             yield ToolCallStarted(call_id="w1", name="write")

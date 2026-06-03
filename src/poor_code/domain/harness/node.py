@@ -127,20 +127,33 @@ class AgentNode:
         args_json = await self._dispatch(ctx)
         return NodeResult(output=self.parse(args_json))
 
+    def _response_format(self) -> dict[str, Any]:
+        """Force schema-valid JSON output via response_format. The provider only
+        attaches it when the route declares the capability (e.g. ollama_cloud);
+        otherwise it is dropped and tool-calling remains the channel. The schema
+        is the output tool's already-inlined parameters, so a model that would
+        otherwise reply with prose is constrained to emit the structured object —
+        which then arrives as message content rather than a tool call."""
+        fn = self.output_tool()["function"]
+        return {"type": "json_schema",
+                "json_schema": {"name": fn["name"], "schema": fn.get("parameters", {})}}
+
     async def _dispatch(self, ctx: NodeContext, extra_messages: list[dict] | None = None) -> str:
-        """Stream one forced output-tool call, retrying up to MAX_DISPATCH_ATTEMPTS
-        times. Each failure (no tool call, or schema-invalid args when output_model
-        is set) is fed back to the model as a corrective message and re-rolled.
-        After the budget is exhausted the last StructuredOutputError propagates."""
+        """Stream one forced structured output, retrying up to MAX_DISPATCH_ATTEMPTS
+        times. The output may arrive as a tool call OR (under response_format) as
+        JSON content; either way it is validated when output_model is set. Each
+        failure (no output, or schema-invalid) is fed back as a corrective message
+        and re-rolled. After the budget is exhausted the last error propagates."""
         base = self.build_messages(ctx.state)
         model_cls = self.output_model()
+        response_format = self._response_format()
         corrections: list[dict] = []
         last_err: StructuredOutputError | None = None
         for _ in range(MAX_DISPATCH_ATTEMPTS):
             extras = [*(extra_messages or []), *corrections]
             messages = [base[0], *extras, *base[1:]] if extras else base
             try:
-                raw = await self._stream_once(ctx, messages)
+                raw = await self._stream_once(ctx, messages, response_format)
                 if model_cls is not None:
                     validate_output(model_cls, raw, node=self.name)
                 return raw
@@ -150,12 +163,17 @@ class AgentNode:
         assert last_err is not None
         raise last_err
 
-    async def _stream_once(self, ctx: NodeContext, messages: list[dict]) -> str:
+    async def _stream_once(
+        self, ctx: NodeContext, messages: list[dict],
+        response_format: dict[str, Any] | None = None,
+    ) -> str:
         tools = [self.output_tool()]
         args_by_call: dict[str, str] = {}
         order: list[str] = []
         content: list[str] = []
-        async for ev in self._llm.stream(messages=messages, tools=tools):
+        async for ev in self._llm.stream(
+            messages=messages, tools=tools, response_format=response_format,
+        ):
             if ctx.cancel.is_set():
                 raise asyncio.CancelledError(f"{self.name} cancelled")
             match ev:
@@ -173,6 +191,12 @@ class AgentNode:
                     pass
         if order:
             return args_by_call[order[0]] or "{}"
+        # No tool call: under response_format the structured object arrives as
+        # content. Accept it only when there is an output_model to validate it
+        # against (the caller validates) — otherwise prose could slip through.
+        text = "".join(content)
+        if text.strip() and self.output_model() is not None:
+            return text
         raise StructuredOutputError(
-            self.name, "".join(content),
+            self.name, text,
             "model produced no tool call (replied with prose or nothing)")

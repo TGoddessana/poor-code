@@ -18,7 +18,7 @@ class FakeLLMClient:
     def __init__(self, args_obj):
         self._args = json.dumps(args_obj)
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         # the node must have offered exactly one output tool
         assert len(tools) == 1
         yield ToolCallStarted(call_id="c1", name=tools[0]["function"]["name"])

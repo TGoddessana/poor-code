@@ -436,7 +436,7 @@ class _ModelAwareFakeLLM:
         self._events = events
         self.model = model
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         for ev in self._events:
             yield ev
 

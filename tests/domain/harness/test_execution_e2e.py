@@ -20,7 +20,7 @@ class E2ELLM:
     def __init__(self):
         self._impl_round = 0
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, response_format=None):
         name = tools[0]["function"]["name"]
         canned = {
             "classify_request": {"kind": "engineering", "reason": "t"},
