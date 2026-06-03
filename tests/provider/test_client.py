@@ -23,14 +23,17 @@ def _sse(chunks: list[dict]) -> bytes:
     return lines + b"data: [DONE]\n\n"
 
 
-def _make_client() -> LLMClient:
-    route = Route(
+def _route() -> Route:
+    return Route(
         protocol=OpenAICompatibleChat(),
         endpoint="/v1/chat/completions",
         auth=BearerAuth(token="t"),
         framing=SseFraming(),
     )
-    return LLMClient(route=route, base_url="https://example.test", model="m")
+
+
+def _make_client(**kwargs) -> LLMClient:
+    return LLMClient(route=_route(), base_url="https://example.test", model="m", **kwargs)
 
 
 @pytest.mark.asyncio
@@ -132,3 +135,54 @@ async def test_stream_http_error_includes_response_body_in_message():
         [_ async for _ in _make_client().stream(messages=[], tools=[])]
     assert "model 'nemotron3:33b' not found" in str(exc.value)
     assert "404" in str(exc.value)
+
+
+# --- #1: per-call idle timeout + bounded retry on transport stalls -------------
+
+def test_idle_read_timeout_is_finite():
+    """read=None turns a provider stall into an infinite hang. The read (idle)
+    timeout must be a finite, positive number so a stalled stream raises."""
+    t = _make_client()._timeout
+    assert t.read is not None and t.read > 0
+    assert t.connect is not None and t.connect > 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_retries_on_transport_stall_before_first_event():
+    """A stall before any token arrives is retried with a fresh request."""
+    body = _sse([
+        {"choices": [{"delta": {"content": "ok"}, "finish_reason": None}]},
+        {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+    ])
+    route = respx.post("https://example.test/v1/chat/completions").mock(
+        side_effect=[httpx.ReadTimeout("stall"), httpx.Response(200, content=body)]
+    )
+    events = [ev async for ev in _make_client().stream(messages=[], tools=[])]
+    assert route.call_count == 2                     # first attempt stalled, retry succeeded
+    assert TextDelta(text="ok") in events
+    assert isinstance(events[-1], FinishedReason)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_gives_up_after_max_retries_on_persistent_stall():
+    route = respx.post("https://example.test/v1/chat/completions").mock(
+        side_effect=httpx.ReadTimeout("stall")
+    )
+    client = _make_client(max_retries=2)
+    with pytest.raises(httpx.TimeoutException):
+        [_ async for _ in client.stream(messages=[], tools=[])]
+    assert route.call_count == 3                      # 1 initial + 2 retries
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_http_status_error_is_not_retried():
+    """A 5xx is a definite answer, not a transport stall — do not retry it."""
+    route = respx.post("https://example.test/v1/chat/completions").mock(
+        return_value=httpx.Response(500, text="boom")
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        [_ async for _ in _make_client(max_retries=2).stream(messages=[], tools=[])]
+    assert route.call_count == 1
