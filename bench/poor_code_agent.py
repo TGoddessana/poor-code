@@ -22,12 +22,25 @@ def build_run_commands(instruction: str) -> list[str]:
     return [f"poor-code --headless {shlex.quote(instruction)}"]
 
 
+# Credential env vars forwarded into the container if present on the bench host.
+_KEY_ENVS = ("OLLAMA_API_KEY", "OPENAI_API_KEY", "POOR_CODE_API_KEY")
+
+
 def build_env() -> dict[str, str]:
-    """Credentials passed into the container. Both required on the bench host."""
-    return {
-        "OLLAMA_API_KEY": os.environ["OLLAMA_API_KEY"],
-        "POOR_CODE_MODEL": os.environ["POOR_CODE_MODEL"],
-    }
+    """Credentials passed into the container. POOR_CODE_MODEL is always required;
+    at least one provider key must be present. POOR_CODE_PROVIDER (default
+    ollama_cloud, resolved container-side) selects which provider to build."""
+    env = {"POOR_CODE_MODEL": os.environ["POOR_CODE_MODEL"]}
+    provider = os.environ.get("POOR_CODE_PROVIDER")
+    if provider:
+        env["POOR_CODE_PROVIDER"] = provider
+    keys = {k: os.environ[k] for k in _KEY_ENVS if os.environ.get(k)}
+    if not keys:
+        raise KeyError(
+            "no provider credential: set OLLAMA_API_KEY, or OPENAI_API_KEY "
+            "(with POOR_CODE_PROVIDER=openai), or POOR_CODE_API_KEY")
+    env.update(keys)
+    return env
 
 
 try:  # only define the real agent when terminal-bench is present
@@ -54,7 +67,7 @@ try:  # only define the real agent when terminal-bench is present
             # tb harness consumes TerminalCommand objects, so wrap here. block=True
             # makes the harness wait for `poor-code --headless` to exit before tests run.
             return [
-                TerminalCommand(command=cmd, max_timeout_sec=600.0, block=True)
+                TerminalCommand(command=cmd, max_timeout_sec=1800.0, block=True)
                 for cmd in build_run_commands(instruction)
             ]
 except ImportError:  # terminal-bench not installed — builders still usable/testable

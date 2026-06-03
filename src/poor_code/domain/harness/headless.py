@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from poor_code.infra import auth_store, paths
-from poor_code.provider.providers import ollama_cloud
+from poor_code.provider.providers import build_llm
 from poor_code.domain.harness.nodes.reporter import build_report, report_to_dict
 from poor_code.domain.project_map import ProjectMap, ProjectMapStore
 from poor_code.domain.session.models import (
@@ -66,15 +66,30 @@ class StderrSink:
         pass
 
 
+# Per-provider env var holding that provider's API key. POOR_CODE_API_KEY is a
+# provider-agnostic override that wins over these when set.
+_PROVIDER_KEY_ENV = {
+    "ollama_cloud": "OLLAMA_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
+
+
 def resolve_llm():
-    """Env first (container has no auth.json), then on-disk auth_store. None = no creds."""
-    key = os.environ.get("OLLAMA_API_KEY")
+    """Env first (container has no auth.json), then on-disk auth_store. None = no creds.
+
+    Provider is chosen by POOR_CODE_PROVIDER (default 'ollama_cloud'); the key is
+    read from POOR_CODE_API_KEY or the provider's own env var. Goes through the
+    central build_llm registry so headless tracks the same provider set as the UI.
+    """
+    provider = os.environ.get("POOR_CODE_PROVIDER", "ollama_cloud")
     model = os.environ.get("POOR_CODE_MODEL")
+    key = (os.environ.get("POOR_CODE_API_KEY")
+           or os.environ.get(_PROVIDER_KEY_ENV.get(provider, ""), "") or "")
     if key and model:
-        return ollama_cloud.configure(model=model, api_key=key)
-    creds = auth_store.get("ollama_cloud")
+        return build_llm(provider, model=model, api_key=key)
+    creds = auth_store.get(provider)
     if creds and creds.get("api_key") and creds.get("model"):
-        return ollama_cloud.configure(model=creds["model"], api_key=creds["api_key"])
+        return build_llm(provider, model=creds["model"], api_key=creds["api_key"])
     return None
 
 
@@ -123,7 +138,8 @@ async def main(instruction: str, *, stdout=None, stderr=None) -> int:
     err = stderr if stderr is not None else sys.stderr
     llm = resolve_llm()
     if llm is None:
-        err.write("no credentials: set OLLAMA_API_KEY + POOR_CODE_MODEL "
+        err.write("no credentials: set POOR_CODE_MODEL + a provider key "
+                  "(OLLAMA_API_KEY, or POOR_CODE_PROVIDER=openai with OPENAI_API_KEY) "
                   "(or run `poor-code` and /login)\n")
         return 2
     try:

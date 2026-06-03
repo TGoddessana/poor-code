@@ -25,7 +25,14 @@ def test_run_command_quotes_instruction(monkeypatch):
     assert "'fix the bug; rm -rf /'" in cmds[0]
 
 
-def test_env_passthrough(monkeypatch):
+def _clear_keys(monkeypatch):
+    for k in ("OLLAMA_API_KEY", "OPENAI_API_KEY", "POOR_CODE_API_KEY",
+              "POOR_CODE_PROVIDER"):
+        monkeypatch.delenv(k, raising=False)
+
+
+def test_env_passthrough_ollama(monkeypatch):
+    _clear_keys(monkeypatch)
     monkeypatch.setenv("OLLAMA_API_KEY", "key-123")
     monkeypatch.setenv("POOR_CODE_MODEL", "model-x")
     mod = _load_agent_module()
@@ -34,8 +41,30 @@ def test_env_passthrough(monkeypatch):
     assert env["POOR_CODE_MODEL"] == "model-x"
 
 
-def test_env_requires_both(monkeypatch):
-    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+def test_env_passthrough_openai(monkeypatch):
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("POOR_CODE_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-1")
+    monkeypatch.setenv("POOR_CODE_MODEL", "gpt-5.4-mini")
+    mod = _load_agent_module()
+    env = mod.build_env()
+    assert env["POOR_CODE_PROVIDER"] == "openai"
+    assert env["OPENAI_API_KEY"] == "sk-1"
+    assert env["POOR_CODE_MODEL"] == "gpt-5.4-mini"
+    assert "OLLAMA_API_KEY" not in env
+
+
+def test_env_requires_model(monkeypatch):
+    _clear_keys(monkeypatch)
+    monkeypatch.delenv("POOR_CODE_MODEL", raising=False)
+    monkeypatch.setenv("OLLAMA_API_KEY", "k")
+    mod = _load_agent_module()
+    with pytest.raises(KeyError):
+        mod.build_env()
+
+
+def test_env_requires_a_credential(monkeypatch):
+    _clear_keys(monkeypatch)
     monkeypatch.setenv("POOR_CODE_MODEL", "m")
     mod = _load_agent_module()
     with pytest.raises(KeyError):
