@@ -155,6 +155,30 @@ async def test_turn_block_height_shrinks_to_content():
         )
 
 
+async def test_failed_turn_error_with_brackets_does_not_crash():
+    """A failed turn's error text is plain text (e.g. a Pydantic validation
+    message containing `[type=..., input_type=str]`). It must NOT be parsed as
+    Textual markup, otherwise the square brackets raise MarkupError on layout."""
+    err = (
+        "ValidationError: 1 validation error for X\n"
+        "  Field required [type=missing, input_value={}, input_type=str]"
+    )
+    failed = TurnView(
+        turn_id="T1", cmd_id="c1", user_text="hi",
+        segments=(), status="failed", error=err,
+    )
+    async with _Host().run_test() as pilot:
+        await pilot.pause()
+        pilot.app.push(AppState(turns=(failed,)))
+        for _ in range(5):
+            await pilot.pause()
+        err_widget = pilot.app.query_one(".turn-error", Static)
+        # Rendering the plain-text error must not raise MarkupError on the
+        # square brackets. (Before the fix, _render() raised here.)
+        err_widget._render()
+        assert err_widget.get_content_height(pilot.app.size, pilot.app.size, 80) > 0
+
+
 # -------------------------------------------------------------------------
 # _sync_turns: new turn must NOT overwrite previous block
 # -------------------------------------------------------------------------
