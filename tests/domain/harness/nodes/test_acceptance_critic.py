@@ -69,20 +69,32 @@ def _bounces(n):
 
 
 @pytest.mark.asyncio
-async def test_repairs_well_under_budget():
-    # Budget is now 100 — a handful of prior bounces must still REPAIR, not escalate.
+async def test_repairs_when_inadequate_under_cap():
+    # Below the convergence cap, an inadequate verdict still bounces back to the oracle.
     llm = FakeLLM({"adequate": False, "counterexample": "still bad"})
     res = await AcceptanceCritic(llm).run(
-        NodeContext(_state(history=_bounces(5)), cancel=asyncio.Event()))
+        NodeContext(_state(history=_bounces(2)), cancel=asyncio.Event()))
     assert res.verdict.kind is VerdictKind.REPAIR
 
 
 @pytest.mark.asyncio
-async def test_escalates_after_budget():
-    from poor_code.domain.harness.nodes.gates import ACCEPTANCE_REPAIR_BUDGET
-    assert ACCEPTANCE_REPAIR_BUDGET == 100
-    llm = FakeLLM({"adequate": False, "counterexample": "still bad"})
+async def test_advances_on_gate_valid_spec_after_convergence_cap():
+    # The critic's "can you break it?" is unbounded — a finite check set is always
+    # theoretically gameable, so it can loop forever. After CONVERGENCE_CAP bounces
+    # we accept the gate-valid spec and move on (forward progress beats abandoning).
+    from poor_code.domain.harness.nodes.acceptance_critic import _CONVERGENCE_CAP
+    assert _CONVERGENCE_CAP == 3
+    llm = FakeLLM({"adequate": False, "counterexample": "still theoretically gameable"})
     res = await AcceptanceCritic(llm).run(
-        NodeContext(_state(history=_bounces(ACCEPTANCE_REPAIR_BUDGET)),
-                    cancel=asyncio.Event()))
-    assert res.verdict.kind is VerdictKind.ESCALATE
+        NodeContext(_state(history=_bounces(_CONVERGENCE_CAP)), cancel=asyncio.Event()))
+    assert res.verdict.kind is VerdictKind.ADVANCE
+
+
+def test_prompt_has_bounded_adequacy_bar():
+    from poor_code.domain.harness.nodes.acceptance_critic import _SYSTEM
+    s = _SYSTEM.lower()
+    # the finite bar the oracle is also told to satisfy
+    assert "exact" in s and "substring" in s
+    assert "boundary" in s
+    # must forbid the unfalsifiable "finite checks are theoretically gameable" rejection
+    assert "do not reject" in s or "not grounds" in s or "must set adequate" in s
