@@ -3,8 +3,12 @@ It never writes to the store and never decides the next hop (route() does)."""
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Protocol, runtime_checkable
+from typing import Any, AsyncIterator, Protocol, TypeVar, runtime_checkable
+
+from pydantic import BaseModel, ValidationError
 
 from poor_code.domain.session.models import Query, SessionState, Verdict
 from poor_code.provider.events import (
@@ -15,6 +19,65 @@ from poor_code.provider.events import (
     ToolCallInputDelta,
     ToolCallStarted,
 )
+
+
+_M = TypeVar("_M", bound=BaseModel)
+
+
+class StructuredOutputError(ValueError):
+    """A node's LLM returned structured output that failed schema validation.
+
+    Carries the *full* raw payload (Pydantic's own message truncates it) so the
+    offending model output is visible in the failed-turn error and in tests."""
+
+    def __init__(self, node: str, raw: str, detail: str) -> None:
+        self.node = node
+        self.raw = raw
+        self.detail = detail
+        super().__init__(
+            f"{node}: invalid structured output ({detail}).\n"
+            f"raw payload:\n{raw}"
+        )
+
+
+def validate_output(model_cls: type[_M], raw: str, *, node: str) -> _M:
+    """Validate a node's structured-output JSON against its schema, re-raising
+    any failure as StructuredOutputError with the raw payload attached."""
+    try:
+        return model_cls.model_validate_json(raw)
+    except ValidationError as e:
+        detail = "; ".join(
+            f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['msg']}"
+            for err in e.errors()
+        )
+        raise StructuredOutputError(node, raw, detail) from e
+
+
+_CODE_FENCE = re.compile(r"```[a-zA-Z0-9_]*\s*\n?(.*?)```", re.DOTALL)
+
+
+def _extract_json_payload(text: str) -> str:
+    """Recover the structured payload from free-text model output.
+
+    Some Ollama models/templates emit the forced tool call as text instead of
+    via the tool_calls channel — wrapped in a ```json / ```tool_call fence,
+    and sometimes as a {"name": ..., "arguments": {...}} envelope. Strip the
+    fence and unwrap the envelope down to the bare arguments object so the
+    schema validator sees what it expects."""
+    s = text.strip()
+    if not s:
+        return ""
+    m = _CODE_FENCE.search(s)
+    if m:
+        s = m.group(1).strip()
+    try:
+        obj = json.loads(s)
+    except (ValueError, TypeError):
+        return s  # not parseable here — let validate_output surface the raw text
+    if (isinstance(obj, dict) and "arguments" in obj
+            and isinstance(obj["arguments"], (dict, list))):
+        return json.dumps(obj["arguments"])
+    return s
 
 
 @dataclass(frozen=True)
@@ -41,7 +104,10 @@ class Node(Protocol):
 @runtime_checkable
 class _LLMClientLike(Protocol):
     async def stream(
-        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        response_format: dict[str, Any] | None = None,
     ) -> AsyncIterator[LLMEvent]: ...
 
 
@@ -79,11 +145,13 @@ class AgentNode:
         tools = [self.output_tool()]
         args_by_call: dict[str, str] = {}
         order: list[str] = []
+        content: list[str] = []
         async for ev in self._llm.stream(messages=messages, tools=tools):
             if ctx.cancel.is_set():
                 raise asyncio.CancelledError(f"{self.name} cancelled")
             match ev:
                 case TextDelta(text=t):
+                    content.append(t)  # kept for the rendered-as-text fallback
                     if ctx.sink is not None:
                         ctx.sink.text_delta(t)
                 case ToolCallStarted(call_id=cid):
@@ -94,6 +162,12 @@ class AgentNode:
                         args_by_call[cid] += d
                 case ToolCallEnded() | FinishedReason():
                     pass
-        if not order:
-            raise ValueError(f"{self.name}: model produced no structured output")
-        return args_by_call[order[0]] or "{}"
+        if order:
+            return args_by_call[order[0]] or "{}"
+        # Some Ollama models/templates render the forced tool call as fenced text
+        # in the message content instead of using the tool_calls channel; recover
+        # the payload from there before giving up.
+        payload = _extract_json_payload("".join(content))
+        if payload:
+            return payload
+        raise ValueError(f"{self.name}: model produced no structured output")

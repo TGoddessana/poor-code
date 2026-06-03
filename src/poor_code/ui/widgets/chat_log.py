@@ -199,11 +199,11 @@ class TurnBlock(Widget):
 
     def compose(self) -> ComposeResult:
         turn = self._turn
-        yield Static(turn.user_text, classes="user-msg")
+        yield Static(turn.user_text, classes="user-msg", markup=False)
         for seg in turn.segments:
             yield self._make_segment_widget(seg)
         if turn.status == "failed" and turn.error:
-            yield Static(f"  error: {turn.error}", classes="turn-error")
+            yield Static(f"  error: {turn.error}", classes="turn-error", markup=False)
         footer_text = _format_turn_footer(turn, fallback_model=self._current_model())
         footer = Static(footer_text, classes="turn-footer", id="turn-footer")
         footer.display = bool(footer_text)
@@ -318,7 +318,9 @@ class TurnBlock(Widget):
             else:
                 # Mount before the footer so footer stays at the bottom.
                 footer_anchor = list(self.query("#turn-footer"))
-                err_widget = Static(f"  error: {turn.error}", classes="turn-error")
+                err_widget = Static(
+                    f"  error: {turn.error}", classes="turn-error", markup=False
+                )
                 if footer_anchor:
                     self.mount(err_widget, before=footer_anchor[0])
                 else:

@@ -12,7 +12,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _LLMClientLike
+from poor_code.domain.harness.node import (
+    AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output,
+)
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import CodeContext, CodeRef, SessionState
 from poor_code.domain.tool.base import ToolContext, allow_all
@@ -25,10 +27,24 @@ _TOOL_NAME = "emit_code_context"
 MAX_ITERATIONS = 8
 
 _EXPLORE_SYSTEM = (
-    "You are the Explorer. Use read and grep to inspect the codebase and find the "
-    "code relevant to the request. The CODE MAP is a starting index of symbol names — "
-    "open the files to confirm. Stop calling tools when you have read enough to decide. "
-    "Do not write or modify anything."
+    "You are the Explorer, the codebase-reconnaissance step of a larger pipeline. "
+    "Your ONLY job is to LOCATE the existing code relevant to the request by reading "
+    "it firsthand. You do NOT answer the user, propose designs, suggest an "
+    "implementation strategy, weigh options, or write any solution — later stages "
+    "(interviewer, planner, implementer) do that. If you find yourself addressing the "
+    "user or proposing what to build, stop: you are doing the wrong job.\n\n"
+    "Work the tools hard — exploration is your whole purpose:\n"
+    "- The CODE MAP is only an index of symbol names; you MUST open files to confirm "
+    "what they actually contain.\n"
+    "- Read BROADLY. One file is almost never enough. Open every plausibly-relevant "
+    "file, follow its imports and call sites, and grep for related names, callers, "
+    "and similar patterns across the tree.\n"
+    "- A non-trivial request (new subsystems, cross-cutting features) needs MANY reads "
+    "across MULTIPLE files. Keep calling read/grep until you have actually traced the "
+    "feature through the code — entry points, the layers it touches, and the tests.\n"
+    "- Only stop calling tools once you have confirmed the relevant code by reading it, "
+    "not after a single glance.\n\n"
+    "Do not write or modify anything. Emit no prose conclusions — just explore."
 )
 
 _EXTRACT_SYSTEM = (
@@ -160,7 +176,7 @@ class ExploringNode(AgentNode):
         }
 
     def parse(self, args_json: str) -> CodeContext:
-        out = _CodeContextOut.model_validate_json(args_json)
+        out = validate_output(_CodeContextOut, args_json, node=self.name)
         to_ref = lambda r: CodeRef(file=r.file, symbol=r.symbol, lineno=r.lineno)
         return CodeContext(
             candidates=tuple(to_ref(r) for r in out.candidates),

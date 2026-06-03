@@ -34,6 +34,7 @@ try:  # only define the real agent when terminal-bench is present
     from terminal_bench.agents.installed_agents.abstract_installed_agent import (
         AbstractInstalledAgent,
     )
+    from terminal_bench.terminal.models import TerminalCommand
 
     class PoorCodeAgent(AbstractInstalledAgent):
         @staticmethod
@@ -48,7 +49,13 @@ try:  # only define the real agent when terminal-bench is present
         def _install_agent_script_path(self) -> Path:
             return _INSTALL_SCRIPT
 
-        def _run_agent_commands(self, instruction: str) -> list[str]:
-            return build_run_commands(instruction)
+        def _run_agent_commands(self, instruction: str) -> list[TerminalCommand]:
+            # build_run_commands stays pure str (unit-testable without tb); the
+            # tb harness consumes TerminalCommand objects, so wrap here. block=True
+            # makes the harness wait for `poor-code --headless` to exit before tests run.
+            return [
+                TerminalCommand(command=cmd, max_timeout_sec=600.0, block=True)
+                for cmd in build_run_commands(instruction)
+            ]
 except ImportError:  # terminal-bench not installed — builders still usable/testable
     PoorCodeAgent = None  # type: ignore[assignment]

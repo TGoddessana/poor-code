@@ -12,7 +12,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _LLMClientLike
+from poor_code.domain.harness.node import (
+    AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output,
+)
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import (
     AnsweredQuery, CodeRef, Query, QueryKind, Requirement, SessionState,
@@ -48,7 +50,7 @@ class _QueryOut(BaseModel):
     context: str | None = None
     options: list[str] = []
     resolves: str | None = None
-    rationale: str
+    rationale: str = ""  # models routinely omit it; not worth failing a turn over
 
 
 class _RequirementOut(BaseModel):
@@ -75,7 +77,7 @@ class Interviewer(AgentNode):
     async def run(self, ctx: NodeContext) -> NodeResult:
         state = ctx.state
         at_cap = len(state.interview) >= MAX_ROUNDS
-        step = _InterviewStepOut.model_validate_json(await self._dispatch(ctx))
+        step = self._parse_step(await self._dispatch(ctx))
         if step.action == "done" or at_cap:
             if step.requirement is None:
                 raise ValueError("interviewer: finishing but no requirement emitted")
@@ -84,6 +86,17 @@ class Interviewer(AgentNode):
             raise ValueError("interviewer: action=ask but no query emitted")
         qid = f"q{len(state.interview) + 1}"
         return NodeResult(query=self._to_query(qid, step.query))
+
+    def _parse_step(self, raw: str) -> _InterviewStepOut:
+        # Weak structured-output backends often skip the interview_step tool and
+        # just ask the question as plain prose. The interviewer's whole job is to
+        # ask one question, so a non-JSON body IS a clarifying question — take it
+        # rather than failing the turn. Anything JSON-shaped goes through the
+        # schema validator as normal (and surfaces the raw payload on failure).
+        s = raw.strip()
+        if s and not s.startswith(("{", "[")):
+            return _InterviewStepOut(action="ask", query=_QueryOut(prompt=s))
+        return validate_output(_InterviewStepOut, raw, node=self.name)
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         assert state.request is not None, "Interviewer requires state.request"
