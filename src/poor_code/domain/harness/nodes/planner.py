@@ -138,6 +138,8 @@ class Planner(AgentNode):
                 "MODE: greenfield (create-from-scratch — no existing code to ground; "
                 "absence of candidates is expected, not a failure)."
             )
+        if cc.summary:
+            lines.append(f"summary: {cc.summary}")
         for label, refs in (
             ("candidates", cc.candidates),
             ("confusers", cc.confusers),
@@ -148,6 +150,9 @@ class Planner(AgentNode):
                 lines.append("  (none)")
             for ref in refs:
                 lines.append(f"  - {self._render_ref(ref)}")
+        for ex in cc.excerpts:
+            body = ex.text if len(ex.text) <= 600 else ex.text[:600] + " …"
+            lines.append(f"--- {ex.path}{' (truncated)' if ex.truncated else ''} ---\n{body}")
         return "\n".join(lines)
 
     def _render_ref(self, ref: CodeRef) -> str:

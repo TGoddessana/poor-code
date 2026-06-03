@@ -34,8 +34,11 @@ _SYSTEM = (
     "behavior). DISCIPLINE: ask ONLY a question whose answer would change what "
     "gets built — no filler, no nitpicking — and ask the single highest-leverage "
     "gap each round. When no decision-changing ambiguity remains, finish: emit "
-    "the Requirement. Tone: blunt and direct, never personally insulting. Ask in "
-    "the user's language. Call interview_step exactly once."
+    "the Requirement. Tone: blunt and direct, never personally insulting. "
+    "Ground every question in CODE CONTEXT: cite the summary and file excerpts; if "
+    "a needed file is not shown, do NOT invent its contents — record the gap in "
+    "open_questions instead of guessing acceptance criteria. "
+    "Ask in the user's language. Call interview_step exactly once."
 )
 
 _FINALIZE = (
@@ -137,6 +140,8 @@ class Interviewer(AgentNode):
                 "MODE: greenfield (create-from-scratch — no existing code to ground; "
                 "absence of candidates is expected, not a failure)."
             )
+        if cc.summary:
+            lines.append(f"summary: {cc.summary}")
         for label, refs in (("candidates", cc.candidates),
                             ("confusers", cc.confusers),
                             ("related_tests", cc.related_tests)):
@@ -145,6 +150,9 @@ class Interviewer(AgentNode):
                 lines.append("  (none)")
             for r in refs:
                 lines.append(f"  - {self._render_ref(r)}")
+        for ex in cc.excerpts:
+            body = ex.text if len(ex.text) <= 600 else ex.text[:600] + " …"
+            lines.append(f"--- {ex.path}{' (truncated)' if ex.truncated else ''} ---\n{body}")
         return "\n".join(lines)
 
     def _render_ref(self, ref: CodeRef) -> str:
