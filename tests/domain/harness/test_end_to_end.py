@@ -117,11 +117,13 @@ async def test_lightweight_request_parks_at_fast_path(tmp_path: Path):
 
 class ScriptedLLM:
     """Routes by tool name; interview_step pops a scripted step per call."""
-    def __init__(self, *, kind, code_context, interview_steps, plan):
+    def __init__(self, *, kind, code_context, interview_steps, plan, acceptance=None):
         self._kind = kind
         self._cc = code_context
         self._steps = list(interview_steps)
         self._plan = plan
+        self._acceptance = acceptance or {
+            "checks": [{"criterion": "auth", "command": "pytest tests/test_auth.py"}]}
 
     async def stream(self, messages, tools, response_format=None):
         name = tools[0]["function"]["name"]
@@ -131,6 +133,10 @@ class ScriptedLLM:
             args = self._cc
         elif name == "interview_step":
             args = self._steps.pop(0)
+        elif name == "emit_acceptance":
+            args = self._acceptance
+        elif name == "emit_critique":
+            args = {"adequate": True, "counterexample": None}
         elif name == "emit_plan":
             args = self._plan
         else:
@@ -149,7 +155,10 @@ def _planning_registry(llm, pm):
     from poor_code.domain.harness.registry import NodeRegistry
     from poor_code.domain.harness.nodes.router import Router
     from poor_code.domain.harness.nodes.explorer import ExploringNode
-    from poor_code.domain.harness.nodes.gates import UnderstandingGate, PlanGate
+    from poor_code.domain.harness.nodes.gates import (
+        AcceptanceGate, UnderstandingGate, PlanGate)
+    from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
+    from poor_code.domain.harness.nodes.acceptance_critic import AcceptanceCritic
     from poor_code.domain.harness.nodes.interviewer import Interviewer
     from poor_code.domain.harness.nodes.planner import Planner
     from poor_code.domain.harness.nodes.execution import TaskSelector
@@ -161,6 +170,9 @@ def _planning_registry(llm, pm):
     reg.register(ExploringNode(llm, project_map=pm, tools=ToolRegistry([ReadTool(), GrepTool()])))
     reg.register(UnderstandingGate())
     reg.register(Interviewer(llm, project_map=pm))
+    reg.register(AcceptanceOracle(llm))
+    reg.register(AcceptanceGate())
+    reg.register(AcceptanceCritic(llm))
     reg.register(Planner(llm, project_map=pm))
     reg.register(PlanGate())
     reg.register(TaskSelector())
