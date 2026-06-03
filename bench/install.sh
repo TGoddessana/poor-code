@@ -6,16 +6,24 @@ set -euo pipefail
 apt-get update -y
 apt-get install -y --no-install-recommends python3 python3-pip git
 
-# Install uv (fast installer) then poor-code from source mounted/copied at /agent.
-pip3 install --no-cache-dir uv || true
+# Install uv. The bench base image ships Python 3.13, but poor-code needs >=3.14,
+# so we install into a uv-managed 3.14 rather than the system interpreter.
+pip3 install --no-cache-dir uv || (curl -LsSf https://astral.sh/uv/install.sh | sh)
+export PATH="/root/.local/bin:${PATH}"
+# Entry-point scripts (the `poor-code` console script) land here, which is on PATH.
+export UV_TOOL_BIN_DIR=/usr/local/bin
 
-# The harness copies the agent's source tree to the container; install from there.
-# Adjust the path if the harness mounts it elsewhere.
+# Delivery order: a locally-mounted source tree at /agent (if a harness provides
+# one) wins; otherwise install from the pushed git branch.
+# POOR_CODE_GIT_REF overrides the branch/tag/commit benched (default below).
+POOR_CODE_GIT_URL="${POOR_CODE_GIT_URL:-https://github.com/TGoddessana/poor-code}"
+POOR_CODE_GIT_REF="${POOR_CODE_GIT_REF:-bench/run-snapshot-20260603}"
+
 if [ -d /agent ]; then
-    pip3 install --no-cache-dir /agent
+    uv tool install --python 3.14 --from /agent poor-code
 else
-    pip3 install --no-cache-dir poor-code || \
-        echo "WARNING: poor-code source not found at /agent and not on PyPI"
+    uv tool install --python 3.14 "git+${POOR_CODE_GIT_URL}@${POOR_CODE_GIT_REF}" || \
+        echo "WARNING: could not install poor-code from git ($POOR_CODE_GIT_REF)"
 fi
 
 command -v poor-code >/dev/null 2>&1 || echo "WARNING: poor-code not on PATH after install"
