@@ -22,8 +22,18 @@ MAX_ITERATIONS = 50
 
 _SYSTEM = (
     "You are the Implementer. Make the change described by the TASK by calling "
-    "write/edit/bash. Stay strictly inside the editable paths. Your goal is for "
-    "the validation command to pass. Stop calling tools when the change is complete."
+    "write/edit/bash. You are NOT a reader — relevant code arrives in RELEVANT "
+    "CODE; do not expect to grep the tree.\n"
+    "RULES:\n"
+    "1. Stay strictly inside EDITABLE PATHS. Never touch anything outside them.\n"
+    "2. Your goal is for the VALIDATION command to pass. NO stubs, NO skeletons, "
+    "NO placeholders, NO 'fill in later' — write the real implementation that "
+    "makes VALIDATION actually pass.\n"
+    "3. Read ORIGINAL REQUEST, OVERALL GOAL, and your PLAN POSITION so you know "
+    "which slice of the whole you own.\n"
+    "4. Keep calling tools until VALIDATION passes; once you confirm it passes, "
+    "stop calling tools.\n"
+    "5. If PAST FAILURES or a REPAIR HINT are present, address them first."
 )
 
 
@@ -135,7 +145,13 @@ class Implementer:
             feedback = "\nPAST FAILURES TO AVOID:\n" + "\n".join(
                 f"  - {e.failure_type}: {e.prevention_hint}" for e in state.feedback.entries)
         hint = f"\nREPAIR HINT: {state.repair_hint}" if state.repair_hint else ""
-        return (f"TASK: {task.title}\nPURPOSE: {task.purpose}\n"
+        header = ""
+        if state.request is not None:
+            header += f"ORIGINAL REQUEST:\n{state.request.raw_text}\n"
+        if state.requirement is not None:
+            header += f"OVERALL GOAL:\n{state.requirement.summary}\n"
+        return (f"{header}"
+                f"TASK: {task.title}\nPURPOSE: {task.purpose}\n"
                 f"DETAILS: {task.description}\nEDITABLE PATHS: {scope}\n"
                 f"VALIDATION (make this pass): {task.how_to_validate}"
                 f"{refs}{feedback}{hint}")
