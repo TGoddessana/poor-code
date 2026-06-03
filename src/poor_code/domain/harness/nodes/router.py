@@ -10,6 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _LLMClientLike
+from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import Request, RequestKind, SessionState
 
 _TOOL_NAME = "classify_request"
@@ -68,7 +69,7 @@ class Router(AgentNode):
             "function": {
                 "name": _TOOL_NAME,
                 "description": "Emit the request classification.",
-                "parameters": _ClassificationOut.model_json_schema(),
+                "parameters": inline_refs(_ClassificationOut.model_json_schema()),
             },
         }
 

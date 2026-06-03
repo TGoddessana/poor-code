@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output,
 )
+from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import CodeContext, CodeRef, GroundingStatus, SessionState
 from poor_code.domain.tool.base import ToolContext, allow_all
@@ -176,7 +177,7 @@ class ExploringNode(AgentNode):
             "function": {
                 "name": _TOOL_NAME,
                 "description": "Emit the body-grounded code context.",
-                "parameters": _CodeContextOut.model_json_schema(),
+                "parameters": inline_refs(_CodeContextOut.model_json_schema()),
             },
         }
 

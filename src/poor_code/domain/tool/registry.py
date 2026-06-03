@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.tool.base import Tool
 
 
@@ -32,7 +33,7 @@ class ToolRegistry:
                 "function": {
                     "name": t.id,
                     "description": t.description,
-                    "parameters": t.params.model_json_schema(),
+                    "parameters": inline_refs(t.params.model_json_schema()),
                 },
             }
             for t in self._tools.values()

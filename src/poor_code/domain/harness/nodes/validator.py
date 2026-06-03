@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult
+from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import Layer, SessionState, Verdict, VerdictKind
 
 MAX_ADVERSARIAL_ROUNDS = 2
@@ -55,7 +56,7 @@ class Validator(AgentNode):
         return {"type": "function",
                 "function": {"name": _TOOL_NAME,
                              "description": "Judge the patch: advance / repair_impl / repair_plan.",
-                             "parameters": _JudgeOut.model_json_schema()}}
+                             "parameters": inline_refs(_JudgeOut.model_json_schema())}}
 
     def output_model(self) -> type[BaseModel]:
         return _JudgeOut

@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from poor_code.domain.harness.node import AgentNode
+from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import FeedbackEntry, SessionState
 
 _TOOL_NAME = "emit_feedback"
@@ -47,7 +48,7 @@ class FailureAnalyst(AgentNode):
         return {"type": "function",
                 "function": {"name": _TOOL_NAME,
                              "description": "Emit one reusable failure lesson.",
-                             "parameters": _FeedbackOut.model_json_schema()}}
+                             "parameters": inline_refs(_FeedbackOut.model_json_schema())}}
 
     def output_model(self) -> type[BaseModel]:
         return _FeedbackOut

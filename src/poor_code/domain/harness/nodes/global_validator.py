@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _LLMClientLike
 from poor_code.domain.harness.nodes.execution import run_shell
+from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
     AttemptStatus, ChangeSet, Layer, SessionState, Verdict, VerdictKind)
 
@@ -91,7 +92,7 @@ class GlobalValidator(AgentNode):
         return {"type": "function",
                 "function": {"name": _TOOL_NAME,
                              "description": "Identify the regression culprit and a fix hint.",
-                             "parameters": _AnalyzeOut.model_json_schema()}}
+                             "parameters": inline_refs(_AnalyzeOut.model_json_schema())}}
 
     def output_model(self) -> type[BaseModel]:
         return _AnalyzeOut

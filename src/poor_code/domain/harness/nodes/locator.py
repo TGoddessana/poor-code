@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from poor_code.domain.harness.node import AgentNode, _LLMClientLike, validate_output
+from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import CodeContext, CodeRef, SessionState
 
@@ -56,7 +57,7 @@ class Locator(AgentNode):
             "function": {
                 "name": _TOOL_NAME,
                 "description": "Emit the symbol-grounded candidate context.",
-                "parameters": _CodeContextOut.model_json_schema(),
+                "parameters": inline_refs(_CodeContextOut.model_json_schema()),
             },
         }
 

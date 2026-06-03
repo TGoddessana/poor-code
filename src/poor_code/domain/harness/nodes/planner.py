@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from poor_code.domain.harness.node import AgentNode, _LLMClientLike
+from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import (
     CodeRef,
@@ -90,7 +91,7 @@ class Planner(AgentNode):
             "function": {
                 "name": _TOOL_NAME,
                 "description": "Emit bounded implementation tasks and dependencies.",
-                "parameters": _PlanOut.model_json_schema(),
+                "parameters": inline_refs(_PlanOut.model_json_schema()),
             },
         }
 

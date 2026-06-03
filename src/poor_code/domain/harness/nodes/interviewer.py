@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output,
 )
+from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import (
     AnsweredQuery, CodeRef, GroundingStatus, Query, QueryKind, Requirement, SessionState,
@@ -107,7 +108,7 @@ class Interviewer(AgentNode):
             "function": {
                 "name": _TOOL_NAME,
                 "description": "Ask one question (action=ask) or finish (action=done).",
-                "parameters": _InterviewStepOut.model_json_schema(),
+                "parameters": inline_refs(_InterviewStepOut.model_json_schema()),
             },
         }
 
