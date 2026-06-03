@@ -23,6 +23,7 @@ class ProviderCreds(TypedDict, total=False):
 
 class AuthFile(TypedDict, total=False):
     providers: dict[str, ProviderCreds]
+    active: str
 
 
 def _path() -> Path:
@@ -48,9 +49,14 @@ def save(provider: str, *, api_key: str, model: str) -> None:
     data = load()
     providers = data.setdefault("providers", {})
     providers[provider] = {"api_key": api_key, "model": model}
+    data["active"] = provider
     p.write_text(json.dumps(data, indent=2), encoding="utf-8")
     os.chmod(p, stat.S_IRUSR | stat.S_IWUSR)
 
 
 def get(provider: str) -> ProviderCreds | None:
     return load().get("providers", {}).get(provider)
+
+
+def get_active() -> str | None:
+    return load().get("active")
