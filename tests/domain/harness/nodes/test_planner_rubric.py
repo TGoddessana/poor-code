@@ -42,3 +42,7 @@ async def test_planner_system_prompt_teaches_patch_size_and_example():
     # worked example with a runnable validation
     assert "curl" in system
     assert "process.exit(1)" in system
+    # server-cleanup teaching (issue: orphaned background server)
+    assert "kill" in system
+    # t3 is behavioral (npm start), not a string check
+    assert "npm start" in system
