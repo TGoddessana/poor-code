@@ -152,8 +152,12 @@ class Implementer:
         if state.requirement is not None:
             header += f"OVERALL GOAL:\n{state.requirement.summary}\n"
         if state.understanding is not None and state.understanding.environment:
-            header += ("ENVIRONMENT (use only runtimes/tools available here; verify with "
-                       f"the bash tool before relying on one):\n{state.understanding.environment}\n")
+            header += ("ENVIRONMENT — write code ONLY for a runtime present below. Items "
+                       "under 'NOT FOUND' are absent: do NOT use them and do NOT assume they "
+                       "will be installed later (e.g. if node is NOT FOUND, do not write a "
+                       "Node server — use an available runtime like python3). If a command "
+                       "fails with 'not found', switch runtimes, do not retry it:\n"
+                       f"{state.understanding.environment}\n")
         return (f"{header}"
                 f"TASK: {task.title}\nPURPOSE: {task.purpose}\n"
                 f"DETAILS: {task.description}\nEDITABLE PATHS: {scope}\n"

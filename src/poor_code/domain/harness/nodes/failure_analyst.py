@@ -14,9 +14,15 @@ from poor_code.domain.session.models import FeedbackEntry, SessionState
 _TOOL_NAME = "emit_feedback"
 
 _SYSTEM = (
-    "You are the Failure Analyst. A validation command just failed. From the patch "
-    "and the failure output, distill ONE concise, reusable lesson: the failure_type, "
-    "the symptom, and a prevention_hint the implementer can apply next time. "
+    "You are the Failure Analyst. A validation command just failed. From the patch, "
+    "the ENVIRONMENT, and the failure output, distill ONE concise, reusable lesson: "
+    "the failure_type, the symptom, and a prevention_hint the implementer can apply "
+    "next time.\n"
+    "RUNTIME RULE: if the failure output shows a runtime/tool is missing "
+    "('command not found', 'not found', 'No such file'), the prevention_hint MUST tell "
+    "the implementer to SWITCH to a tool/runtime that is actually present in ENVIRONMENT "
+    "(e.g. rewrite a Node server in Python if node is absent but python3 is present) — "
+    "NOT to retry the same absent tool or to assume it will exist later.\n"
     "Call emit_feedback once."
 )
 
@@ -37,10 +43,13 @@ class FailureAnalyst(AgentNode):
         rr = attempt.run_result if attempt else None
         diff = attempt.patch.diff if (attempt and attempt.patch) else ""
         out = "" if rr is None else rr.output
+        env = state.understanding.environment if state.understanding else ""
+        env_block = f"ENVIRONMENT (what is actually available here):\n{env}\n\n" if env else ""
         return [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": (
-                f"TASK: {task.title if task else '?'}\n\nPATCH:\n{diff or '(empty)'}\n\n"
+                f"TASK: {task.title if task else '?'}\n\n{env_block}"
+                f"PATCH:\n{diff or '(empty)'}\n\n"
                 f"FAILURE OUTPUT:\n{out[:2000] or '(none)'}")},
         ]
 

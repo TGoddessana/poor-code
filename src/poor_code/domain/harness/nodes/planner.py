@@ -175,8 +175,10 @@ class Planner(AgentNode):
             )
         if cc.environment:
             lines.append(
-                "ENVIRONMENT (choose a stack/runtime that is actually AVAILABLE here; "
-                f"do not assume a runtime that is absent):\n{cc.environment}")
+                "ENVIRONMENT — you MUST pick a stack/runtime listed as present below. "
+                "Anything under 'NOT FOUND' is absent; a task that depends on it WILL fail "
+                "(e.g. do not plan a Node server if node is NOT FOUND but python3 is "
+                f"present):\n{cc.environment}")
         if cc.summary:
             lines.append(f"summary: {cc.summary}")
         for label, refs in (

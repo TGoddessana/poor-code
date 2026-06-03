@@ -36,6 +36,12 @@ for t in %TOOLS%; do
   v=$("$t" --version 2>&1 | head -1 | cut -c1-80)
   echo "  $t: ${v:-present}"
 done
+echo "NOT FOUND (curated tools absent here — do NOT use; code requiring them will fail):"
+miss=""
+for t in %TOOLS%; do
+  command -v "$t" >/dev/null 2>&1 || miss="$miss $t"
+done
+echo " ${miss# }"
 echo "PATH COMMANDS (names only, catch-all):"
 for d in $(printf '%s' "$PATH" | tr ':' ' '); do ls -1 "$d" 2>/dev/null; done | sort -u | tr '\n' ' '
 echo ""

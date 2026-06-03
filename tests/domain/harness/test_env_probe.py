@@ -19,6 +19,14 @@ async def test_probe_reports_os_and_present_runtimes(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_probe_lists_absent_curated_tools(tmp_path):
+    # Absence must be EXPLICIT, not merely "not in the present list" — the model
+    # ignored implicit absence and kept choosing Node. The probe names what's gone.
+    out = await probe_environment(tmp_path)
+    assert "NOT FOUND" in out
+
+
+@pytest.mark.asyncio
 async def test_probe_is_bounded(tmp_path):
     out = await probe_environment(tmp_path)
     # never dump an unbounded wall of text into downstream prompts
