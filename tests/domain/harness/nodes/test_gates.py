@@ -112,8 +112,46 @@ async def test_plan_gate_repairs_dependency_cycle():
 async def test_plan_gate_escalates_after_repair_budget_exhausted():
     prior = Transition(from_node="plan_gate", to_node="planner",
                        trigger=TriggerKind.GATE, reason="repair", ts_iso="t")
-    res = await PlanGate().run(_ctx(SessionState(plan=Plan(), history=(prior,))))
+    res = await PlanGate().run(_ctx(SessionState(plan=Plan(), history=(prior, prior))))
     assert res.verdict.kind is VerdictKind.ESCALATE
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_rejects_too_many_editable_files():
+    res = await PlanGate().run(_ctx(SessionState(plan=Plan(tasks=(
+        _task(edit_scope=EditScope(editable=("a.py", "b.py", "c.py", "d.py"))),
+    )))))
+    assert res.verdict.kind is VerdictKind.REPAIR
+    assert "split" in res.verdict.hint.lower()
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_rejects_prose_validation():
+    res = await PlanGate().run(_ctx(SessionState(plan=Plan(tasks=(
+        _task(how_to_validate="Check that the server returns 55."),
+    )))))
+    assert res.verdict.kind is VerdictKind.REPAIR
+    assert "command" in res.verdict.hint.lower()
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_accepts_runnable_validation():
+    res = await PlanGate().run(_ctx(SessionState(plan=Plan(tasks=(
+        _task(how_to_validate="curl -s localhost:3000/fib/10 | grep -q 55"),
+    )))))
+    assert res.verdict.kind is VerdictKind.ADVANCE
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_allows_two_repairs_before_escalating():
+    one = Transition(from_node="plan_gate", to_node="planner",
+                     trigger=TriggerKind.GATE, reason="r", ts_iso="t")
+    # 1 prior bounce → still REPAIR (budget is 2)
+    res1 = await PlanGate().run(_ctx(SessionState(plan=Plan(), history=(one,))))
+    assert res1.verdict.kind is VerdictKind.REPAIR
+    # 2 prior bounces → ESCALATE
+    res2 = await PlanGate().run(_ctx(SessionState(plan=Plan(), history=(one, one))))
+    assert res2.verdict.kind is VerdictKind.ESCALATE
 
 
 @pytest.mark.asyncio
