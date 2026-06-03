@@ -241,12 +241,24 @@ class GroundingStatus(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class FileExcerpt:
+    """A real file body the Explorer read, carried verbatim into CodeContext so
+    downstream nodes see ground truth (not model-retyped text). `truncated` marks
+    a head-only slice of a large file."""
+    path: str
+    text: str
+    truncated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class CodeContext:
     candidates: tuple[CodeRef, ...] = ()
     confusers: tuple[CodeRef, ...] = ()
     related_tests: tuple[CodeRef, ...] = ()
     search_notes: str = ""        # explorer 자기진단(빈손일 때 채움)
     grounding: GroundingStatus = GroundingStatus.NOT_FOUND  # 빈손 해석에만 의미
+    summary: str = ""             # explorer 합성 브리핑 (한 단락)
+    excerpts: tuple[FileExcerpt, ...] = ()  # explorer가 실제로 읽은 본문
 
 
 class QueryKind(str, Enum):
