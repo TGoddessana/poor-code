@@ -181,3 +181,17 @@ async def test_understanding_gate_escalates_after_explorer_bounce():
     )
     res = await UnderstandingGate().run(_ctx(state))
     assert res.verdict.kind is VerdictKind.ESCALATE
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_repair_count_ignores_non_plangate_bounces():
+    # A validator-driven REPAIR(PLAN) also routes to the planner, but it must NOT
+    # consume PlanGate's own repair budget.
+    from_validator = Transition(from_node="validator", to_node="planner",
+                                trigger=TriggerKind.GATE, reason="r", ts_iso="t")
+    from_plangate = Transition(from_node="plan_gate", to_node="planner",
+                               trigger=TriggerKind.GATE, reason="r", ts_iso="t")
+    # 2 validator bounces + 1 plan_gate bounce → plan_gate count is 1 → still REPAIR
+    state = SessionState(plan=Plan(), history=(from_validator, from_validator, from_plangate))
+    res = await PlanGate().run(_ctx(state))
+    assert res.verdict.kind is VerdictKind.REPAIR

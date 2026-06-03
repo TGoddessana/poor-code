@@ -100,7 +100,9 @@ class PlanGate:
     @staticmethod
     def _repair_count(state) -> int:
         return sum(1 for t in state.history
-                   if t.trigger is TriggerKind.GATE and t.to_node == "planner")
+                   if t.trigger is TriggerKind.GATE
+                   and t.from_node == "plan_gate"
+                   and t.to_node == "planner")
 
     @staticmethod
     def _has_cycle(ids, deps) -> bool:
