@@ -8,7 +8,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from poor_code.domain.tool.base import ExecuteResult, ToolContext
+from poor_code.domain.tool.base import (
+    ExecuteResult, ToolContext, reject_escaping_glob,
+)
 
 
 class GrepParams(BaseModel):
@@ -30,11 +32,16 @@ class GrepTool:
             rx = re.compile(args.pattern)
         except re.error as e:
             raise ValueError(f"invalid regex: {e}")
+        if args.path_glob:
+            reject_escaping_glob(args.path_glob)
 
         root = ctx.cwd.resolve()
         results: list[str] = []
         for path in sorted(root.glob(args.path_glob or "**/*")):
             if not path.is_file():
+                continue
+            # Defensive: never read a file that resolved outside the working dir.
+            if root != path.resolve() and root not in path.resolve().parents:
                 continue
             try:
                 with path.open("r", encoding="utf-8", errors="replace") as fh:

@@ -40,3 +40,23 @@ async def test_grep_respects_path_glob(tmp_path):
 async def test_grep_invalid_regex_raises(tmp_path):
     with pytest.raises(ValueError):
         await GrepTool().execute(GrepParams(pattern="("), _ctx(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_grep_rejects_parent_escaping_glob(tmp_path):
+    # A '../**/*' glob walked out of cwd into the container filesystem and OOM'd
+    # the process. The tool must refuse to escape cwd.
+    (tmp_path / "secret_outside.txt")  # not created; we just must not reach it
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "a.py").write_text("target\n")
+    with pytest.raises(ValueError):
+        await GrepTool().execute(
+            GrepParams(pattern="target", path_glob="../**/*"), _ctx(work))
+
+
+@pytest.mark.asyncio
+async def test_grep_rejects_absolute_glob(tmp_path):
+    with pytest.raises(ValueError):
+        await GrepTool().execute(
+            GrepParams(pattern="x", path_glob="/etc/**/*"), _ctx(tmp_path))

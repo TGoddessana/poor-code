@@ -27,7 +27,9 @@ from poor_code.domain.harness.route import FORWARD, route
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.tool.bash import BashTool
 from poor_code.domain.tool.edit import EditTool
+from poor_code.domain.tool.glob import GlobTool
 from poor_code.domain.tool.grep import GrepTool
+from poor_code.domain.tool.list import ListTool
 from poor_code.domain.tool.read import ReadTool
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.domain.tool.write import WriteTool
@@ -52,7 +54,7 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     reg.register(Router(llm))
     reg.register(ExploringNode(
         llm, project_map=project_map,
-        tools=ToolRegistry([ReadTool(), GrepTool()])))
+        tools=ToolRegistry([ListTool(), GlobTool(), ReadTool(), GrepTool()])))
     reg.register(UnderstandingGate())
     reg.register(Interviewer(llm, project_map=project_map))
     reg.register(AcceptanceOracle(llm))
