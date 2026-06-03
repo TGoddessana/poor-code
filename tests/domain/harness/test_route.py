@@ -41,10 +41,11 @@ def test_escalate_verdict_routes_to_user():
     assert route("completion_gate", res, SessionState()) == "user"
 
 
-def test_interviewer_forwards_to_planner():
+def test_interviewer_forwards_to_acceptance_oracle():
+    # acceptance_oracle now sits between interviewer and planner
     from poor_code.domain.harness.route import route
     from poor_code.domain.harness.node import NodeResult
     from poor_code.domain.session.models import Requirement, SessionState
     res = NodeResult(output=Requirement(summary="done"))
     nxt = route("interviewer", res, SessionState())
-    assert nxt == "planner"
+    assert nxt == "acceptance_oracle"

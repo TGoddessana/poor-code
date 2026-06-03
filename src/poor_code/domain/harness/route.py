@@ -14,7 +14,10 @@ FORWARD: dict[tuple[str, str | None], str] = {
     ("router", "lightweight"): "fast_path",
     ("explorer", None): "understanding_gate",
     ("understanding_gate", None): "interviewer",  # gate ADVANCE falls through here
-    ("interviewer", None): "planner",
+    ("interviewer", None): "acceptance_oracle",
+    ("acceptance_oracle", None): "acceptance_gate",
+    ("acceptance_gate", None): "acceptance_critic",  # gate ADVANCE falls through here
+    ("acceptance_critic", None): "planner",          # critic ADVANCE falls through here
     ("planner", None): "plan_gate",
     ("plan_gate", None): "task_selector",
     ("task_selector", "task"): "composer",
@@ -35,6 +38,7 @@ _SHALLOWEST: dict[Layer, str] = {
     Layer.IMPLEMENTATION: "implementer",
     Layer.PLAN: "planner",
     Layer.UNDERSTANDING: "explorer",
+    Layer.ACCEPTANCE: "acceptance_oracle",
 }
 
 
