@@ -1,6 +1,9 @@
+"""Tests for the deterministic HARNESS POSITION orientation block."""
+from __future__ import annotations
+
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.session.models import (
-    CodeContext, Cursor, GroundingStatus, Phase, Plan, Request, RequestKind,
+    CodeContext, CodeRef, Cursor, GroundingStatus, Phase, Plan, Request, RequestKind,
     Requirement, SessionState, Task, TaskStatus,
 )
 
@@ -52,10 +55,35 @@ def test_implementer_position_shows_task_progress():
     assert "ValidationRunner runs your VALIDATION" in out
 
 
-def test_located_with_candidates_counts_them():
+def test_located_without_candidates_shows_grounding_label():
     state = SessionState(
         request=Request(raw_text="x", kind=RequestKind.ENGINEERING),
         understanding=CodeContext(candidates=(), grounding=GroundingStatus.NOT_FOUND),
     )
     # no candidates, not_found → shows grounding label, not a count
     assert "located (not_found)" in render_position("interviewer", state)
+
+
+def test_located_with_candidates_counts_them():
+    state = SessionState(
+        request=Request(raw_text="x", kind=RequestKind.ENGINEERING),
+        understanding=CodeContext(
+            candidates=(CodeRef(file="a.py"), CodeRef(file="b.py")),
+            grounding=GroundingStatus.NOT_FOUND),
+    )
+    assert "located (2 candidates)" in render_position("planner", state)
+
+
+def test_done_cursor_task_not_double_reported():
+    state = SessionState(
+        request=Request(raw_text="x", kind=RequestKind.ENGINEERING),
+        plan=Plan(tasks=(
+            Task(id="t1", title="A", purpose="", status=TaskStatus.DONE),
+            Task(id="t2", title="B", purpose=""),
+        )),
+        cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="implementer", task_id="t1"),
+    )
+    out = render_position("implementer", state)
+    assert "done: t1" in out
+    assert "doing:" not in out   # t1 is DONE → not also "doing"
+    assert "left: t2" in out

@@ -16,6 +16,7 @@ _STAGES: tuple[tuple[str, str], ...] = (
     ("validate", "validation_runner"),
     ("report", "reporter"),
 )
+# validate/report intentionally have no _ROLE/_AFTER entry — raw name is fine.
 
 _ROLE: dict[str, str] = {
     "explorer": "LOCATING — you are the Explorer.",
@@ -95,9 +96,9 @@ def _plan_progress(state: SessionState) -> str:
     tasks = state.plan.tasks
     cur = state.cursor.task_id if state.cursor is not None else None
     done = [t.id for t in tasks if t.status is TaskStatus.DONE]
-    doing = next((t for t in tasks if t.id == cur), None)
+    doing = next((t for t in tasks if t.id == cur and t.status is not TaskStatus.DONE), None)
     left = [t.id for t in tasks if t.status is not TaskStatus.DONE and t.id != cur]
-    s = f"plan has {len(tasks)} tasks"
+    s = f"plan has {len(tasks)} task{'s' if len(tasks) != 1 else ''}"
     if done:
         s += f"; done: {', '.join(done)}"
     if doing is not None:
