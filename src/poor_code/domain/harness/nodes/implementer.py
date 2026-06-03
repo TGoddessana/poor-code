@@ -34,7 +34,12 @@ _SYSTEM = (
     "which slice of the whole you own.\n"
     "4. Keep calling tools until VALIDATION passes; once you confirm it passes, "
     "stop calling tools.\n"
-    "5. If PAST FAILURES or a REPAIR HINT are present, address them first."
+    "5. If PAST FAILURES or a REPAIR HINT are present, address them first.\n"
+    "6. If the TASK runs a service (a server/daemon), launch it with bash background:true "
+    "and LEAVE IT RUNNING — never kill it on success; it must outlive this run, and the "
+    "validation probe checks the LIVE instance, so launch before the probe runs. If a "
+    "launch fails (e.g. the port is already bound), READ the error and adapt — free the "
+    "port, or use another port if the task allows — do not retry the identical launch."
 )
 
 
