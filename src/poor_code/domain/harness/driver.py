@@ -11,9 +11,9 @@ from typing import Callable
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
-    AttemptStatus, Attempt, CodeContext, FeedbackEntry, Phase, Plan, Report, Request,
-    Requirement, SelectedTask, SessionState, TaskCompleted, TaskContext, TaskStatus,
-    TriggerKind, ValidationResult, Verdict, VerdictKind,
+    AcceptanceSpec, AttemptStatus, Attempt, CodeContext, FeedbackEntry, Phase, Plan,
+    Report, Request, Requirement, SelectedTask, SessionState, TaskCompleted, TaskContext,
+    TaskStatus, TriggerKind, ValidationResult, Verdict, VerdictKind,
 )
 
 RouteFn = Callable[[str, NodeResult, SessionState], "str | None"]
@@ -76,6 +76,8 @@ class Driver:
             return state.with_requirement(out)
         if isinstance(out, Plan):
             return state.with_plan(out)
+        if isinstance(out, AcceptanceSpec):
+            return state.with_acceptance(out)
         if isinstance(out, SelectedTask):
             return state.with_active_task(out.task_id)
         if isinstance(out, TaskContext):
