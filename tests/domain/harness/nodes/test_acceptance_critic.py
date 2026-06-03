@@ -61,13 +61,28 @@ async def test_critic_prompt_includes_the_checks():
     assert "grep -q Hello hello.txt" in prompt
 
 
-@pytest.mark.asyncio
-async def test_escalates_after_budget():
-    bounces = tuple(
+def _bounces(n):
+    return tuple(
         Transition(from_node="acceptance_critic", to_node="acceptance_oracle",
                    trigger=TriggerKind.GATE, reason="r", ts_iso="t")
-        for _ in range(2))
+        for _ in range(n))
+
+
+@pytest.mark.asyncio
+async def test_repairs_well_under_budget():
+    # Budget is now 100 — a handful of prior bounces must still REPAIR, not escalate.
     llm = FakeLLM({"adequate": False, "counterexample": "still bad"})
     res = await AcceptanceCritic(llm).run(
-        NodeContext(_state(history=bounces), cancel=asyncio.Event()))
+        NodeContext(_state(history=_bounces(5)), cancel=asyncio.Event()))
+    assert res.verdict.kind is VerdictKind.REPAIR
+
+
+@pytest.mark.asyncio
+async def test_escalates_after_budget():
+    from poor_code.domain.harness.nodes.gates import ACCEPTANCE_REPAIR_BUDGET
+    assert ACCEPTANCE_REPAIR_BUDGET == 100
+    llm = FakeLLM({"adequate": False, "counterexample": "still bad"})
+    res = await AcceptanceCritic(llm).run(
+        NodeContext(_state(history=_bounces(ACCEPTANCE_REPAIR_BUDGET)),
+                    cancel=asyncio.Event()))
     assert res.verdict.kind is VerdictKind.ESCALATE

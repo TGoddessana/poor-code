@@ -60,10 +60,26 @@ async def test_oracle_prompt_includes_requirement_and_grounding_rules():
 
 
 @pytest.mark.asyncio
-async def test_oracle_surfaces_repair_hint():
+async def test_oracle_system_states_task_independent_anti_gaming_rules():
+    # These are the three universal anti-gaming invariants (NOT task-specific):
+    # exact-equality over substring, at least one non-example input (lookup-table
+    # defence), and at least one boundary/extreme input.
+    llm = FakeLLM({"checks": []})
+    await AcceptanceOracle(llm).run(NodeContext(_state(), cancel=asyncio.Event()))
+    system = llm.seen_messages[0]["content"].lower()
+    assert "substring" in system          # exact-equality, not substring match
+    assert "lookup" in system             # defend against lookup-table / hard-coded outputs
+    assert "boundary" in system           # exercise extreme / edge inputs
+
+
+@pytest.mark.asyncio
+async def test_oracle_surfaces_repair_hint_forcefully():
     llm = FakeLLM({"checks": []})
     await AcceptanceOracle(llm).run(
         NodeContext(_state(repair_hint="a 13-byte file with no newline passes — wrong"),
                     cancel=asyncio.Event()))
     prompt = llm.seen_messages[-1]["content"]
     assert "13-byte file with no newline" in prompt
+    # the counterexample must be framed as something the redesign has to DEFEAT
+    assert "counterexample" in prompt.lower()
+    assert "fail" in prompt.lower()

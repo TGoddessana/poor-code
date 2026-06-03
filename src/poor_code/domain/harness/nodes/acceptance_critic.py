@@ -11,14 +11,15 @@ from pydantic import BaseModel
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output,
 )
-from poor_code.domain.harness.nodes.gates import _acceptance_repair_count
+from poor_code.domain.harness.nodes.gates import (
+    ACCEPTANCE_REPAIR_BUDGET, _acceptance_repair_count,
+)
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
     Layer, SessionState, Verdict, VerdictKind,
 )
 
 _TOOL_NAME = "emit_critique"
-_REPAIR_BUDGET = 2
 
 _SYSTEM = (
     "You are the Acceptance Critic. Try to BREAK the proposed acceptance checks. Produce "
@@ -47,7 +48,7 @@ class AcceptanceCritic(AgentNode):
         if out.adequate:
             return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
         hint = out.counterexample or "Acceptance checks are inadequate; redesign."
-        if _acceptance_repair_count(ctx.state) >= _REPAIR_BUDGET:
+        if _acceptance_repair_count(ctx.state) >= ACCEPTANCE_REPAIR_BUDGET:
             return NodeResult(verdict=Verdict(
                 kind=VerdictKind.ESCALATE,
                 query=f"Acceptance checks still inadequate after redesign: {hint}"))

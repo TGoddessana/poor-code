@@ -41,12 +41,25 @@ async def test_repairs_on_prose_check():
     assert res.verdict.layer is Layer.ACCEPTANCE
 
 
-@pytest.mark.asyncio
-async def test_escalates_after_budget():
-    bounces = tuple(
+def _bounces(n):
+    return tuple(
         Transition(from_node="acceptance_gate", to_node="acceptance_oracle",
                    trigger=TriggerKind.GATE, reason="r", ts_iso="t")
-        for _ in range(2))
-    s = SessionState(acceptance=AcceptanceSpec(), history=bounces)
+        for _ in range(n))
+
+
+@pytest.mark.asyncio
+async def test_repairs_well_under_budget():
+    # Budget is now 100 — a few prior bounces must still REPAIR, not escalate.
+    s = SessionState(acceptance=AcceptanceSpec(), history=_bounces(5))
+    res = await AcceptanceGate().run(_ctx(s))
+    assert res.verdict.kind is VerdictKind.REPAIR
+
+
+@pytest.mark.asyncio
+async def test_escalates_after_budget():
+    from poor_code.domain.harness.nodes.gates import ACCEPTANCE_REPAIR_BUDGET
+    assert ACCEPTANCE_REPAIR_BUDGET == 100
+    s = SessionState(acceptance=AcceptanceSpec(), history=_bounces(ACCEPTANCE_REPAIR_BUDGET))
     res = await AcceptanceGate().run(_ctx(s))
     assert res.verdict.kind is VerdictKind.ESCALATE

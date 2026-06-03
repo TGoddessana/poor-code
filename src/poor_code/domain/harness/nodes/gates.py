@@ -120,6 +120,14 @@ class PlanGate:
         return any(visit(node) for node in ids)
 
 
+# Shared by AcceptanceGate (ill-formed floor) and AcceptanceCritic (adequacy). The
+# acceptance layer is allowed to iterate a lot: the oracle↔critic loop is the harness
+# *refusing to build against a gameable spec*, which is the behaviour we want. We only
+# escalate to a human once it is clearly not converging, so the bound is deliberately
+# loose — it is a non-termination backstop, not a quality knob.
+ACCEPTANCE_REPAIR_BUDGET = 100
+
+
 def _acceptance_repair_count(state) -> int:
     """Bounces back to acceptance_oracle from either the gate or the critic."""
     return sum(1 for t in state.history
@@ -133,13 +141,11 @@ class AcceptanceGate:
 
     name = "acceptance_gate"
 
-    _REPAIR_BUDGET = 2
-
     async def run(self, ctx: NodeContext) -> NodeResult:
         hint = self._invalid_hint(ctx.state.acceptance)
         if hint is None:
             return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
-        if _acceptance_repair_count(ctx.state) >= self._REPAIR_BUDGET:
+        if _acceptance_repair_count(ctx.state) >= ACCEPTANCE_REPAIR_BUDGET:
             return NodeResult(verdict=Verdict(
                 kind=VerdictKind.ESCALATE,
                 query=f"Acceptance check still ill-formed after redesign: {hint}"))

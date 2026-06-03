@@ -31,6 +31,17 @@ _SYSTEM = (
     "`expected=$(printf '%s' \"$S\" | wc -c)`.\n"
     "4. Observe REAL behavior (start the thing, curl it), never a surface string. A check "
     "that starts a long-running process MUST kill it and exit with the check's status.\n"
+    "ANTI-GAMING INVARIANTS (apply to EVERY task — a check that violates these will be "
+    "rejected by an adversarial critic):\n"
+    "5. EXACT equality, never SUBSTRING. Match the whole value: `test \"$got\" = \"$want\"`, "
+    "`grep -qx`, or `diff`. A check like `grep -q '\"result\":5'` is BROKEN — it also passes "
+    "on 55 or 500.\n"
+    "6. Defend against a LOOKUP-TABLE / hard-coded implementation: do NOT only check inputs "
+    "named in the requirement or its examples. Include AT LEAST ONE input the requirement "
+    "never mentions, whose expected output you DERIVE at run time — so an impl that hard-codes "
+    "the example answers cannot pass.\n"
+    "7. Include AT LEAST ONE boundary / extreme input (empty, zero, negative, very large, or "
+    "malformed) where a naive or hard-coded implementation would diverge from a correct one.\n"
     "Call emit_acceptance once."
 )
 
@@ -56,8 +67,14 @@ class AcceptanceOracle(AgentNode):
         req = state.requirement
         prior = ""
         if state.repair_hint:
-            prior = ("PRIOR REJECTION — your previous acceptance design was rejected. "
-                     f"Fix this and redesign:\n{state.repair_hint}\n\n")
+            prior = (
+                "PRIOR REJECTION — the adversarial critic BROKE your previous acceptance "
+                "design with the COUNTEREXAMPLE below (a wrong implementation that still "
+                "passed, or a correct one that failed). Your redesigned checks MUST make "
+                "this counterexample FAIL; do NOT resubmit checks it would still pass. "
+                "Address the specific hole it exposes (e.g. switch substring matches to "
+                "exact equality, add an input the examples never cover).\n"
+                f"<<< COUNTEREXAMPLE\n{state.repair_hint}\n>>>\n\n")
         return [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": (
