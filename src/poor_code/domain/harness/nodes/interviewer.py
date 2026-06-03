@@ -17,7 +17,7 @@ from poor_code.domain.harness.node import (
 )
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import (
-    AnsweredQuery, CodeRef, Query, QueryKind, Requirement, SessionState,
+    AnsweredQuery, CodeRef, GroundingStatus, Query, QueryKind, Requirement, SessionState,
 )
 
 _TOOL_NAME = "interview_step"
@@ -131,6 +131,11 @@ class Interviewer(AgentNode):
         if cc is None:
             return "(none)"
         lines: list[str] = []
+        if cc.grounding is GroundingStatus.GREENFIELD:
+            lines.append(
+                "MODE: greenfield (create-from-scratch — no existing code to ground; "
+                "absence of candidates is expected, not a failure)."
+            )
         for label, refs in (("candidates", cc.candidates),
                             ("confusers", cc.confusers),
                             ("related_tests", cc.related_tests)):

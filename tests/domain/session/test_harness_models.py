@@ -1,5 +1,5 @@
 from poor_code.domain.session.models import (
-    Request, RequestKind, CodeRef, CodeContext,
+    Request, RequestKind, CodeRef, CodeContext, GroundingStatus,
     Cursor, Phase, Transition, TriggerKind,
     Verdict, VerdictKind, Layer,
 )
@@ -19,6 +19,15 @@ def test_code_context_holds_coderefs():
     )
     assert cc.candidates[0].symbol == "login"
     assert cc.confusers[0].symbol is None  # whole-file ref
+
+
+def test_code_context_grounding_defaults_to_not_found():
+    assert CodeContext().grounding is GroundingStatus.NOT_FOUND
+
+
+def test_code_context_grounding_can_be_greenfield():
+    cc = CodeContext(grounding=GroundingStatus.GREENFIELD)
+    assert cc.grounding is GroundingStatus.GREENFIELD
 
 
 def test_verdict_repair_carries_layer():

@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -16,7 +16,7 @@ from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output,
 )
 from poor_code.domain.project_map.models import ProjectMap
-from poor_code.domain.session.models import CodeContext, CodeRef, SessionState
+from poor_code.domain.session.models import CodeContext, CodeRef, GroundingStatus, SessionState
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
@@ -51,9 +51,13 @@ _EXTRACT_SYSTEM = (
     "You explored the codebase by reading files. From the exploration above, "
     "emit the symbols/files most likely relevant (candidates), lookalikes that "
     "are NOT (confusers), and related tests — grounded in what you actually read. "
-    "If you found nothing, leave candidates empty and write a precise search_notes "
-    "diagnosis (what you searched, what was empty, where to look next). "
-    "Call emit_code_context once."
+    "Set `grounding` to classify the result: if you found relevant existing code, "
+    "fill candidates (grounding may stay 'not_found'). If candidates is EMPTY, you "
+    "MUST choose why: 'greenfield' when the task is create-from-scratch and there is "
+    "no existing code to ground (an empty or unrelated CODE MAP is strong evidence); "
+    "'not_found' when code that SHOULD exist could not be located — then write a "
+    "precise search_notes diagnosis (what you searched, what was empty, where to look "
+    "next). Call emit_code_context once."
 )
 
 
@@ -68,6 +72,7 @@ class _CodeContextOut(BaseModel):
     confusers: list[_CodeRefOut] = []
     related_tests: list[_CodeRefOut] = []
     search_notes: str = ""
+    grounding: Literal["not_found", "greenfield"] = "not_found"
 
 
 class ExploringNode(AgentNode):
@@ -186,6 +191,7 @@ class ExploringNode(AgentNode):
             confusers=tuple(to_ref(r) for r in out.confusers),
             related_tests=tuple(to_ref(r) for r in out.related_tests),
             search_notes=out.search_notes,
+            grounding=GroundingStatus(out.grounding),
         )
 
     def _map_digest(self) -> str:

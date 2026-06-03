@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from poor_code.domain.harness.node import NodeContext
 from poor_code.domain.harness.nodes.explorer import ExploringNode
-from poor_code.domain.session.models import SessionState, Request, RequestKind, CodeContext
+from poor_code.domain.session.models import (
+    SessionState, Request, RequestKind, CodeContext, GroundingStatus,
+)
 from poor_code.domain.project_map.models import ProjectMap, FileEntry, Symbol, SymbolKind
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.domain.tool.read import ReadTool
@@ -63,6 +65,37 @@ async def test_explorer_extracts_code_context():
     res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event()))
     assert isinstance(res.output, CodeContext)
     assert res.output.candidates[0].symbol == "build_provider"
+
+
+@pytest.mark.asyncio
+async def test_explorer_emits_greenfield_grounding():
+    llm = ScriptedLLM([
+        [TextDelta(text="empty workspace"), FinishedReason(reason="stop")],
+        _emit_round({"candidates": [], "confusers": [], "related_tests": [],
+                     "search_notes": "empty project", "grounding": "greenfield"}),
+    ])
+    node = ExploringNode(llm, project_map=_map(), tools=_tools())
+    res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert res.output.grounding is GroundingStatus.GREENFIELD
+
+
+@pytest.mark.asyncio
+async def test_explorer_grounding_defaults_to_not_found_when_omitted():
+    llm = ScriptedLLM([
+        [TextDelta(text="searched"), FinishedReason(reason="stop")],
+        _emit_round({"candidates": [], "confusers": [], "related_tests": [],
+                     "search_notes": "nothing"}),  # no grounding key
+    ])
+    node = ExploringNode(llm, project_map=_map(), tools=_tools())
+    res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert res.output.grounding is GroundingStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_explorer_output_tool_exposes_grounding():
+    node = ExploringNode(ScriptedLLM([]), project_map=_map(), tools=_tools())
+    props = node.output_tool()["function"]["parameters"]["properties"]
+    assert "grounding" in props
 
 
 @pytest.mark.asyncio

@@ -233,12 +233,20 @@ class CodeRef:
     lineno: int | None = None
 
 
+class GroundingStatus(str, Enum):
+    """Disambiguates an empty `CodeContext.candidates`. Only consulted when
+    candidates is empty; when candidates is non-empty the gate advances on that."""
+    NOT_FOUND = "not_found"    # searched, expected to find code, but failed (real failure)
+    GREENFIELD = "greenfield"  # nothing to ground (create-from-scratch); empty is expected
+
+
 @dataclass(frozen=True, slots=True)
 class CodeContext:
     candidates: tuple[CodeRef, ...] = ()
     confusers: tuple[CodeRef, ...] = ()
     related_tests: tuple[CodeRef, ...] = ()
     search_notes: str = ""        # explorer 자기진단(빈손일 때 채움)
+    grounding: GroundingStatus = GroundingStatus.NOT_FOUND  # 빈손 해석에만 의미
 
 
 class QueryKind(str, Enum):
