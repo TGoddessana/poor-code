@@ -139,6 +139,8 @@ class ScriptedLLM:
             args = {"adequate": True, "counterexample": None}
         elif name == "emit_plan":
             args = self._plan
+        elif name == "emit_plan_review":
+            args = {"ok": True}
         else:
             # ExploringNode stage ① exploration round: stop without read/grep
             yield TextDelta(text="enough")
@@ -161,6 +163,7 @@ def _planning_registry(llm, pm):
     from poor_code.domain.harness.nodes.acceptance_critic import AcceptanceCritic
     from poor_code.domain.harness.nodes.interviewer import Interviewer
     from poor_code.domain.harness.nodes.planner import Planner
+    from poor_code.domain.harness.nodes.plan_reviewer import PlanReviewer
     from poor_code.domain.harness.nodes.execution import TaskSelector
     from poor_code.domain.tool.registry import ToolRegistry
     from poor_code.domain.tool.read import ReadTool
@@ -175,6 +178,7 @@ def _planning_registry(llm, pm):
     reg.register(AcceptanceCritic(llm))
     reg.register(Planner(llm, project_map=pm))
     reg.register(PlanGate())
+    reg.register(PlanReviewer(llm))
     reg.register(TaskSelector())
     return reg  # task_selector → composer (unregistered) → park
 

@@ -19,7 +19,8 @@ FORWARD: dict[tuple[str, str | None], str] = {
     ("acceptance_gate", None): "acceptance_critic",  # gate ADVANCE falls through here
     ("acceptance_critic", None): "planner",          # critic ADVANCE falls through here
     ("planner", None): "plan_gate",
-    ("plan_gate", None): "task_selector",
+    ("plan_gate", None): "plan_reviewer",          # gate ADVANCE falls through here
+    ("plan_reviewer", None): "task_selector",      # reviewer ADVANCE falls through here
     ("task_selector", "task"): "composer",
     ("task_selector", "done"): "global_validator",
     ("composer", None): "implementer",

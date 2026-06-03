@@ -36,6 +36,7 @@ class E2ELLM:
                                      "edit_scope": {"editable": ["out.txt"]},
                                      "how_to_validate": "test -f out.txt"}],
                           "deps": []},
+            "emit_plan_review": {"ok": True},
             "judge": {"verdict": "advance", "hint": ""},
         }
         if name == "write":  # implementer tool loop
