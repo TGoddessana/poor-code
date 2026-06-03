@@ -18,7 +18,7 @@ from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
     FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted)
 
-MAX_ITERATIONS = 12
+MAX_ITERATIONS = 50
 
 _SYSTEM = (
     "You are the Implementer. Make the change described by the TASK by calling "

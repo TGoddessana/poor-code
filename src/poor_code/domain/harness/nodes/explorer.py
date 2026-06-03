@@ -25,7 +25,7 @@ from poor_code.provider.events import (
 )
 
 _TOOL_NAME = "emit_code_context"
-MAX_ITERATIONS = 8
+MAX_ITERATIONS = 20
 
 _EXPLORE_SYSTEM = (
     "You are the Explorer, the codebase-reconnaissance step of a larger pipeline. "
