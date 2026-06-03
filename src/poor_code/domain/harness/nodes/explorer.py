@@ -61,10 +61,11 @@ _EXTRACT_SYSTEM = (
     "no existing code to ground (an empty or unrelated CODE MAP is strong evidence); "
     "'not_found' when code that SHOULD exist could not be located — then write a "
     "precise search_notes diagnosis (what you searched, what was empty, where to look "
-    "next). Also write `summary`: ONE paragraph of the key facts you observed — what "
-    "the request actually requires, what exists vs. is missing, concrete data facts "
-    "(file dimensions/format), and the command that ACTUALLY validates the result "
-    "(behavioral, not a string check). Do NOT retype file bodies; the harness "
+    "next). Also write `summary`: ONE paragraph of ONLY what you OBSERVED — what "
+    "relevant code exists and what is missing. Do NOT state what the request requires, "
+    "do NOT invent data facts (sizes/formats), and do NOT propose how to validate the "
+    "result — later nodes (interviewer, acceptance_oracle, planner) own those. "
+    "Do NOT retype file bodies; the harness "
     "attaches what you read. Call emit_code_context once."
 )
 
