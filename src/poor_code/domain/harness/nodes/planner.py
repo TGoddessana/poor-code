@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from poor_code.domain.harness.node import AgentNode, _LLMClientLike
+from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import (
@@ -96,6 +97,7 @@ class Planner(AgentNode):
             {
                 "role": "user",
                 "content": (
+                    f"{render_position('planner', state)}\n\n"
                     "REQUIREMENT:\n"
                     f"summary: {req.summary}\n"
                     f"acceptance:\n{self._bullets(req.acceptance)}\n"

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLike
+from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.snapshot import GitSnapshot, default_git_dir
 from poor_code.domain.session.models import Attempt, ChangeRecord, SessionState
 from poor_code.domain.tool.base import ToolContext, allow_all
@@ -29,7 +30,7 @@ _SYSTEM = (
     "2. Your goal is for the VALIDATION command to pass. NO stubs, NO skeletons, "
     "NO placeholders, NO 'fill in later' — write the real implementation that "
     "makes VALIDATION actually pass.\n"
-    "3. Read ORIGINAL REQUEST, OVERALL GOAL, and your PLAN POSITION so you know "
+    "3. Read ORIGINAL REQUEST, OVERALL GOAL, and your HARNESS POSITION so you know "
     "which slice of the whole you own.\n"
     "4. Keep calling tools until VALIDATION passes; once you confirm it passes, "
     "stop calling tools.\n"
@@ -145,7 +146,7 @@ class Implementer:
             feedback = "\nPAST FAILURES TO AVOID:\n" + "\n".join(
                 f"  - {e.failure_type}: {e.prevention_hint}" for e in state.feedback.entries)
         hint = f"\nREPAIR HINT: {state.repair_hint}" if state.repair_hint else ""
-        header = ""
+        header = f"{render_position('implementer', state)}\n\n"
         if state.request is not None:
             header += f"ORIGINAL REQUEST:\n{state.request.raw_text}\n"
         if state.requirement is not None:

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output,
 )
+from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import (
@@ -106,6 +107,7 @@ class ExploringNode(AgentNode):
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": _EXPLORE_SYSTEM},
             {"role": "user", "content":
+                f"{render_position('explorer', state)}\n\n"
                 f"REQUEST:\n{state.request.raw_text}\n\nCODE MAP:\n{self._map_digest()}{hint}"},
         ]
         tool_ctx = ToolContext(
