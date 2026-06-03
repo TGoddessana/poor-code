@@ -47,6 +47,8 @@ _SYSTEM = (
     "afterward (kill) and exit with the check's status, so retries don't hit a "
     "busy port.\n"
     "6. CodeContext (summary/excerpts) is reference material, not binding truth.\n"
+    "7. A GLOBAL ACCEPTANCE spec defines 'done'. Your tasks together must satisfy it; "
+    "keep each how_to_validate consistent with those checks.\n"
     "EXAMPLE — request 'Node HTTP server, GET /fib/:n -> nth Fibonacci (BigInt), :3000':\n"
     "  t1 lib/fib.js (pure BigInt nth Fibonacci)\n"
     "     validate: node -e \"if(require('./lib/fib')(10)!==55n)process.exit(1)\"\n"
@@ -104,6 +106,8 @@ class Planner(AgentNode):
                     f"out_of_scope:\n{self._bullets(req.out_of_scope)}\n"
                     f"assumptions:\n{self._bullets(req.assumptions)}\n"
                     f"open_questions:\n{self._bullets(req.open_questions)}\n\n"
+                    f"GLOBAL ACCEPTANCE (your tasks must collectively satisfy these):\n"
+                    f"{self._acceptance_digest(state)}\n\n"
                     f"CODE CONTEXT:\n{self._context_digest(state)}"
                 ),
             },
@@ -151,6 +155,13 @@ class Planner(AgentNode):
         if not items:
             return "  (none)"
         return "\n".join(f"  - {item}" for item in items)
+
+    @staticmethod
+    def _acceptance_digest(state: SessionState) -> str:
+        spec = state.acceptance
+        if spec is None or not spec.checks:
+            return "  (none)"
+        return "\n".join(f"  - ({c.criterion}) {c.command}" for c in spec.checks)
 
     def _context_digest(self, state: SessionState) -> str:
         cc = state.understanding

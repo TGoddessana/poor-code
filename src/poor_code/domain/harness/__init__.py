@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from poor_code.domain.harness.driver import Driver
 from poor_code.domain.harness.node import Node, NodeContext, NodeResult
+from poor_code.domain.harness.nodes.acceptance_critic import AcceptanceCritic
+from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
 from poor_code.domain.harness.nodes.composer import Composer
 from poor_code.domain.harness.nodes.execution import (
     TaskSelector, EngGate, ValidationRunner, CompletionGate,
@@ -12,7 +14,7 @@ from poor_code.domain.harness.nodes.execution import (
 from poor_code.domain.harness.nodes.explorer import ExploringNode
 from poor_code.domain.harness.nodes.failure_analyst import FailureAnalyst
 from poor_code.domain.harness.nodes.fast_path import FastPathNode
-from poor_code.domain.harness.nodes.gates import PlanGate, UnderstandingGate
+from poor_code.domain.harness.nodes.gates import AcceptanceGate, PlanGate, UnderstandingGate
 from poor_code.domain.harness.nodes.global_validator import GlobalValidator
 from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.harness.nodes.interviewer import Interviewer
@@ -33,6 +35,7 @@ from poor_code.domain.tool.write import WriteTool
 __all__ = [
     "Driver", "Node", "NodeContext", "NodeResult", "NodeRegistry",
     "Router", "ExploringNode", "Interviewer", "Planner", "PlanGate", "FastPathNode",
+    "AcceptanceOracle", "AcceptanceGate", "AcceptanceCritic",
     "TaskSelector", "EngGate", "ValidationRunner", "CompletionGate",
     "Composer", "Implementer", "Validator", "FailureAnalyst", "GlobalValidator", "Reporter",
     "route", "FORWARD", "build_default_registry",
@@ -52,6 +55,9 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
         tools=ToolRegistry([ReadTool(), GrepTool()])))
     reg.register(UnderstandingGate())
     reg.register(Interviewer(llm, project_map=project_map))
+    reg.register(AcceptanceOracle(llm))
+    reg.register(AcceptanceGate())
+    reg.register(AcceptanceCritic(llm))
     reg.register(Planner(llm, project_map=project_map))
     reg.register(PlanGate())
     reg.register(TaskSelector())

@@ -61,6 +61,11 @@ class GlobalValidator(AgentNode):
             code, out = await run_shell(task.how_to_validate, self._cwd, ctx.cancel)
             if code != 0:
                 failures.append((task.id, code, out))
+        if ctx.state.acceptance is not None:
+            for chk in ctx.state.acceptance.checks:
+                code, out = await run_shell(chk.command, self._cwd, ctx.cancel)
+                if code != 0:
+                    failures.append((f"acceptance:{chk.criterion[:40]}", code, out))
         if not failures:
             return NodeResult(branch="pass")
 

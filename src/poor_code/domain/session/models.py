@@ -63,6 +63,7 @@ class SessionState:
     history: tuple[Transition, ...] = ()
     requirement: "Requirement | None" = None
     plan: "Plan | None" = None
+    acceptance: "AcceptanceSpec | None" = None
     pending_query: "Query | None" = None
     interview: "tuple[AnsweredQuery, ...]" = ()
     repair_hint: str | None = None
@@ -81,6 +82,9 @@ class SessionState:
 
     def with_plan(self, p: "Plan") -> "SessionState":
         return replace(self, plan=p)
+
+    def with_acceptance(self, spec: "AcceptanceSpec") -> "SessionState":
+        return replace(self, acceptance=spec)
 
     def with_pending_query(self, q: "Query") -> "SessionState":
         return replace(self, pending_query=q)
@@ -303,6 +307,20 @@ class Requirement:
     open_questions: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class AcceptanceCheck:
+    """One runnable acceptance check: exit 0 == criterion satisfied."""
+    criterion: str
+    command: str
+    rationale: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptanceSpec:
+    """The global, plan-independent definition of 'done' (acceptance_oracle output)."""
+    checks: tuple[AcceptanceCheck, ...] = ()
+
+
 class TaskStatus(str, Enum):
     PENDING = "pending"
     ACTIVE = "active"
@@ -470,6 +488,7 @@ class Layer(str, Enum):
     IMPLEMENTATION = "implementation"
     PLAN = "plan"
     UNDERSTANDING = "understanding"
+    ACCEPTANCE = "acceptance"
 
 
 @dataclass(frozen=True, slots=True)

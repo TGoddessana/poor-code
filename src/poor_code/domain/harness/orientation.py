@@ -27,7 +27,7 @@ _ROLE: dict[str, str] = {
 
 _AFTER: dict[str, str] = {
     "explorer": "After you: the Interviewer turns your findings into a binding spec.",
-    "interviewer": "After you: the Planner breaks your spec into patch-sized tasks.",
+    "interviewer": "After you: the Acceptance Oracle designs the 'done' check, then the Planner breaks your spec into tasks.",
     "planner": "After you: PlanGate checks your plan, then the Implementer builds each task.",
     "implementer": "After this task: ValidationRunner runs your VALIDATION; pass -> next task, fail -> you retry.",
 }

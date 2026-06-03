@@ -4,6 +4,7 @@ The Verdict is what makes the graph *cycle*: route() turns repair(layer) into a
 back-edge to that layer's shallowest producer (design.md §6/§16/§18)."""
 from __future__ import annotations
 
+from poor_code.domain.harness.grounding import validation_floor_hint
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.session.models import (
     CodeContext, GroundingStatus, Layer, TriggerKind, Verdict, VerdictKind,
@@ -49,8 +50,6 @@ class PlanGate:
 
     _MAX_EDITABLE = 3
     _REPAIR_BUDGET = 2
-    _PROSE_STARTERS = ("check", "verify", "ensure", "confirm", "make sure",
-                       "the ", "it ", "should", "this ", "validate that")
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         hint = self._invalid_hint(ctx.state.plan)
@@ -73,15 +72,12 @@ class PlanGate:
         for task in plan.tasks:
             if not task.edit_scope.editable:
                 return f"Task {task.id} has no editable paths."
-            if not task.how_to_validate.strip():
-                return f"Task {task.id} has no validation."
             if len(task.edit_scope.editable) > cls._MAX_EDITABLE:
                 return (f"Task {task.id} edits {len(task.edit_scope.editable)} files — "
                         "too broad; split into patch-sized tasks (<=3 files).")
-            if cls._is_prose_validation(task.how_to_validate):
-                return (f"Task {task.id} how_to_validate reads as prose, not a runnable "
-                        "command. The ValidationRunner executes it literally — give a "
-                        "real shell command (e.g. pytest/curl/node -e ...).")
+            floor = validation_floor_hint(task.how_to_validate)
+            if floor is not None:
+                return f"Task {task.id} how_to_validate {floor}"
 
         for dep in plan.deps:
             if dep.task_id not in ids or dep.depends_on not in ids:
@@ -91,11 +87,6 @@ class PlanGate:
         if cls._has_cycle(ids, plan.deps):
             return "Plan dependency graph has a cycle."
         return None
-
-    @classmethod
-    def _is_prose_validation(cls, v: str) -> bool:
-        low = v.strip().lower()
-        return any(low.startswith(p) for p in cls._PROSE_STARTERS)
 
     @staticmethod
     def _repair_count(state) -> int:
@@ -127,3 +118,40 @@ class PlanGate:
             return False
 
         return any(visit(node) for node in ids)
+
+
+def _acceptance_repair_count(state) -> int:
+    """Bounces back to acceptance_oracle from either the gate or the critic."""
+    return sum(1 for t in state.history
+               if t.trigger is TriggerKind.GATE and t.to_node == "acceptance_oracle")
+
+
+class AcceptanceGate:
+    """Deterministic floor on the AcceptanceSpec: it must have at least one check and
+    each check must be a runnable command (not prose). Task-DEPENDENT adequacy is the
+    acceptance_critic's job, NOT this gate's."""
+
+    name = "acceptance_gate"
+
+    _REPAIR_BUDGET = 2
+
+    async def run(self, ctx: NodeContext) -> NodeResult:
+        hint = self._invalid_hint(ctx.state.acceptance)
+        if hint is None:
+            return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
+        if _acceptance_repair_count(ctx.state) >= self._REPAIR_BUDGET:
+            return NodeResult(verdict=Verdict(
+                kind=VerdictKind.ESCALATE,
+                query=f"Acceptance check still ill-formed after redesign: {hint}"))
+        return NodeResult(verdict=Verdict(
+            kind=VerdictKind.REPAIR, layer=Layer.ACCEPTANCE, hint=hint))
+
+    @staticmethod
+    def _invalid_hint(spec) -> str | None:
+        if spec is None or not spec.checks:
+            return "Acceptance spec has no checks; design at least one runnable check."
+        for i, chk in enumerate(spec.checks, start=1):
+            floor = validation_floor_hint(chk.command)
+            if floor is not None:
+                return f"Acceptance check {i} ({chk.criterion!r}) command {floor}"
+        return None
