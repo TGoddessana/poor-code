@@ -41,3 +41,28 @@ def test_load_corrupt_file_returns_empty(monkeypatch, tmp_path):
     p.parent.mkdir(parents=True)
     p.write_text("not json")
     assert auth_store.load() == {"providers": {}}
+
+
+def test_save_sets_active_to_that_provider(monkeypatch, tmp_path):
+    _redirect_home(monkeypatch, tmp_path)
+    auth_store.save("ollama_cloud", api_key="a", model="m1")
+    assert auth_store.get_active() == "ollama_cloud"
+
+
+def test_last_save_wins_as_active(monkeypatch, tmp_path):
+    _redirect_home(monkeypatch, tmp_path)
+    auth_store.save("ollama_cloud", api_key="a", model="m1")
+    auth_store.save("openai", api_key="sk", model="gpt-5.4-mini")
+    assert auth_store.get_active() == "openai"
+
+
+def test_get_active_none_when_unset(monkeypatch, tmp_path):
+    _redirect_home(monkeypatch, tmp_path)
+    assert auth_store.get_active() is None
+
+
+def test_active_field_does_not_break_get(monkeypatch, tmp_path):
+    _redirect_home(monkeypatch, tmp_path)
+    auth_store.save("openai", api_key="sk", model="gpt-5.4-mini")
+    # get() returns only the provider entry, not the top-level active key.
+    assert auth_store.get("openai") == {"api_key": "sk", "model": "gpt-5.4-mini"}
