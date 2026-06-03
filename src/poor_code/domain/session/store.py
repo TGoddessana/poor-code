@@ -23,6 +23,8 @@ from poor_code.domain.session.models import (
     Layer,
     FeedbackEntry,
     FeedbackMemory,
+    FileExcerpt,
+    GroundingStatus,
     Dependency,
     EditScope,
     Phase,
@@ -326,6 +328,12 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
                 "confusers": [_ref_to_dict(r) for r in cc.confusers],
                 "related_tests": [_ref_to_dict(r) for r in cc.related_tests],
                 "search_notes": cc.search_notes,
+                "grounding": cc.grounding.value,
+                "summary": cc.summary,
+                "excerpts": [
+                    {"path": e.path, "text": e.text, "truncated": e.truncated}
+                    for e in cc.excerpts
+                ],
             }
         ),
         "history": [
@@ -365,7 +373,13 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
                 candidates=tuple(_dict_to_ref(r) for r in cc["candidates"]),
                 confusers=tuple(_dict_to_ref(r) for r in cc["confusers"]),
                 related_tests=tuple(_dict_to_ref(r) for r in cc["related_tests"]),
-                search_notes=cc.get("search_notes", ""))),
+                search_notes=cc.get("search_notes", ""),
+                grounding=GroundingStatus(cc.get("grounding", "not_found")),
+                summary=cc.get("summary", ""),
+                excerpts=tuple(
+                    FileExcerpt(path=e["path"], text=e["text"],
+                                truncated=e.get("truncated", False))
+                    for e in cc.get("excerpts", [])))),
             history=tuple(
                 Transition(from_node=t["from_node"], to_node=t["to_node"],
                            trigger=TriggerKind(t["trigger"]), reason=t["reason"],
