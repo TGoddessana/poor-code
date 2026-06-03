@@ -363,9 +363,18 @@ class Dependency:
 
 
 @dataclass(frozen=True, slots=True)
+class FileSlot:
+    """One file the plan touches and its single responsibility. Filled by the
+    planner BEFORE tasks so decomposition is anchored to a concrete file map."""
+    path: str
+    responsibility: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Plan:
     tasks: tuple[Task, ...] = ()
     deps: tuple[Dependency, ...] = ()
+    file_plan: tuple[FileSlot, ...] = ()
 
 
 class AttemptStatus(str, Enum):
