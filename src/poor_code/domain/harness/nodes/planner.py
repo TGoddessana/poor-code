@@ -17,6 +17,7 @@ from poor_code.domain.session.models import (
     CodeRef,
     Dependency,
     EditScope,
+    GroundingStatus,
     Plan,
     SessionState,
     Task,
@@ -131,6 +132,11 @@ class Planner(AgentNode):
         if cc is None:
             return "(none)"
         lines: list[str] = []
+        if cc.grounding is GroundingStatus.GREENFIELD:
+            lines.append(
+                "MODE: greenfield (create-from-scratch — no existing code to ground; "
+                "absence of candidates is expected, not a failure)."
+            )
         for label, refs in (
             ("candidates", cc.candidates),
             ("confusers", cc.confusers),

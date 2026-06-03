@@ -11,6 +11,7 @@ from poor_code.domain.project_map.models import FileEntry, ProjectMap, Symbol, S
 from poor_code.domain.session.models import (
     CodeContext,
     CodeRef,
+    GroundingStatus,
     Requirement,
     SessionState,
 )
@@ -127,3 +128,22 @@ async def test_planner_prompt_includes_requirement_and_code_context():
     assert "add google login" in prompt
     assert "src/auth.py::login" in prompt
     assert "def login(provider: str) -> None" in prompt
+
+
+@pytest.mark.asyncio
+async def test_planner_prompt_flags_greenfield_mode():
+    state = SessionState(
+        requirement=Requirement(summary="create hello.txt"),
+        understanding=CodeContext(candidates=(), grounding=GroundingStatus.GREENFIELD),
+    )
+    llm = FakeLLM({"tasks": [], "deps": []})
+    await Planner(llm, project_map=_map()).run(NodeContext(state, cancel=asyncio.Event()))
+    assert "MODE: greenfield" in llm.seen_messages[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_planner_prompt_no_greenfield_flag_when_grounded():
+    # _state() uses real candidates with default grounding=not_found
+    llm = FakeLLM({"tasks": [], "deps": []})
+    await Planner(llm, project_map=_map()).run(NodeContext(_state(), cancel=asyncio.Event()))
+    assert "MODE: greenfield" not in llm.seen_messages[-1]["content"]

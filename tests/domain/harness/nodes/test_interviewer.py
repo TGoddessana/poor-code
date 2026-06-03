@@ -7,7 +7,7 @@ from pathlib import Path
 from poor_code.domain.harness.node import NodeContext, StructuredOutputError
 from poor_code.domain.harness.nodes.interviewer import Interviewer, MAX_ROUNDS
 from poor_code.domain.session.models import (
-    SessionState, Request, RequestKind, CodeContext, CodeRef,
+    SessionState, Request, RequestKind, CodeContext, CodeRef, GroundingStatus,
     Query, QueryKind, UserResponse, AnsweredQuery, Requirement,
 )
 from poor_code.domain.project_map.models import ProjectMap, FileEntry, Symbol, SymbolKind
@@ -120,6 +120,27 @@ async def test_interviewer_schema_invalid_output_raises_with_raw_payload():
     assert "query" in err.detail                       # points at the bad field
     assert json.loads(err.raw)["query"] == bad_prompt  # full raw payload retained
     assert "raw payload" in str(err)                   # surfaced for the failed-turn UI
+
+
+def _greenfield_state():
+    return SessionState(
+        request=Request(raw_text="create hello.txt", kind=RequestKind.ENGINEERING),
+        understanding=CodeContext(candidates=(), grounding=GroundingStatus.GREENFIELD),
+    )
+
+
+def test_interviewer_context_flags_greenfield_mode():
+    node = Interviewer(FakeLLMClient({"action": "done", "requirement": {"summary": "x"}}),
+                       project_map=_map())
+    user = node.build_messages(_greenfield_state())[-1]["content"]
+    assert "MODE: greenfield" in user
+
+
+def test_interviewer_context_no_greenfield_flag_when_grounded():
+    node = Interviewer(FakeLLMClient({"action": "done", "requirement": {"summary": "x"}}),
+                       project_map=_map())
+    user = node.build_messages(_state())[-1]["content"]  # _state() has candidates, default grounding
+    assert "MODE: greenfield" not in user
 
 
 @pytest.mark.asyncio
