@@ -19,6 +19,7 @@ from poor_code.domain.session.models import (
     CodeRef,
     Dependency,
     EditScope,
+    FileSlot,
     GroundingStatus,
     Plan,
     SessionState,
@@ -28,12 +29,19 @@ from poor_code.domain.session.models import (
 _TOOL_NAME = "emit_plan"
 
 _SYSTEM = (
-    "You are the Planner. Convert the binding Requirement into a sequence of "
-    "PATCH-SIZED engineering Tasks — each one small enough that a weak model "
-    "finishes it in a single pass.\n"
+    "You are the Planner. Convert the binding Requirement into the SMALLEST set of "
+    "PATCH-SIZED engineering Tasks that delivers it.\n"
+    "FILE PLAN FIRST: before any task, fill file_plan — every file this change "
+    "touches and that file's single responsibility. Then derive tasks FROM "
+    "file_plan. Every task's edit_scope.editable MUST be a file named in file_plan. "
+    "Never emit a task for a file that does not belong to the chosen stack "
+    "(e.g. no package.json in a Python project).\n"
     "RULES:\n"
-    "1. One task = one patch. One primary editable file (2-3 max). If a task "
-    "spans multiple files or multiple distinct behaviors, SPLIT it.\n"
+    "1. One task = one patch with one primary editable file (2-3 max). Group by "
+    "RESPONSIBILITY: files that CHANGE TOGETHER belong in the SAME task. Do NOT "
+    "split 'write the test' from 'implement it' — they are ONE task. A single "
+    "deliverable (one bug fix, one server) is ONE task. Default to FEWER tasks; "
+    "split only when two parts are INDEPENDENTLY SHIPPABLE. When unsure, MERGE.\n"
     "2. Every task MUST have a non-empty edit_scope.editable and a how_to_validate "
     "that is a RUNNABLE COMMAND (not prose). The ValidationRunner executes that "
     "string literally and checks its exit code — 'Check that ...' is invalid; an "
@@ -51,6 +59,7 @@ _SYSTEM = (
     "7. A GLOBAL ACCEPTANCE spec defines 'done'. Your tasks together must satisfy it; "
     "keep each how_to_validate consistent with those checks.\n"
     "EXAMPLE — request 'Node HTTP server, GET /fib/:n -> nth Fibonacci (BigInt), :3000':\n"
+    "  file_plan: lib/fib.js (pure nth Fibonacci), server.js (:3000 route /fib/:n)\n"
     "  t1 lib/fib.js (pure BigInt nth Fibonacci)\n"
     "     validate: node -e \"if(require('./lib/fib')(10)!==55n)process.exit(1)\"\n"
     "  t2 server.js (:3000, route /fib/:n; implementer launches it and leaves it "
@@ -79,7 +88,13 @@ class _DependencyOut(BaseModel):
     depends_on: str
 
 
+class _FileSlotOut(BaseModel):
+    path: str
+    responsibility: str = ""
+
+
 class _PlanOut(BaseModel):
+    file_plan: list[_FileSlotOut] = []
     tasks: list[_TaskOut] = []
     deps: list[_DependencyOut] = []
 
@@ -133,7 +148,11 @@ class Planner(AgentNode):
             Dependency(task_id=dep.task_id, depends_on=dep.depends_on)
             for dep in out.deps
         )
-        return Plan(tasks=tasks, deps=deps)
+        file_plan = tuple(
+            FileSlot(path=slot.path, responsibility=slot.responsibility)
+            for slot in out.file_plan
+        )
+        return Plan(tasks=tasks, deps=deps, file_plan=file_plan)
 
     @staticmethod
     def _to_task(index: int, task: _TaskOut) -> Task:

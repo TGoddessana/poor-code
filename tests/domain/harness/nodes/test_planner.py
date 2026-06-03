@@ -147,3 +147,48 @@ async def test_planner_prompt_no_greenfield_flag_when_grounded():
     llm = FakeLLM({"tasks": [], "deps": []})
     await Planner(llm, project_map=_map()).run(NodeContext(_state(), cancel=asyncio.Event()))
     assert "MODE: greenfield" not in llm.seen_messages[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_planner_emits_file_plan():
+    llm = FakeLLM({
+        "file_plan": [
+            {"path": "server.py", "responsibility": "HTTP server on :3000"},
+        ],
+        "tasks": [{
+            "title": "server",
+            "purpose": "serve fib",
+            "edit_scope": {"editable": ["server.py"]},
+            "how_to_validate": "curl -fs localhost:3000/fib/10 | grep -qx 55",
+        }],
+        "deps": [],
+    })
+    res = await Planner(llm, project_map=_map()).run(
+        NodeContext(_state(), cancel=asyncio.Event())
+    )
+    plan = res.output
+    assert plan.file_plan[0].path == "server.py"
+    assert plan.file_plan[0].responsibility == "HTTP server on :3000"
+
+
+@pytest.mark.asyncio
+async def test_planner_file_plan_defaults_empty_when_omitted():
+    # Older-shaped payloads without file_plan must still parse.
+    llm = FakeLLM({"tasks": [], "deps": []})
+    res = await Planner(llm, project_map=_map()).run(
+        NodeContext(_state(), cancel=asyncio.Event())
+    )
+    assert res.output.file_plan == ()
+
+
+@pytest.mark.asyncio
+async def test_planner_prompt_teaches_cohesion_not_behavior_split():
+    llm = FakeLLM({"tasks": [], "deps": []})
+    await Planner(llm, project_map=_map()).run(
+        NodeContext(_state(), cancel=asyncio.Event())
+    )
+    system = llm.seen_messages[0]["content"].lower()
+    assert "responsibility" in system          # split by responsibility...
+    assert "change together" in system         # ...files that change together stay together
+    assert "file_plan" in system               # file-plan-first instruction
+    assert "fewer" in system                    # bias to merge
