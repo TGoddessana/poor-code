@@ -118,3 +118,40 @@ class PlanGate:
             return False
 
         return any(visit(node) for node in ids)
+
+
+def _acceptance_repair_count(state) -> int:
+    """Bounces back to acceptance_oracle from either the gate or the critic."""
+    return sum(1 for t in state.history
+               if t.trigger is TriggerKind.GATE and t.to_node == "acceptance_oracle")
+
+
+class AcceptanceGate:
+    """Deterministic floor on the AcceptanceSpec: it must have at least one check and
+    each check must be a runnable command (not prose). Task-DEPENDENT adequacy is the
+    acceptance_critic's job, NOT this gate's."""
+
+    name = "acceptance_gate"
+
+    _REPAIR_BUDGET = 2
+
+    async def run(self, ctx: NodeContext) -> NodeResult:
+        hint = self._invalid_hint(ctx.state.acceptance)
+        if hint is None:
+            return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
+        if _acceptance_repair_count(ctx.state) >= self._REPAIR_BUDGET:
+            return NodeResult(verdict=Verdict(
+                kind=VerdictKind.ESCALATE,
+                query=f"Acceptance check still ill-formed after redesign: {hint}"))
+        return NodeResult(verdict=Verdict(
+            kind=VerdictKind.REPAIR, layer=Layer.ACCEPTANCE, hint=hint))
+
+    @staticmethod
+    def _invalid_hint(spec) -> str | None:
+        if spec is None or not spec.checks:
+            return "Acceptance spec has no checks; design at least one runnable check."
+        for i, chk in enumerate(spec.checks, start=1):
+            floor = validation_floor_hint(chk.command)
+            if floor is not None:
+                return f"Acceptance check {i} ({chk.criterion!r}) command {floor}"
+        return None
