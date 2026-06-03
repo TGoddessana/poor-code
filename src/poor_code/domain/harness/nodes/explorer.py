@@ -224,12 +224,20 @@ class ExploringNode(AgentNode):
     def parse(self, args_json: str, excerpts: tuple[FileExcerpt, ...] = ()) -> CodeContext:
         out = validate_output(_CodeContextOut, args_json, node=self.name)
         to_ref = lambda r: CodeRef(file=r.file, symbol=r.symbol, lineno=r.lineno)
+        grounding = GroundingStatus(out.grounding)
+        # Deterministic safety net: an empty working tree (no files in the project
+        # map) with no candidates is unambiguously greenfield, whatever the model
+        # guessed. The model kept labelling an empty repo 'not_found', which made
+        # the UnderstandingGate bounce then escalate -> ABANDONED before planning.
+        if (not out.candidates and not self._map.files
+                and grounding is GroundingStatus.NOT_FOUND):
+            grounding = GroundingStatus.GREENFIELD
         return CodeContext(
             candidates=tuple(to_ref(r) for r in out.candidates),
             confusers=tuple(to_ref(r) for r in out.confusers),
             related_tests=tuple(to_ref(r) for r in out.related_tests),
             search_notes=out.search_notes,
-            grounding=GroundingStatus(out.grounding),
+            grounding=grounding,
             summary=out.summary,
             excerpts=excerpts,
         )
