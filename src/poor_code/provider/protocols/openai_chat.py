@@ -50,8 +50,22 @@ class OpenAICompatibleChat:
 
 
 class _OpenAIChatParser:
+    """Accumulates streamed tool calls.
+
+    Calls are keyed by `id`, not by `index`. The OpenAI spec distinguishes
+    parallel tool calls by `index`, but some providers (e.g. ollama.com's
+    minimax-m3) emit every parallel call with `index: 0`, distinguishing them
+    only by `id`. Keying by index there merges two individually-valid argument
+    payloads into one invalid blob (`{"path":"a"}{"path":"b"}`), which the server
+    later rejects with HTTP 400. Standard streaming sends `id` only on a call's
+    first chunk and id-less continuation chunks carry only `index`; we map those
+    back to the in-progress call via `index → key`.
+    """
+
     def __init__(self) -> None:
-        self._calls: dict[int, dict[str, str]] = {}
+        self._calls: dict[str, dict[str, str]] = {}
+        self._order: list[str] = []
+        self._index_to_key: dict[int, str] = {}
 
     def parse_chunk(self, chunk: dict[str, Any]) -> Iterable[LLMEvent]:
         # OpenAI's final-chunk usage frame has choices=[] (or absent) and
@@ -87,9 +101,25 @@ class _OpenAIChatParser:
 
         for tc in delta.get("tool_calls") or []:
             idx = tc.get("index", 0)
-            if idx not in self._calls:
-                self._calls[idx] = {"id": tc.get("id") or "", "name": "", "args": ""}
-            call = self._calls[idx]
+            tcid = tc.get("id") or ""
+            if tcid:
+                # A non-empty id starts (or re-selects) a call. Distinct ids at
+                # the same index → distinct calls (the minimax case).
+                key = tcid
+                if key not in self._calls:
+                    self._calls[key] = {"id": tcid, "name": "", "args": ""}
+                    self._order.append(key)
+                self._index_to_key[idx] = key
+            else:
+                # id-less continuation chunk — belongs to the call in progress at
+                # this index (standard OpenAI argument streaming).
+                key = self._index_to_key.get(idx)
+                if key is None:
+                    key = f"__idx_{idx}"
+                    self._calls[key] = {"id": "", "name": "", "args": ""}
+                    self._order.append(key)
+                    self._index_to_key[idx] = key
+            call = self._calls[key]
             fn = tc.get("function") or {}
             if fn.get("name"):
                 call["name"] = fn["name"]
@@ -97,8 +127,8 @@ class _OpenAIChatParser:
                 call["args"] += fn["arguments"]
 
         if finish_reason is not None:
-            for idx in sorted(self._calls):
-                call = self._calls[idx]
+            for key in self._order:
+                call = self._calls[key]
                 cid = call["id"] or uuid.uuid4().hex
                 yield ToolCallStarted(call_id=cid, name=call["name"])
                 yield ToolCallInputDelta(call_id=cid, json_delta=call["args"] or "{}")
