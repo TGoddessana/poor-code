@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from poor_code.domain.harness.node import AgentNode, _LLMClientLike
+from poor_code.domain.harness.node import AgentNode, _LLMClientLike, validate_output
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import CodeContext, CodeRef, SessionState
 
@@ -60,8 +60,11 @@ class Locator(AgentNode):
             },
         }
 
+    def output_model(self) -> type[BaseModel]:
+        return _CodeContextOut
+
     def parse(self, args_json: str) -> CodeContext:
-        out = _CodeContextOut.model_validate_json(args_json)
+        out = validate_output(_CodeContextOut, args_json, node=self.name)
         to_ref = lambda r: CodeRef(file=r.file, symbol=r.symbol, lineno=r.lineno)
         return CodeContext(
             candidates=tuple(to_ref(r) for r in out.candidates),

@@ -93,5 +93,8 @@ class GlobalValidator(AgentNode):
                              "description": "Identify the regression culprit and a fix hint.",
                              "parameters": _AnalyzeOut.model_json_schema()}}
 
+    def output_model(self) -> type[BaseModel]:
+        return _AnalyzeOut
+
     def parse(self, args_json: str) -> str:  # unused (run() parses inline); kept for AgentNode contract
         return _AnalyzeOut.model_validate_json(args_json).hint

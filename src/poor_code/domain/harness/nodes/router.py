@@ -72,6 +72,9 @@ class Router(AgentNode):
             },
         }
 
+    def output_model(self) -> type[BaseModel]:
+        return _ClassificationOut
+
     @staticmethod
     def _classify_seed(text: str) -> RequestKind:
         """Deterministic seed — English-prefix heuristic. Fallback only."""

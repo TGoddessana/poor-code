@@ -36,10 +36,12 @@ class LLMClient:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        response_format: dict[str, Any] | None = None,
     ) -> AsyncIterator[LLMEvent]:
         body = self.route.protocol.build_body(
             messages=messages, tools=tools, model=self.model,
             capabilities=self.route.capabilities,
+            response_format=response_format,
         )
         parser = self.route.protocol.for_stream()  # fresh per-stream parser
         headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}

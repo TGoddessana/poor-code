@@ -49,6 +49,9 @@ class FailureAnalyst(AgentNode):
                              "description": "Emit one reusable failure lesson.",
                              "parameters": _FeedbackOut.model_json_schema()}}
 
+    def output_model(self) -> type[BaseModel]:
+        return _FeedbackOut
+
     def parse(self, args_json: str) -> FeedbackEntry:
         out = _FeedbackOut.model_validate_json(args_json)
         return FeedbackEntry(failure_type=out.failure_type, symptom=out.symptom,

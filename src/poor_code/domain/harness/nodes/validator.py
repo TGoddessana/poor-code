@@ -57,6 +57,9 @@ class Validator(AgentNode):
                              "description": "Judge the patch: advance / repair_impl / repair_plan.",
                              "parameters": _JudgeOut.model_json_schema()}}
 
+    def output_model(self) -> type[BaseModel]:
+        return _JudgeOut
+
     def parse(self, args_json: str) -> Verdict:
         out = _JudgeOut.model_validate_json(args_json)
         if out.verdict == "repair_impl":

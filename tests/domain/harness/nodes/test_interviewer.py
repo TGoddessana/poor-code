@@ -4,7 +4,7 @@ import pytest
 from datetime import UTC, datetime
 from pathlib import Path
 
-from poor_code.domain.harness.node import NodeContext
+from poor_code.domain.harness.node import NodeContext, StructuredOutputError
 from poor_code.domain.harness.nodes.interviewer import Interviewer, MAX_ROUNDS
 from poor_code.domain.session.models import (
     SessionState, Request, RequestKind, CodeContext, CodeRef,
@@ -103,6 +103,23 @@ async def test_interviewer_cap_forces_done_even_if_model_asks():
     assert res.query is None
     assert isinstance(res.output, Requirement)
     assert res.output.summary == "forced finalize"
+
+
+@pytest.mark.asyncio
+async def test_interviewer_schema_invalid_output_raises_with_raw_payload():
+    # A model that violates the schema — here `query` as a bare string instead of
+    # the object — is re-rolled, then (still bad) surfaces the FULL raw payload
+    # (Pydantic's own message truncates it).
+    bad_prompt = "'원격 제어'의 범위가 무엇입니까?"
+    llm = FakeLLMClient({"action": "ask", "query": bad_prompt})
+    node = Interviewer(llm, project_map=_map())
+    with pytest.raises(StructuredOutputError) as exc:
+        await node.run(NodeContext(state=_state(), cancel=asyncio.Event()))
+    err = exc.value
+    assert err.node == "interviewer"
+    assert "query" in err.detail                       # points at the bad field
+    assert json.loads(err.raw)["query"] == bad_prompt  # full raw payload retained
+    assert "raw payload" in str(err)                   # surfaced for the failed-turn UI
 
 
 @pytest.mark.asyncio

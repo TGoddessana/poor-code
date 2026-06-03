@@ -93,6 +93,9 @@ class Planner(AgentNode):
             },
         }
 
+    def output_model(self) -> type[BaseModel]:
+        return _PlanOut
+
     def parse(self, args_json: str) -> Plan:
         out = _PlanOut.model_validate_json(args_json)
         tasks = tuple(self._to_task(i, task) for i, task in enumerate(out.tasks, start=1))

@@ -6,7 +6,6 @@ accumulates them and emits Started+InputDelta+Ended on finish_reason.
 """
 from __future__ import annotations
 
-import json
 import uuid
 from typing import Any, Iterable
 
@@ -36,7 +35,7 @@ class OpenAICompatibleChat:
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": model,
-            "messages": _sanitize_messages(messages),
+            "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
@@ -100,96 +99,9 @@ class _OpenAIChatParser:
         if finish_reason is not None:
             for idx in sorted(self._calls):
                 call = self._calls[idx]
-                base_id = call["id"] or uuid.uuid4().hex
-                pieces = _split_top_level_json(call["args"] or "{}")
-                for k, piece in enumerate(pieces):
-                    cid = base_id if len(pieces) == 1 else f"{base_id}#{k}"
-                    yield ToolCallStarted(call_id=cid, name=call["name"])
-                    yield ToolCallInputDelta(call_id=cid, json_delta=piece)
-                    yield ToolCallEnded(call_id=cid)
+                cid = call["id"] or uuid.uuid4().hex
+                yield ToolCallStarted(call_id=cid, name=call["name"])
+                yield ToolCallInputDelta(call_id=cid, json_delta=call["args"] or "{}")
+                yield ToolCallEnded(call_id=cid)
             reason = finish_reason if finish_reason in _VALID_REASONS else "stop"
             yield FinishedReason(reason=reason)
-
-
-def _split_top_level_json(s: str) -> list[str]:
-    """Split concatenated top-level JSON values into separate pieces.
-
-    A model may cram N parallel tool calls into one call's arguments as
-    `{"a":1}{"b":2}`. This splits them at depth-0 boundaries. Braces/brackets
-    inside JSON strings (and escaped quotes) are ignored. If the string is not
-    cleanly splittable (trailing garbage, unbalanced, truncated) OR contains a
-    single value, the original string is returned unchanged as `[s]` — so
-    normal calls are byte-identical."""
-    pieces: list[str] = []
-    depth = 0
-    in_str = False
-    escape = False
-    start: int | None = None
-    for i, ch in enumerate(s):
-        if start is None:
-            if ch.isspace():
-                continue
-            start = i
-        if in_str:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch in "{[":
-            depth += 1
-        elif ch in "}]":
-            depth -= 1
-            if depth == 0:
-                pieces.append(s[start : i + 1])
-                start = None
-            elif depth < 0:
-                return [s]  # unbalanced → don't split
-    # leftover open value, trailing garbage, or unterminated string → bail
-    if start is not None or depth != 0 or in_str:
-        return [s]
-    if len(pieces) <= 1:
-        return [s]  # single value (or none) → original unchanged
-    return pieces
-
-
-def _repair_args(s: str) -> str:
-    """Ensure a tool-call argument string is valid JSON. Valid → unchanged.
-    Otherwise take the first valid top-level object, else '{}'."""
-    try:
-        json.loads(s)
-        return s
-    except (ValueError, TypeError):
-        pass
-    for piece in _split_top_level_json(s):
-        try:
-            json.loads(piece)
-            return piece
-        except (ValueError, TypeError):
-            continue
-    return "{}"
-
-
-def _sanitize_messages(messages: list[dict]) -> list[dict]:
-    """Repair invalid assistant tool-call argument strings (defensive floor).
-    Returns a new list; never mutates the input."""
-    out: list[dict] = []
-    for m in messages:
-        tcs = m.get("tool_calls")
-        if m.get("role") == "assistant" and tcs:
-            new_tcs = []
-            for tc in tcs:
-                fn = tc.get("function") or {}
-                args = fn.get("arguments")
-                if isinstance(args, str):
-                    repaired = _repair_args(args)
-                    if repaired != args:
-                        tc = {**tc, "function": {**fn, "arguments": repaired}}
-                new_tcs.append(tc)
-            m = {**m, "tool_calls": new_tcs}
-        out.append(m)
-    return out
