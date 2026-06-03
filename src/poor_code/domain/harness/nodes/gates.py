@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.session.models import (
-    CodeContext, Layer, TriggerKind, Verdict, VerdictKind,
+    CodeContext, GroundingStatus, Layer, TriggerKind, Verdict, VerdictKind,
 )
 
 
@@ -19,7 +19,7 @@ class UnderstandingGate:
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         cc = ctx.state.understanding or CodeContext()
-        if cc.candidates:
+        if cc.candidates or cc.grounding is GroundingStatus.GREENFIELD:
             return NodeResult(output=None, verdict=Verdict(kind=VerdictKind.ADVANCE))
         if self._already_repaired(ctx.state):
             return NodeResult(output=None, verdict=Verdict(

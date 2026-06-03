@@ -5,8 +5,8 @@ import pytest
 from poor_code.domain.harness.node import NodeContext
 from poor_code.domain.harness.nodes.gates import PlanGate, UnderstandingGate
 from poor_code.domain.session.models import (
-    CodeContext, CodeRef, Dependency, EditScope, Layer, Plan, SessionState, Task,
-    Transition, TriggerKind, VerdictKind,
+    CodeContext, CodeRef, Dependency, EditScope, GroundingStatus, Layer, Plan,
+    SessionState, Task, Transition, TriggerKind, VerdictKind,
 )
 
 
@@ -19,6 +19,21 @@ async def test_advances_when_candidates_present():
     cc = CodeContext(candidates=(CodeRef(file="a.py", symbol="x"),))
     res = await UnderstandingGate().run(_ctx(SessionState(understanding=cc)))
     assert res.verdict.kind is VerdictKind.ADVANCE
+
+
+@pytest.mark.asyncio
+async def test_advances_when_greenfield_even_without_candidates():
+    cc = CodeContext(candidates=(), grounding=GroundingStatus.GREENFIELD)
+    res = await UnderstandingGate().run(_ctx(SessionState(understanding=cc)))
+    assert res.verdict.kind is VerdictKind.ADVANCE
+
+
+@pytest.mark.asyncio
+async def test_repairs_when_not_found_without_candidates():
+    cc = CodeContext(candidates=(), grounding=GroundingStatus.NOT_FOUND)
+    res = await UnderstandingGate().run(_ctx(SessionState(understanding=cc)))
+    assert res.verdict.kind is VerdictKind.REPAIR
+    assert res.verdict.layer is Layer.UNDERSTANDING
 
 
 @pytest.mark.asyncio
