@@ -151,8 +151,10 @@ class Planner(AgentNode):
             for ref in refs:
                 lines.append(f"  - {self._render_ref(ref)}")
         for ex in cc.excerpts:
-            body = ex.text if len(ex.text) <= 600 else ex.text[:600] + " …"
-            lines.append(f"--- {ex.path}{' (truncated)' if ex.truncated else ''} ---\n{body}")
+            clipped = len(ex.text) > 600
+            body = ex.text[:600] + " …" if clipped else ex.text
+            label = " (truncated)" if ex.truncated or clipped else ""
+            lines.append(f"--- {ex.path}{label} ---\n{body}")
         return "\n".join(lines)
 
     def _render_ref(self, ref: CodeRef) -> str:

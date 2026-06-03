@@ -57,6 +57,25 @@ async def test_interviewer_digest_includes_summary_and_excerpt():
 
 
 @pytest.mark.asyncio
+async def test_interviewer_digest_marks_digest_clipped_excerpt_truncated():
+    big = CodeContext(
+        grounding=GroundingStatus.GREENFIELD,
+        excerpts=(FileExcerpt(path="big.txt", text="A" * 700, truncated=False),),
+    )
+    state = SessionState(
+        request=Request(raw_text="x", kind=RequestKind.ENGINEERING),
+        understanding=big,
+    )
+    llm = FakeLLM({"action": "done",
+                   "requirement": {"summary": "s", "acceptance": [], "out_of_scope": [],
+                                   "assumptions": [], "open_questions": []}})
+    await Interviewer(llm, project_map=_map()).run(NodeContext(state, cancel=asyncio.Event()))
+    prompt = llm.seen_messages[-1]["content"]
+    assert "--- big.txt (truncated) ---" in prompt
+    assert " …" in prompt
+
+
+@pytest.mark.asyncio
 async def test_planner_digest_includes_summary_and_excerpt():
     state = SessionState(
         requirement=Requirement(summary="reconstruct image"),
