@@ -38,6 +38,10 @@ class StderrSink:
     def node_entered(self, node: str, phase: str) -> None:
         self._w(f"▸ {node} [{phase}]")
 
+    def node_repaired(self, node: str, detail: str) -> None:
+        # Surface WHY a gate sent work back (e.g. eng_gate's scope violation).
+        self._w(f"  ↺ {node} {detail}")
+
     def text_delta(self, text: str) -> None:
         if text:
             self._out.write(text)

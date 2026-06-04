@@ -48,6 +48,12 @@ class TurnSink:
     def node_entered(self, node: str, phase: str) -> None:
         self._dispatch(NodeEntered(turn_id=self._turn_id, node=node, phase=phase))
 
+    def node_repaired(self, node: str, detail: str) -> None:
+        # Observability hook used by headless (StderrSink). The TUI surfaces repairs
+        # through existing node/phase events, so this is a no-op here — adding a new
+        # message event would require touching the hardwired messages.py reducer.
+        pass
+
     def text_delta(self, text: str) -> None:
         if text:
             self._dispatch(AssistantTextDelta(turn_id=self._turn_id, text=text))

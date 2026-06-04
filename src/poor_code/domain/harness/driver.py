@@ -50,6 +50,11 @@ class Driver:
                 return state                               # cursor stays → re-entrant resume
             state = self._apply(state, result)            # ① write (sole writer)
             v = result.verdict
+            if v is not None and v.kind in (VerdictKind.REPAIR, VerdictKind.ESCALATE):
+                detail = v.hint or v.query                 # REPAIR→hint, ESCALATE→query
+                if detail and sink is not None and hasattr(sink, "node_repaired"):
+                    layer = v.layer.value if v.layer is not None else "-"
+                    sink.node_repaired(node.name, f"{v.kind.value}({layer}): {detail}")
             if v is not None and v.kind is VerdictKind.REPAIR and v.hint:
                 state = state.with_repair_hint(v.hint)     # carry hint to the re-entered node
 
