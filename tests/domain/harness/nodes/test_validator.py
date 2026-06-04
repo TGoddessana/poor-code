@@ -33,6 +33,29 @@ def _state(rounds=0):
                       task_id="t1", attempt_id="t1-a1"))
 
 
+class _CapturingJudgeLLM(_JudgeLLM):
+    def __init__(self, verdict="advance"):
+        super().__init__(verdict)
+        self.seen = None
+    async def stream(self, messages, tools, response_format=None):
+        self.seen = messages
+        async for ev in super().stream(messages, tools, response_format):
+            yield ev
+
+
+@pytest.mark.asyncio
+async def test_validator_prompt_carries_scope_for_semantic_judgment():
+    # Scope appropriateness moved from eng_gate's mechanical allowlist to the validator.
+    # So the reviewer must SEE the task's intended editable scope and be told to judge
+    # whether the patched files fit — a test sibling is fine, an unrelated module is not.
+    llm = _CapturingJudgeLLM()
+    await Validator(llm).run(NodeContext(state=_state(), cancel=asyncio.Event()))
+    user = llm.seen[-1]["content"]
+    system = llm.seen[0]["content"].lower()
+    assert "a.txt" in user        # the declared editable scope reaches the reviewer
+    assert "scope" in system      # the reviewer is instructed to judge scope fit
+
+
 @pytest.mark.asyncio
 async def test_validator_advance():
     res = await Validator(_JudgeLLM("advance")).run(

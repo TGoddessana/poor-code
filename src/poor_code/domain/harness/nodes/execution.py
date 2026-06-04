@@ -53,8 +53,12 @@ class TaskSelector:
 
 
 class EngGate:
-    """Structural guard on the latest Attempt: must have a patch, and every
-    changed file must be inside edit_scope.editable and never in forbidden."""
+    """Structural guard on the latest Attempt: it must have a patch and must never
+    touch a forbidden path. Whether the edits FIT the task (scope appropriateness) is
+    the validator's semantic call, not a mechanical allowlist — a task that fixes
+    src/x.py may also edit its test tests/test_x.py without declaring it, and the
+    reviewer judges that instead of the gate killing it. eng_gate keeps only the two
+    hard, judgment-free floors: there is something to review, and nothing forbidden."""
 
     name = "eng_gate"
 
@@ -75,13 +79,10 @@ class EngGate:
     def _invalid_hint(task, attempt) -> str | None:
         if attempt is None or attempt.patch is None or not attempt.patch.files:
             return "Attempt has no patch."
-        editable = set(task.edit_scope.editable)
         forbidden = set(task.edit_scope.forbidden)
         for f in attempt.patch.files:
             if f in forbidden:
                 return f"Edited forbidden path: {f}"
-            if editable and f not in editable:
-                return f"Edited path outside editable scope: {f}"
         return None
 
 

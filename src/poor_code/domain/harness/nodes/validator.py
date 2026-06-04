@@ -22,7 +22,12 @@ _SYSTEM = (
     "correct and complete), 'repair_impl' (the implementation has a hole — give a "
     "specific hint), or 'repair_plan' (the validation command is too weak to catch "
     "regressions — say why). You cannot run code or change the validation command. "
-    "Call judge once."
+    "Also judge SCOPE with judgment, not a literal allowlist: EDITABLE SCOPE lists the "
+    "files the task was expected to touch, but editing a closely-related file the task "
+    "obviously needs is fine — e.g. fixing src/x.py and also editing its test "
+    "tests/test_x.py, or a sibling in the same module. Only flag an edit as repair_impl "
+    "for scope if it touches a CLEARLY UNRELATED file (different feature/module) with no "
+    "bearing on this task; then say which file and why. Call judge once."
 )
 
 
@@ -45,11 +50,15 @@ class Validator(AgentNode):
         task = self._active_task(state)
         attempt = self._latest_attempt(state)
         diff = "" if attempt is None or attempt.patch is None else attempt.patch.diff
+        editable = ", ".join(task.edit_scope.editable) or "(unspecified)"
+        forbidden = ", ".join(task.edit_scope.forbidden) or "(none)"
         return [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": (
                 f"TASK: {task.title}\nPURPOSE: {task.purpose}\n"
-                f"VALIDATION COMMAND: {task.how_to_validate}\n\nPATCH:\n{diff or '(empty)'}")},
+                f"VALIDATION COMMAND: {task.how_to_validate}\n"
+                f"EDITABLE SCOPE (guidance, judge with sense): {editable}\n"
+                f"FORBIDDEN: {forbidden}\n\nPATCH:\n{diff or '(empty)'}")},
         ]
 
     def output_tool(self) -> dict[str, Any]:

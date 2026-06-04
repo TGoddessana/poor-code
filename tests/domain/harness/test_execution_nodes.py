@@ -104,11 +104,23 @@ async def test_eng_gate_repairs_on_missing_patch():
 
 
 @pytest.mark.asyncio
-async def test_eng_gate_repairs_on_out_of_scope_edit():
+async def test_eng_gate_repairs_on_forbidden_edit():
     a = Attempt(id="a1", patch=ChangeRecord(files=("src/forbidden.py",), diff="@@"))
     r = await EngGate().run(_ctx(_state_with_attempt(a, editable=("src/a.py",),
                                                      forbidden=("src/forbidden.py",))))
     assert r.verdict.kind is VerdictKind.REPAIR
+
+
+@pytest.mark.asyncio
+async def test_eng_gate_advances_on_edit_outside_editable_when_not_forbidden():
+    # Scope appropriateness is now the validator's (semantic) judgment, not a mechanical
+    # allowlist. eng_gate only blocks forbidden paths and empty patches; a legitimate
+    # edit outside the declared editable (e.g. the task's own test file) advances to the
+    # reviewer, who decides if it fits the task. This is what unblocked astropy-2: the
+    # implementer edited test_qdp.py (not in editable) and the old gate killed it.
+    a = Attempt(id="a1", patch=ChangeRecord(files=("tests/test_a.py",), diff="@@"))
+    r = await EngGate().run(_ctx(_state_with_attempt(a, editable=("src/a.py",))))
+    assert r.verdict.kind is VerdictKind.ADVANCE
 
 
 from pathlib import Path
