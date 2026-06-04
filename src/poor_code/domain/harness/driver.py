@@ -111,6 +111,7 @@ def _phase_for(node: str, current: Phase) -> Phase:
         "acceptance_critic": Phase.PLANNING,
         "planner": Phase.PLANNING,
         "plan_gate": Phase.PLANNING,
+        "plan_reviewer": Phase.PLANNING,
         "task_selector": Phase.IMPLEMENTING,
         "composer": Phase.IMPLEMENTING,
         "implementer": Phase.IMPLEMENTING,

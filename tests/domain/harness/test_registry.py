@@ -32,7 +32,7 @@ def test_execution_agent_nodes_are_registered():
                     files=(), parse_errors=())
     reg = build_default_registry(llm=_LLM(), project_map=pm)
     for name in ("composer", "implementer", "validator",
-                 "failure_analyst", "global_validator"):
+                 "failure_analyst", "global_validator", "plan_reviewer"):
         assert reg.get(name) is not None, f"{name} not registered"
 
 

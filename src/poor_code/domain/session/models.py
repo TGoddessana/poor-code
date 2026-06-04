@@ -363,9 +363,18 @@ class Dependency:
 
 
 @dataclass(frozen=True, slots=True)
+class FileSlot:
+    """One file the plan touches and its single responsibility. Filled by the
+    planner BEFORE tasks so decomposition is anchored to a concrete file map."""
+    path: str
+    responsibility: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Plan:
     tasks: tuple[Task, ...] = ()
     deps: tuple[Dependency, ...] = ()
+    file_plan: tuple[FileSlot, ...] = ()
 
 
 class AttemptStatus(str, Enum):
@@ -407,6 +416,12 @@ class TaskReport:
     title: str
     status: TaskStatus
     attempts: int = 0
+    # Last binding validation (validation_runner) for this task — surfaced so an
+    # ABANDONED/looping task is diagnosable: WHICH command ran, its exit code, and
+    # its output. Blank when no attempt produced a run_result.
+    validation_command: str = ""
+    validation_exit: int | None = None
+    validation_output: str = ""
 
 
 @dataclass(frozen=True, slots=True)
