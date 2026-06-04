@@ -13,6 +13,19 @@ from poor_code.domain.session.models import (
 )
 
 
+class _TraceSink:
+    """Records the node_entered calls so a test can assert the walked path."""
+
+    def __init__(self) -> None:
+        self.entered: list[str] = []
+
+    def node_entered(self, node: str, phase: str) -> None:
+        self.entered.append(node)
+
+    def __getattr__(self, _name):  # no-op for every other sink method
+        return lambda *a, **k: None
+
+
 @pytest.mark.asyncio
 async def test_run_headless_over_real_registry_reaches_succeeded_report(tmp_path):
     llm = E2ELLM()
@@ -25,9 +38,16 @@ async def test_run_headless_over_real_registry_reaches_succeeded_report(tmp_path
         policy=Policy.FULL_AUTO,
     )
 
-    final = await run_headless(driver, start, asyncio.Event(), sink=None)
+    sink = _TraceSink()
+    final = await run_headless(driver, start, asyncio.Event(), sink=sink)
 
     assert final.report is not None
     assert final.report.outcome is ReportOutcome.SUCCEEDED
     # the implementer actually created the file in the work tree
     assert (tmp_path / "out.txt").read_text() == "ok"
+    # FULL_AUTO skips the interview + acceptance layer: the graph goes from the
+    # understanding_gate straight to the planner, entering none of those nodes.
+    assert "planner" in sink.entered
+    for skipped in ("interviewer", "acceptance_oracle", "acceptance_gate",
+                    "acceptance_critic"):
+        assert skipped not in sink.entered, f"{skipped} should be skipped in FULL_AUTO"

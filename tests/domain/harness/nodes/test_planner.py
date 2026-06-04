@@ -12,6 +12,8 @@ from poor_code.domain.session.models import (
     CodeContext,
     CodeRef,
     GroundingStatus,
+    Request,
+    RequestKind,
     Requirement,
     SessionState,
 )
@@ -147,6 +149,23 @@ async def test_planner_prompt_no_greenfield_flag_when_grounded():
     llm = FakeLLM({"tasks": [], "deps": []})
     await Planner(llm, project_map=_map()).run(NodeContext(_state(), cancel=asyncio.Event()))
     assert "MODE: greenfield" not in llm.seen_messages[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_planner_falls_back_to_request_when_requirement_absent():
+    # Headless (FULL_AUTO) skips the interviewer, so state.requirement is None.
+    # The planner must synthesize the requirement from the raw request instead of
+    # asserting — the request text becomes the summary.
+    state = SessionState(
+        requirement=None,
+        request=Request(raw_text="fix the broken __hash__", kind=RequestKind.ENGINEERING),
+        understanding=CodeContext(candidates=()),
+    )
+    llm = FakeLLM({"tasks": [], "deps": []})
+    await Planner(llm, project_map=_map()).run(NodeContext(state, cancel=asyncio.Event()))
+    prompt = llm.seen_messages[-1]["content"]
+    assert "REQUIREMENT:" in prompt
+    assert "fix the broken __hash__" in prompt
 
 
 @pytest.mark.asyncio

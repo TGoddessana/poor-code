@@ -22,6 +22,7 @@ from poor_code.domain.session.models import (
     FileSlot,
     GroundingStatus,
     Plan,
+    Requirement,
     SessionState,
     Task,
 )
@@ -107,8 +108,7 @@ class Planner(AgentNode):
         self._map = project_map
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
-        assert state.requirement is not None, "Planner requires state.requirement"
-        req = state.requirement
+        req = self._effective_requirement(state)
         return [
             {"role": "system", "content": _SYSTEM},
             {
@@ -168,6 +168,17 @@ class Planner(AgentNode):
             ),
             how_to_validate=task.how_to_validate,
         )
+
+    @staticmethod
+    def _effective_requirement(state: SessionState) -> Requirement:
+        """The binding Requirement, or a minimal one synthesized from the raw request
+        when the interviewer was skipped (FULL_AUTO/headless). The request text becomes
+        the summary; acceptance/scope are left empty for the planner to infer from code
+        context — exactly the unattended path the interview would otherwise have filled."""
+        if state.requirement is not None:
+            return state.requirement
+        assert state.request is not None, "Planner requires a requirement or a request"
+        return Requirement(summary=state.request.raw_text)
 
     @staticmethod
     def _bullets(items: tuple[str, ...]) -> str:

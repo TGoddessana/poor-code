@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from poor_code.domain.harness.node import NodeResult
 from poor_code.domain.session.models import (
-    Layer, Request, SessionState, VerdictKind,
+    Layer, Policy, Request, SessionState, VerdictKind,
 )
 
 # (node_name, branch) → next_node. branch=None for single-out nodes.
@@ -59,4 +59,13 @@ def route(node: str, result: NodeResult, state: SessionState) -> str | None:
         if v.kind is VerdictKind.ESCALATE:
             return "user"
     branch = result.branch if result.branch is not None else _branch(node, result)
-    return FORWARD.get((node, branch))
+    nxt = FORWARD.get((node, branch))
+    # FULL_AUTO (headless) has no human to answer the interviewer or to add signal
+    # to the acceptance spec, so that whole layer only burns LLM round-trips against
+    # the wall-clock. Skip it: understanding_gate ADVANCE jumps straight to the
+    # planner, and since the interview→acceptance→planner chain is linear and only
+    # entered here, none of those nodes are ever reached. The planner synthesizes
+    # its requirement from the raw request when state.requirement is absent.
+    if state.policy is Policy.FULL_AUTO and nxt == "interviewer":
+        return "planner"
+    return nxt
