@@ -416,6 +416,12 @@ class TaskReport:
     title: str
     status: TaskStatus
     attempts: int = 0
+    # Last binding validation (validation_runner) for this task — surfaced so an
+    # ABANDONED/looping task is diagnosable: WHICH command ran, its exit code, and
+    # its output. Blank when no attempt produced a run_result.
+    validation_command: str = ""
+    validation_exit: int | None = None
+    validation_output: str = ""
 
 
 @dataclass(frozen=True, slots=True)
