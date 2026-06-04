@@ -308,6 +308,18 @@ class Requirement:
     open_questions: tuple[str, ...] = ()
 
 
+def effective_requirement(state: "SessionState") -> Requirement:
+    """The binding Requirement, or a minimal one synthesized from the raw request when
+    the interviewer was skipped (FULL_AUTO/headless). The request text becomes the
+    summary — for a SWE-bench issue that text carries the reproduction, which is exactly
+    the independent signal the planner and acceptance_oracle need. Shared by both so the
+    fallback stays identical."""
+    if state.requirement is not None:
+        return state.requirement
+    assert state.request is not None, "need a requirement or a request to plan from"
+    return Requirement(summary=state.request.raw_text)
+
+
 @dataclass(frozen=True, slots=True)
 class AcceptanceCheck:
     """One runnable acceptance check: exit 0 == criterion satisfied."""

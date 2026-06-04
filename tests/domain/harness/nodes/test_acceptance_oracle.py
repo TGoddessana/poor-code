@@ -6,7 +6,8 @@ import pytest
 from poor_code.domain.harness.node import NodeContext
 from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
 from poor_code.domain.session.models import (
-    AcceptanceSpec, CodeContext, GroundingStatus, Requirement, SessionState,
+    AcceptanceSpec, CodeContext, GroundingStatus, Request, RequestKind,
+    Requirement, SessionState,
 )
 from poor_code.provider.events import (
     FinishedReason, ToolCallEnded, ToolCallInputDelta, ToolCallStarted,
@@ -46,6 +47,25 @@ async def test_oracle_emits_acceptance_spec():
     assert isinstance(res.output, AcceptanceSpec)
     assert res.output.checks[0].criterion == "exact content"
     assert "diff - hello.txt" in res.output.checks[0].command
+
+
+@pytest.mark.asyncio
+async def test_oracle_falls_back_to_request_when_requirement_absent():
+    # Headless (FULL_AUTO) skips the interviewer, so state.requirement is None. The
+    # oracle must ground its global done-check on the raw request (the issue text,
+    # which carries the reproduction) instead of asserting — this is what makes the
+    # check independent of the planner's self-authored per-task validations.
+    issue = ("ascii.qdp assumes upper-case commands. "
+             "Table.read of 'read serr 1 2' should not crash.")
+    state = SessionState(
+        requirement=None,
+        request=Request(raw_text=issue, kind=RequestKind.ENGINEERING),
+        understanding=CodeContext(grounding=GroundingStatus.GREENFIELD),
+    )
+    llm = FakeLLM({"checks": []})
+    await AcceptanceOracle(llm).run(NodeContext(state, cancel=asyncio.Event()))
+    prompt = llm.seen_messages[-1]["content"]
+    assert "read serr 1 2" in prompt  # the issue's reproduction reached the oracle
 
 
 @pytest.mark.asyncio

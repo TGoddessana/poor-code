@@ -60,12 +60,19 @@ def route(node: str, result: NodeResult, state: SessionState) -> str | None:
             return "user"
     branch = result.branch if result.branch is not None else _branch(node, result)
     nxt = FORWARD.get((node, branch))
-    # FULL_AUTO (headless) has no human to answer the interviewer or to add signal
-    # to the acceptance spec, so that whole layer only burns LLM round-trips against
-    # the wall-clock. Skip it: understanding_gate ADVANCE jumps straight to the
-    # planner, and since the interview→acceptance→planner chain is linear and only
-    # entered here, none of those nodes are ever reached. The planner synthesizes
-    # its requirement from the raw request when state.requirement is absent.
-    if state.policy is Policy.FULL_AUTO and nxt == "interviewer":
-        return "planner"
+    # FULL_AUTO (headless): no human to answer the interviewer, so skip that node — it
+    # would only auto-answer "use your best judgment" and burn round-trips. But KEEP a
+    # lean acceptance: the acceptance_oracle grounds its global done-check on the issue
+    # text (request.raw_text, which carries the reproduction), and that check is the
+    # independent witness that defends "all per-task validations pass => issue resolved"
+    # (the per-task how_to_validate is self-authored by the same model that writes the
+    # fix, so it is self-confirming). We drop only the human-dialogue interviewer and the
+    # expensive LLM adequacy critic; the oracle + deterministic gate stay, re-activating
+    # the global_validator->planner corrective cycle. acceptance_oracle (like the planner)
+    # synthesizes its requirement from the request when state.requirement is absent.
+    if state.policy is Policy.FULL_AUTO:
+        if nxt == "interviewer":
+            return "acceptance_oracle"
+        if nxt == "acceptance_critic":
+            return "planner"
     return nxt

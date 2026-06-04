@@ -11,6 +11,7 @@ from poor_code.domain.harness.node import AgentNode, _LLMClientLike
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
     AcceptanceCheck, AcceptanceSpec, GroundingStatus, SessionState,
+    effective_requirement,
 )
 
 _TOOL_NAME = "emit_acceptance"
@@ -63,8 +64,7 @@ class AcceptanceOracle(AgentNode):
         super().__init__(llm)
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
-        assert state.requirement is not None, "acceptance_oracle requires a requirement"
-        req = state.requirement
+        req = effective_requirement(state)
         prior = ""
         if state.repair_hint:
             prior = (

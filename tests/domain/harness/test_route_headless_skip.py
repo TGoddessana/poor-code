@@ -1,11 +1,16 @@
-"""Headless (FULL_AUTO) skips the interview + acceptance layer.
+"""Headless (FULL_AUTO) skips the human-dialogue interviewer and the adequacy
+critic, but KEEPS a lean acceptance (oracle + gate) grounded in the issue text.
 
-Why this exists: the interviewer + acceptance(oracle/gate/critic) nodes only add
-signal when a human answers their questions. Unattended (FULL_AUTO) they auto-answer
-"use your best judgment" and burn LLM round-trips against the bench wall-clock —
-the dominant blocker. So in FULL_AUTO the understanding_gate ADVANCE routes straight
-to the planner, and the acceptance chain is never entered. SUPERVISED (TUI) is
-unchanged: a human is present to answer, so the full interview runs.
+Why this exists: the interviewer needs a human to answer; unattended it only burns
+round-trips, so FULL_AUTO skips it. But the acceptance_oracle does NOT need a human —
+it grounds its global done-check on the request/issue text (which headless HAS), and
+that check is the independent witness that defends "small tasks pass => issue
+resolved" (the per-task how_to_validate is self-authored and self-confirming). So in
+FULL_AUTO the understanding_gate ADVANCE routes to acceptance_oracle (not the
+interviewer), runs the deterministic gate, then skips the expensive LLM adequacy
+critic straight to the planner. This re-activates the global_validator->planner
+corrective cycle that the earlier skip-everything had killed. SUPERVISED (TUI) is
+unchanged: the human answers the interviewer and the full critic runs.
 """
 from poor_code.domain.harness.node import NodeResult
 from poor_code.domain.harness.route import route
@@ -24,17 +29,32 @@ def test_supervised_understanding_gate_advances_to_interviewer():
     assert route("understanding_gate", _advance(), state) == "interviewer"
 
 
-def test_full_auto_understanding_gate_skips_interview_to_planner():
-    # Headless: no human → skip the interview/acceptance ceremony entirely.
+def test_full_auto_understanding_gate_skips_interviewer_to_acceptance_oracle():
+    # Headless: skip the human-dialogue interviewer, but still run the oracle so the
+    # issue-grounded independent done-check exists.
     state = SessionState(policy=Policy.FULL_AUTO)
-    assert route("understanding_gate", _advance(), state) == "planner"
+    assert route("understanding_gate", _advance(), state) == "acceptance_oracle"
+
+
+def test_supervised_acceptance_gate_advances_to_critic():
+    # TUI: the adversarial adequacy critic runs after the gate.
+    state = SessionState(policy=Policy.SUPERVISED)
+    assert route("acceptance_gate", _advance(), state) == "acceptance_critic"
+
+
+def test_full_auto_acceptance_gate_skips_critic_to_planner():
+    # Headless: keep oracle+gate (independent check + well-formedness floor) but skip
+    # the expensive LLM adequacy critic — grounding on the issue does the adequacy work.
+    state = SessionState(policy=Policy.FULL_AUTO)
+    assert route("acceptance_gate", _advance(), state) == "planner"
 
 
 def test_full_auto_does_not_alter_unrelated_edges():
-    # The redirect is surgical: only the interview entry point moves.
+    # The redirects are surgical: only the interviewer entry and the critic edge move.
     state = SessionState(policy=Policy.FULL_AUTO)
     assert route("plan_gate", _advance(), state) == "plan_reviewer"
     assert route("plan_reviewer", _advance(), state) == "task_selector"
+    assert route("acceptance_oracle", _advance(), state) == "acceptance_gate"
 
 
 def test_full_auto_understanding_repair_still_loops_to_explorer():
