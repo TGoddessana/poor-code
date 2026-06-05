@@ -111,3 +111,18 @@ def test_repair_counter_counts_only_plan_reviewer_bounces():
                       trigger=TriggerKind.GATE, reason="x", ts_iso="t")
     state = SessionState(history=(rv, gate, rv))
     assert _plan_review_repair_count(state) == 2
+
+
+def test_reviewer_prompt_lists_steps_and_new_pathologies():
+    from poor_code.domain.harness.nodes.plan_reviewer import _SYSTEM
+    from poor_code.domain.session.models import Step, StepKind
+    low = _SYSTEM.lower()
+    assert "type-inconsistency" in low or "inconsistent" in low
+    assert "coverage" in low
+    step = Step(id="t1.s1", kind=StepKind.IMPL, file="server.py",
+                body="def clear_layers():\n    pass")
+    task = Task(id="t1", title="t", purpose="p",
+                edit_scope=EditScope(editable=("server.py",)),
+                how_to_validate="pytest -q", steps=(step,))
+    msgs = PlanReviewer(FakeLLM({"ok": True})).build_messages(_state(Plan(tasks=(task,))))
+    assert "clear_layers" in msgs[-1]["content"]

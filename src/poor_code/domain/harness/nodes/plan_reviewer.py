@@ -42,6 +42,10 @@ _SYSTEM = (
     "a computed number nobody observed).\n"
     "5. PHANTOM FILE — a task targets a file absent from file_plan or from the "
     "chosen stack/environment.\n"
+    "6. TYPE-INCONSISTENCY — a step references a symbol named differently from where "
+    "another step defines it (e.g. clear_layers() defined but clearLayers() called), "
+    "or uses a function no step defines.\n"
+    "7. COVERAGE GAP — an Acceptance check has no task whose steps would satisfy it.\n"
     "If NONE hold, set ok=true. Be decisive: a single deliverable should be ONE "
     "task with one sane probe. Call emit_plan_review once."
 )
@@ -91,9 +95,13 @@ class PlanReviewer(AgentNode):
         files = "\n".join(
             f"  - {s.path}: {s.responsibility}" for s in (plan.file_plan if plan else ())
         ) or "  (none)"
-        tasks = "\n".join(
+        tasks = "\n\n".join(
             f"  {t.id} [{', '.join(t.edit_scope.editable)}] {t.title}\n"
-            f"      validate: {t.how_to_validate}"
+            f"      validate: {t.how_to_validate}\n"
+            + "\n".join(
+                f"      {s.id} {s.kind.value} {s.file}: {s.body[:200]}"
+                for s in t.steps
+            )
             for t in (plan.tasks if plan else ())
         ) or "  (none)"
         deps = "\n".join(
