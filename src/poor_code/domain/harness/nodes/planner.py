@@ -168,9 +168,26 @@ class Planner(AgentNode):
                     f"GLOBAL ACCEPTANCE (your tasks must collectively satisfy these):\n"
                     f"{self._acceptance_digest(state)}\n\n"
                     f"CODE CONTEXT:\n{self._context_digest(state)}"
+                    f"{self._repair_digest(state)}"
                 ),
             },
         ]
+
+    @staticmethod
+    def _repair_digest(state: SessionState) -> str:
+        if not state.repair_hint:
+            return ""
+        prior = state.plan
+        tasks = "\n".join(
+            f"  {t.id} [{', '.join(t.edit_scope.editable)}] {t.title}"
+            for t in (prior.tasks if prior else ())
+        ) or "  (none)"
+        return (
+            "\n\nSURGICAL REPAIR — your previous plan was REJECTED for this reason:\n"
+            f"  {state.repair_hint}\n"
+            "Fix ONLY the task named in that reason; keep every other task unchanged.\n"
+            f"PRIOR PLAN (tasks):\n{tasks}\n"
+        )
 
     def output_tool(self) -> dict[str, Any]:
         return {

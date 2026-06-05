@@ -84,6 +84,21 @@ def _state():
     )
 
 
+@pytest.mark.asyncio
+async def test_planner_surfaces_repair_hint_and_prior_plan():
+    from dataclasses import replace
+
+    from poor_code.domain.session.models import EditScope, Plan, Task
+    prior = Plan(tasks=(Task(id="t1", title="add f", purpose="p",
+                             edit_scope=EditScope(editable=())),))
+    state = replace(_state().with_repair_hint("Task t1 has no editable paths."), plan=prior)
+    llm = FakeLLM({"file_plan": [], "tasks": []})
+    await Planner(llm, project_map=_map()).run(NodeContext(state, cancel=asyncio.Event()))
+    user_msg = llm.seen_messages[-1]["content"]
+    assert "Task t1 has no editable paths." in user_msg
+    assert "PRIOR PLAN" in user_msg and "add f" in user_msg
+
+
 def test_system_prompt_carries_strengthening_levers():
     from poor_code.domain.harness.nodes.planner import _SYSTEM
     low = _SYSTEM.lower()
