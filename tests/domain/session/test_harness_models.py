@@ -2,7 +2,26 @@ from poor_code.domain.session.models import (
     Request, RequestKind, CodeRef, CodeContext, GroundingStatus,
     Cursor, Phase, Transition, TriggerKind,
     Verdict, VerdictKind, Layer,
+    Step, StepKind, Task,
 )
+
+
+def test_step_defaults_are_empty():
+    s = Step(id="t1.s1", kind=StepKind.IMPL)
+    assert s.file == "" and s.anchor == "" and s.body == ""
+    assert s.run == "" and s.expected == ""
+
+
+def test_task_carries_ordered_steps():
+    steps = (
+        Step(id="t1.s1", kind=StepKind.TEST, file="tests/x_test.py",
+             body="def test_x():\n    assert f() == 1", run="pytest -q", expected="PASS"),
+        Step(id="t1.s2", kind=StepKind.IMPL, file="x.py", body="def f():\n    return 1"),
+    )
+    t = Task(id="t1", title="x", purpose="p", steps=steps)
+    assert t.steps[0].kind is StepKind.TEST
+    assert t.steps[1].body == "def f():\n    return 1"
+    assert Task(id="t2", title="y", purpose="p").steps == ()
 
 
 def test_request_kind_roundtrip():

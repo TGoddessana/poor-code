@@ -355,6 +355,29 @@ class TaskContext:
     snippet: str | None = None
 
 
+class StepKind(str, Enum):
+    """A step's role inside a Task. The harness uses a shadow-git snapshot, so there
+    is no per-task `commit` step — only writing code (test/impl) and running checks."""
+    TEST = "test"    # write test code into `file`
+    IMPL = "impl"    # write implementation code into `file`
+    RUN = "run"      # only execute `run`; no `body`
+
+
+@dataclass(frozen=True, slots=True)
+class Step:
+    """One bite-sized, code-complete action for the Implementer to apply then verify.
+    `body` is the actual code (flat string — code never lives in a side document);
+    `run`+`expected` are the per-step observable check (the inner loop). The task's
+    `how_to_validate` remains the binding outer gate."""
+    id: str
+    kind: StepKind
+    file: str = ""
+    anchor: str = ""
+    body: str = ""
+    run: str = ""
+    expected: str = ""
+
+
 @dataclass(frozen=True, slots=True)
 class Task:
     id: str
@@ -366,6 +389,7 @@ class Task:
     status: TaskStatus = TaskStatus.PENDING
     context: TaskContext | None = None
     attempts: tuple[Attempt, ...] = ()
+    steps: tuple[Step, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
