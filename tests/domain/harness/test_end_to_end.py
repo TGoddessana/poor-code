@@ -185,7 +185,8 @@ def _planning_registry(llm, pm):
     reg.register(Planner(llm, project_map=pm))
     reg.register(PlanGate())
     reg.register(PlanReviewer(llm))
-    reg.register(Provisioner(cwd=pm.cwd))  # no-op on empty cwd; keeps the impl boundary
+    reg.register(Provisioner(llm, cwd=pm.cwd,  # empty cwd → quick exit; keeps impl boundary
+                             tools=ToolRegistry([ReadTool(), GrepTool()])))
     reg.register(TaskSelector())
     return reg  # task_selector → composer (unregistered) → park
 

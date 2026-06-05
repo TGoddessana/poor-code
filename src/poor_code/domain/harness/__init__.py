@@ -66,7 +66,9 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     reg.register(Planner(llm, project_map=project_map))
     reg.register(PlanGate())
     reg.register(PlanReviewer(llm))
-    reg.register(Provisioner(cwd=project_map.cwd))
+    reg.register(Provisioner(
+        llm, cwd=project_map.cwd,
+        tools=ToolRegistry([BashTool(), ReadTool(), ListTool(), GlobTool(), GrepTool()])))
     reg.register(TaskSelector())
     reg.register(EngGate())
     reg.register(ValidationRunner(cwd=project_map.cwd))

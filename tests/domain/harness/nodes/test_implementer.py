@@ -91,3 +91,15 @@ def test_prompt_renders_ordered_steps(tmp_path):
     assert "STEPS (apply in order" in prompt
     assert "t1.s1" in prompt and "def f():" in prompt
     assert "run: pytest -q" in prompt and "expected: PASS" in prompt
+
+
+def test_prompt_injects_env_report(tmp_path):
+    from poor_code.domain.session.models import EnvReport
+    er = EnvReport(ready=True, test_command="python -m pytest -q",
+                   install_steps=("pip install -e .[test]",), notes="numpy built")
+    task = Task(id="t1", title="x", purpose="p",
+                edit_scope=EditScope(editable=("x.py",)), how_to_validate="pytest -q")
+    impl = Implementer(_WriteThenStopLLM(), cwd=tmp_path, tools=_tools())
+    prompt = impl._prompt(SessionState(env_report=er), task)
+    assert "python -m pytest -q" in prompt
+    assert "already" in prompt.lower()  # deps already installed — don't reinstall/fake

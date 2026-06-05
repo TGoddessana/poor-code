@@ -3,7 +3,22 @@ from poor_code.domain.session.models import (
     Cursor, Phase, Transition, TriggerKind,
     Verdict, VerdictKind, Layer,
     Step, StepKind, Task,
+    EnvReport, SessionState,
 )
+
+
+def test_env_report_defaults():
+    er = EnvReport()
+    assert er.ready is False
+    assert er.test_command == "" and er.install_steps == () and er.notes == ""
+
+
+def test_session_state_carries_env_report():
+    er = EnvReport(ready=True, test_command="pytest -q",
+                   install_steps=("pip install -e .[test]",), notes="ok")
+    st = SessionState().with_env_report(er)
+    assert st.env_report is er
+    assert SessionState().env_report is None
 
 
 def test_step_defaults_are_empty():

@@ -155,6 +155,17 @@ class Implementer:
             feedback = "\nPAST FAILURES TO AVOID:\n" + "\n".join(
                 f"  - {e.failure_type}: {e.prevention_hint}" for e in state.feedback.entries)
         hint = f"\nREPAIR HINT: {state.repair_hint}" if state.repair_hint else ""
+        env = ""
+        if state.env_report is not None and (
+                state.env_report.ready or state.env_report.test_command):
+            er = state.env_report
+            env = ("\nENVIRONMENT READY — the provisioner already set up the test env. "
+                   "Dependencies are ALREADY installed: do NOT reinstall them and do NOT "
+                   "hand-create stub/fake modules to satisfy imports. "
+                   f"Run the project's tests with: {er.test_command or 'python -m pytest -q'}.")
+            if er.notes:
+                env += f" Notes: {er.notes}"
+        hint = env + hint
         header = f"{render_position(self.name, state)}\n\n"
         if state.request is not None:
             header += f"ORIGINAL REQUEST:\n{state.request.raw_text}\n"

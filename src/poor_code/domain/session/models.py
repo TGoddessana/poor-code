@@ -70,6 +70,7 @@ class SessionState:
     feedback: FeedbackMemory = field(default_factory=FeedbackMemory)
     report: "Report | None" = None
     policy: Policy = Policy.SUPERVISED
+    env_report: "EnvReport | None" = None
 
     def with_request(self, request: Request) -> "SessionState":
         return replace(self, request=request)
@@ -103,6 +104,9 @@ class SessionState:
 
     def with_policy(self, p: "Policy") -> "SessionState":
         return replace(self, policy=p)
+
+    def with_env_report(self, report: "EnvReport") -> "SessionState":
+        return replace(self, env_report=report)
 
     def _with_task(self, task_id: str, **changes) -> "SessionState":
         assert self.plan is not None, "no plan to update tasks in"
@@ -439,6 +443,17 @@ class ChangeRecord:
 class ChangeSet:
     aggregate_diff: str = ""
     per_task: tuple[tuple[str, str], ...] = ()   # (task_id, diff)
+
+
+@dataclass(frozen=True, slots=True)
+class EnvReport:
+    """Provisioner output — what the env-prep step learned and did, injected forward
+    into the implementer so it does not re-discover (or hand-fake) the test setup.
+    `ready` is the provisioner's own confidence that tests can now run."""
+    ready: bool = False
+    test_command: str = ""              # canonical way to run the project's tests
+    install_steps: tuple[str, ...] = () # commands actually run to bootstrap the env
+    notes: str = ""                     # gotchas / what is missing
 
 
 class ReportOutcome(str, Enum):

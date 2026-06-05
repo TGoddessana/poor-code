@@ -11,7 +11,7 @@ from typing import Callable
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
-    AcceptanceSpec, AttemptStatus, Attempt, CodeContext, FeedbackEntry, Phase, Plan,
+    AcceptanceSpec, AttemptStatus, Attempt, CodeContext, EnvReport, FeedbackEntry, Phase, Plan,
     Report, Request, Requirement, SelectedTask, SessionState, TaskCompleted, TaskContext,
     TaskStatus, TriggerKind, ValidationResult, Verdict, VerdictKind,
 )
@@ -103,6 +103,8 @@ class Driver:
                     .with_task_status(out.task_id, TaskStatus.DONE))
         if isinstance(out, Report):
             return state.with_report(out)
+        if isinstance(out, EnvReport):
+            return state.with_env_report(out)
         return state
 
 
