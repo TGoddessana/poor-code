@@ -84,6 +84,15 @@ def _state():
     )
 
 
+def test_system_prompt_carries_strengthening_levers():
+    from poor_code.domain.harness.nodes.planner import _SYSTEM
+    low = _SYSTEM.lower()
+    assert "literal" in low
+    assert "steps" in low and "body" in low and "expected" in low
+    assert "todo" in low and "edge cases" in low
+    assert "do not invent" in low
+
+
 @pytest.mark.asyncio
 async def test_planner_parses_steps_with_deterministic_ids():
     payload = {
