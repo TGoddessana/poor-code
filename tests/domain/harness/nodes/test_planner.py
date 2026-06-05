@@ -16,6 +16,7 @@ from poor_code.domain.session.models import (
     RequestKind,
     Requirement,
     SessionState,
+    StepKind,
 )
 from poor_code.provider.events import (
     FinishedReason,
@@ -81,6 +82,33 @@ def _state():
             related_tests=(CodeRef(file="tests/test_auth.py"),),
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_planner_parses_steps_with_deterministic_ids():
+    payload = {
+        "file_plan": [{"path": "x.py", "responsibility": "f"}],
+        "tasks": [{
+            "title": "add f", "purpose": "p",
+            "edit_scope": {"editable": ["x.py", "tests/x_test.py"]},
+            "how_to_validate": "pytest tests/x_test.py -q",
+            "steps": [
+                {"kind": "test", "file": "tests/x_test.py",
+                 "body": "def test_f():\n    assert f() == 1",
+                 "run": "pytest tests/x_test.py -q", "expected": "PASS"},
+                {"kind": "impl", "file": "x.py", "anchor": "end of file",
+                 "body": "def f():\n    return 1"},
+            ],
+        }],
+    }
+    res = await Planner(FakeLLM(payload), project_map=_map()).run(
+        NodeContext(_state(), cancel=asyncio.Event())
+    )
+    task = res.output.tasks[0]
+    assert [s.id for s in task.steps] == ["t1.s1", "t1.s2"]
+    assert task.steps[0].kind is StepKind.TEST
+    assert task.steps[1].body == "def f():\n    return 1"
+    assert task.steps[0].expected == "PASS"
 
 
 @pytest.mark.asyncio

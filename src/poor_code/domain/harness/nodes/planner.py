@@ -23,6 +23,8 @@ from poor_code.domain.session.models import (
     GroundingStatus,
     Plan,
     SessionState,
+    Step,
+    StepKind,
     Task,
     effective_requirement,
 )
@@ -84,12 +86,25 @@ class _EditScopeOut(BaseModel):
     forbidden: list[str] = []
 
 
+class _StepOut(BaseModel):
+    kind: str = "impl"
+    file: str = ""
+    anchor: str = ""
+    body: str = ""
+    run: str = ""
+    expected: str = ""
+
+
+_STEP_KIND = {"test": StepKind.TEST, "impl": StepKind.IMPL, "run": StepKind.RUN}
+
+
 class _TaskOut(BaseModel):
     title: str
     purpose: str
     description: str = ""
     edit_scope: _EditScopeOut = Field(default_factory=_EditScopeOut)
     how_to_validate: str = ""
+    steps: list[_StepOut] = []
 
 
 class _DependencyOut(BaseModel):
@@ -164,8 +179,21 @@ class Planner(AgentNode):
 
     @staticmethod
     def _to_task(index: int, task: _TaskOut) -> Task:
+        task_id = f"t{index}"
+        steps = tuple(
+            Step(
+                id=f"{task_id}.s{j}",
+                kind=_STEP_KIND.get(step.kind.strip().lower(), StepKind.IMPL),
+                file=step.file,
+                anchor=step.anchor,
+                body=step.body,
+                run=step.run,
+                expected=step.expected,
+            )
+            for j, step in enumerate(task.steps, start=1)
+        )
         return Task(
-            id=f"t{index}",
+            id=task_id,
             title=task.title,
             purpose=task.purpose,
             description=task.description,
@@ -175,6 +203,7 @@ class Planner(AgentNode):
                 forbidden=tuple(task.edit_scope.forbidden),
             ),
             how_to_validate=task.how_to_validate,
+            steps=steps,
         )
 
     @staticmethod
