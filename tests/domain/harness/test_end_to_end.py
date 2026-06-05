@@ -205,6 +205,11 @@ async def test_interview_done_flows_through_planner_then_task_selector_advances_
                     "purpose": "Support google login",
                     "edit_scope": {"editable": ["src/provider/google.py"]},
                     "how_to_validate": "pytest tests/test_auth.py",
+                    "steps": [{
+                        "kind": "impl", "file": "src/provider/google.py",
+                        "body": "class Google:\n    pass",
+                        "run": "pytest tests/test_auth.py", "expected": "PASS",
+                    }],
                 },
             ],
             "deps": [],
