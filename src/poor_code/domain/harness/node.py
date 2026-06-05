@@ -38,6 +38,24 @@ class StructuredOutputError(ValueError):
         )
 
 
+def strip_code_fence(text: str) -> str:
+    """Normalize a structured-output payload that arrived as text. A weak model often
+    replies with ```json {...} ``` (or with leading prose) instead of via the tool
+    channel; the wrapper breaks JSON parsing at column 1. Drop a wrapping markdown
+    fence, then slice to the outermost balanced braces. This is transport
+    normalization, NOT schema relaxation — the result is still schema-validated."""
+    s = text.strip()
+    if s.startswith("```"):
+        s = s.split("\n", 1)[1] if "\n" in s else ""
+        if s.rstrip().endswith("```"):
+            s = s.rstrip()[:-3]
+        s = s.strip()
+    start, end = s.find("{"), s.rfind("}")
+    if start != -1 and end > start:
+        return s[start:end + 1]
+    return s
+
+
 def validate_output(model_cls: type[_M], raw: str, *, node: str) -> _M:
     """Validate a node's structured-output JSON against its schema, re-raising
     any failure as StructuredOutputError with the raw payload attached."""
@@ -153,7 +171,7 @@ class AgentNode:
             extras = [*(extra_messages or []), *corrections]
             messages = [base[0], *extras, *base[1:]] if extras else base
             try:
-                raw = await self._stream_once(ctx, messages, response_format)
+                raw = strip_code_fence(await self._stream_once(ctx, messages, response_format))
                 if model_cls is not None:
                     validate_output(model_cls, raw, node=self.name)
                 return raw
