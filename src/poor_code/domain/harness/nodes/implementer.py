@@ -34,6 +34,10 @@ _SYSTEM = (
     "which slice of the whole you own.\n"
     "4. Keep calling tools until VALIDATION passes; once you confirm it passes, "
     "stop calling tools.\n"
+    "4b. If STEPS are listed, execute them IN ORDER: apply the step's code to its "
+    "file, then run its command and confirm the result matches EXPECTED before moving "
+    "to the next step. If a step's command does not match EXPECTED, fix that step and "
+    "re-run it before advancing — do not skip ahead.\n"
     "5. If PAST FAILURES or a REPAIR HINT are present, address them first.\n"
     "6. If the TASK runs a service (a server/daemon), launch it with bash background:true "
     "and LEAVE IT RUNNING — never kill it on success; it must outlive this run, and the "
@@ -167,7 +171,21 @@ class Implementer:
                 f"TASK: {task.title}\nPURPOSE: {task.purpose}\n"
                 f"DETAILS: {task.description}\nEDITABLE PATHS: {scope}\n"
                 f"VALIDATION (make this pass): {task.how_to_validate}"
-                f"{refs}{feedback}{hint}")
+                f"{self._render_steps(task)}{refs}{feedback}{hint}")
+
+    @staticmethod
+    def _render_steps(task) -> str:
+        if not task.steps:
+            return ""
+        lines = ["\nSTEPS (apply in order; verify each against EXPECTED before the next):"]
+        for s in task.steps:
+            where = f"{s.file}" + (f" @ {s.anchor}" if s.anchor else "")
+            lines.append(f"  [{s.id}] {s.kind.value} {where}")
+            if s.body:
+                lines.append(f"    code:\n{s.body}")
+            if s.run:
+                lines.append(f"    run: {s.run}    expected: {s.expected}")
+        return "\n".join(lines)
 
 
 def _safe_args(args_json: str) -> dict:

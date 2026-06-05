@@ -77,3 +77,17 @@ async def test_implementer_starts_new_attempt_after_runner_failure(tmp_path):
     res = await node.run(NodeContext(state=_state(attempts=(failed,)), cancel=asyncio.Event()))
     assert res.output.id == "t1-a2"               # new attempt id
     assert res.output.adversarial_rounds == 0
+
+
+def test_prompt_renders_ordered_steps(tmp_path):
+    from poor_code.domain.session.models import Step, StepKind
+    step = Step(id="t1.s1", kind=StepKind.IMPL, file="x.py", anchor="end of file",
+                body="def f():\n    return 1", run="pytest -q", expected="PASS")
+    task = Task(id="t1", title="add f", purpose="p",
+                edit_scope=EditScope(editable=("x.py",)),
+                how_to_validate="pytest -q", steps=(step,))
+    impl = Implementer(_WriteThenStopLLM(), cwd=tmp_path, tools=_tools())
+    prompt = impl._prompt(SessionState(), task)
+    assert "STEPS (apply in order" in prompt
+    assert "t1.s1" in prompt and "def f():" in prompt
+    assert "run: pytest -q" in prompt and "expected: PASS" in prompt
