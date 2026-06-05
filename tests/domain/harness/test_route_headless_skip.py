@@ -53,7 +53,7 @@ def test_full_auto_does_not_alter_unrelated_edges():
     # The redirects are surgical: only the interviewer entry and the critic edge move.
     state = SessionState(policy=Policy.FULL_AUTO)
     assert route("plan_gate", _advance(), state) == "plan_reviewer"
-    assert route("plan_reviewer", _advance(), state) == "task_selector"
+    assert route("plan_reviewer", _advance(), state) == "provisioner"
     assert route("acceptance_oracle", _advance(), state) == "acceptance_gate"
 
 

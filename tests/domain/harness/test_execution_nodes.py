@@ -226,7 +226,8 @@ from poor_code.domain.harness.route import FORWARD
 
 def test_execution_forward_edges_present():
     assert FORWARD[("plan_gate", None)] == "plan_reviewer"
-    assert FORWARD[("plan_reviewer", None)] == "task_selector"
+    assert FORWARD[("plan_reviewer", None)] == "provisioner"
+    assert FORWARD[("provisioner", None)] == "task_selector"
     assert FORWARD[("task_selector", "task")] == "composer"
     assert FORWARD[("task_selector", "done")] == "global_validator"
     assert FORWARD[("composer", None)] == "implementer"

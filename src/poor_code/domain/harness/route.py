@@ -20,7 +20,8 @@ FORWARD: dict[tuple[str, str | None], str] = {
     ("acceptance_critic", None): "planner",          # critic ADVANCE falls through here
     ("planner", None): "plan_gate",
     ("plan_gate", None): "plan_reviewer",          # gate ADVANCE falls through here
-    ("plan_reviewer", None): "task_selector",      # reviewer ADVANCE falls through here
+    ("plan_reviewer", None): "provisioner",        # reviewer ADVANCE falls through here
+    ("provisioner", None): "task_selector",        # bootstrap env, then enter impl layer
     ("task_selector", "task"): "composer",
     ("task_selector", "done"): "global_validator",
     ("composer", None): "implementer",

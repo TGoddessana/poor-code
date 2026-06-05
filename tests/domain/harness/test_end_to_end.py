@@ -1,9 +1,14 @@
 import asyncio
 import json
+import tempfile
 import uuid
 import pytest
 from datetime import UTC, datetime
 from pathlib import Path
+
+# Empty cwd so the wired-in provisioner finds no Python project marker and no-ops —
+# without this it would `pip install -e .` the repo root (cwd=".") during the test.
+_E2E_CWD = Path(tempfile.mkdtemp(prefix="e2e-empty-"))
 
 from poor_code.domain.harness import build_default_registry, Driver, route
 from poor_code.domain.session.models import SessionState, Cursor, Phase, Request, RequestKind
@@ -47,7 +52,7 @@ def _map():
                  signature=None, doc=None, calls=(), called_by=())
     fe = FileEntry(path="src/auth.py", language="python", content_hash="h",
                    symbols=(sym,), imports=(), imported_by=(), tests=())
-    return ProjectMap(version=2, generated_at=datetime.now(UTC), cwd=Path("."),
+    return ProjectMap(version=2, generated_at=datetime.now(UTC), cwd=_E2E_CWD,
                       files=(fe,), parse_errors=())
 
 
@@ -164,6 +169,7 @@ def _planning_registry(llm, pm):
     from poor_code.domain.harness.nodes.interviewer import Interviewer
     from poor_code.domain.harness.nodes.planner import Planner
     from poor_code.domain.harness.nodes.plan_reviewer import PlanReviewer
+    from poor_code.domain.harness.nodes.provisioner import Provisioner
     from poor_code.domain.harness.nodes.execution import TaskSelector
     from poor_code.domain.tool.registry import ToolRegistry
     from poor_code.domain.tool.read import ReadTool
@@ -179,6 +185,7 @@ def _planning_registry(llm, pm):
     reg.register(Planner(llm, project_map=pm))
     reg.register(PlanGate())
     reg.register(PlanReviewer(llm))
+    reg.register(Provisioner(cwd=pm.cwd))  # no-op on empty cwd; keeps the impl boundary
     reg.register(TaskSelector())
     return reg  # task_selector → composer (unregistered) → park
 

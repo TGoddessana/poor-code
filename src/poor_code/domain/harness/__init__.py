@@ -20,6 +20,7 @@ from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.harness.nodes.interviewer import Interviewer
 from poor_code.domain.harness.nodes.plan_reviewer import PlanReviewer
 from poor_code.domain.harness.nodes.planner import Planner
+from poor_code.domain.harness.nodes.provisioner import Provisioner
 from poor_code.domain.harness.nodes.reporter import Reporter
 from poor_code.domain.harness.nodes.router import Router
 from poor_code.domain.harness.nodes.validator import Validator
@@ -41,6 +42,7 @@ __all__ = [
     "AcceptanceOracle", "AcceptanceGate", "AcceptanceCritic",
     "TaskSelector", "EngGate", "ValidationRunner", "CompletionGate",
     "Composer", "Implementer", "Validator", "FailureAnalyst", "GlobalValidator", "Reporter",
+    "Provisioner",
     "route", "FORWARD", "build_default_registry",
 ]
 
@@ -64,6 +66,7 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     reg.register(Planner(llm, project_map=project_map))
     reg.register(PlanGate())
     reg.register(PlanReviewer(llm))
+    reg.register(Provisioner(cwd=project_map.cwd))
     reg.register(TaskSelector())
     reg.register(EngGate())
     reg.register(ValidationRunner(cwd=project_map.cwd))
