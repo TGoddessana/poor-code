@@ -6,7 +6,7 @@ from poor_code.domain.harness.node import NodeContext
 from poor_code.domain.harness.nodes.gates import PlanGate, UnderstandingGate
 from poor_code.domain.session.models import (
     CodeContext, CodeRef, Dependency, EditScope, GroundingStatus, Layer, Plan,
-    SessionState, Task, Transition, TriggerKind, VerdictKind,
+    SessionState, Step, StepKind, Task, Transition, TriggerKind, VerdictKind,
 )
 
 
@@ -60,9 +60,47 @@ def _task(**overrides) -> Task:
         "purpose": "B",
         "edit_scope": EditScope(editable=("src/a.py",)),
         "how_to_validate": "pytest tests/test_a.py",
+        "steps": (Step(id="t1.s1", kind=StepKind.IMPL, file="src/a.py",
+                       body="x = 1", run="pytest tests/test_a.py", expected="PASS"),),
     }
     data.update(overrides)
     return Task(**data)
+
+
+def _task_with_steps(steps, **kw) -> Task:
+    return Task(id="t1", title="t", purpose="p",
+                edit_scope=EditScope(editable=("x.py",)),
+                how_to_validate="pytest -q", steps=tuple(steps), **kw)
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_rejects_task_without_steps():
+    assert "no steps" in PlanGate._invalid_hint(Plan(tasks=(_task_with_steps(()),)))
+
+
+def test_plan_gate_rejects_empty_body_step():
+    step = Step(id="t1.s1", kind=StepKind.IMPL, file="x.py", body="")
+    hint = PlanGate._invalid_hint(Plan(tasks=(_task_with_steps((step,)),)))
+    assert hint is not None and "empty body" in hint
+
+
+def test_plan_gate_rejects_placeholder_body():
+    step = Step(id="t1.s1", kind=StepKind.IMPL, file="x.py",
+                body="def f():\n    # TODO: implement later\n    pass")
+    hint = PlanGate._invalid_hint(Plan(tasks=(_task_with_steps((step,)),)))
+    assert hint is not None and "placeholder" in hint
+
+
+def test_plan_gate_rejects_step_file_outside_editable():
+    step = Step(id="t1.s1", kind=StepKind.IMPL, file="other.py", body="x = 1")
+    hint = PlanGate._invalid_hint(Plan(tasks=(_task_with_steps((step,)),)))
+    assert hint is not None and "outside editable" in hint
+
+
+def test_plan_gate_accepts_well_formed_steps():
+    step = Step(id="t1.s1", kind=StepKind.IMPL, file="x.py", body="x = 1",
+                run="pytest -q", expected="PASS")
+    assert PlanGate._invalid_hint(Plan(tasks=(_task_with_steps((step,)),))) is None
 
 
 @pytest.mark.asyncio

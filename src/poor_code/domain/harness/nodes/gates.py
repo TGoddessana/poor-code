@@ -10,6 +10,11 @@ from poor_code.domain.session.models import (
     CodeContext, GroundingStatus, Layer, TriggerKind, Verdict, VerdictKind,
 )
 
+_PLACEHOLDER_TOKENS = (
+    "todo", "tbd", "fixme", "fill in later", "implement later",
+    "appropriate error handling", "handle edge cases", "similar to task",
+)
+
 
 class UnderstandingGate:
     """Guards the understanding layer: a CodeContext with no candidates means the
@@ -78,6 +83,9 @@ class PlanGate:
             floor = validation_floor_hint(task.how_to_validate)
             if floor is not None:
                 return f"Task {task.id} how_to_validate {floor}"
+            step_hint = cls._step_hint(task)
+            if step_hint is not None:
+                return step_hint
 
         for dep in plan.deps:
             if dep.task_id not in ids or dep.depends_on not in ids:
@@ -86,6 +94,27 @@ class PlanGate:
 
         if cls._has_cycle(ids, plan.deps):
             return "Plan dependency graph has a cycle."
+        return None
+
+    @staticmethod
+    def _step_hint(task) -> str | None:
+        if not task.steps:
+            return f"Task {task.id} has no steps; give code-level steps."
+        editable = set(task.edit_scope.editable)
+        for step in task.steps:
+            kind = step.kind.value
+            if kind in ("test", "impl") and not step.body.strip():
+                return f"Task {task.id} step {step.id} ({kind}) has an empty body."
+            if step.run.strip() and not step.expected.strip():
+                return f"Task {task.id} step {step.id} has a run but no expected result."
+            if step.file and editable and step.file not in editable:
+                return (f"Task {task.id} step {step.id} edits {step.file} — "
+                        "outside editable scope.")
+            low = step.body.lower()
+            for tok in _PLACEHOLDER_TOKENS:
+                if tok in low:
+                    return (f"Task {task.id} step {step.id} body contains placeholder "
+                            f"'{tok}'; write the real code.")
         return None
 
     @staticmethod
