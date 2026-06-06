@@ -1,6 +1,8 @@
 # src/poor_code/domain/harness/route.py
 """The graph's edges live HERE and nowhere else. Forward edges are data
-(FORWARD); back-edges are logic (route()). Nodes never know their neighbors."""
+(FORWARD); back-edges are data (_SHALLOWEST); policy rewrites (_FULL_AUTO_SKIP)
+handle conditional skips. All assembled into DEFAULT_EDGES; route() delegates to it.
+Nodes never know their neighbors."""
 from __future__ import annotations
 
 from poor_code.domain.harness.graph import EdgeTable, Rewrite

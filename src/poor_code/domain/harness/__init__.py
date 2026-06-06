@@ -88,9 +88,8 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     return reg
 
 
-def build_default_graph(*, llm, project_map, agent=None):
+def build_default_graph(*, llm, project_map: ProjectMap, agent=None) -> Graph:
     """진입 그래프(Graph): 기본 레지스트리 + DEFAULT_EDGES + entry='router'."""
-    from poor_code.domain.harness.graph import Graph
     from poor_code.domain.harness.route import DEFAULT_EDGES
     reg = build_default_registry(llm=llm, project_map=project_map, agent=agent)
     return Graph(nodes=reg, edges=DEFAULT_EDGES, entry="router")
