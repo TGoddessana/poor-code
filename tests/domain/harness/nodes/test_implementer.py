@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pytest
 
 from poor_code.domain.harness.node import NodeContext
@@ -35,6 +36,52 @@ class _WriteThenStopLLM:
 
 def _tools():
     return ToolRegistry([WriteTool(), EditTool(), BashTool()])
+
+
+class _BashThenStopLLM:
+    """Round 1: run a bash command (big output). Round 2: capture messages, stop."""
+    def __init__(self, command):
+        self.calls = 0
+        self._command = command
+        self.round2_messages = None
+    async def stream(self, messages, tools, response_format=None):
+        self.calls += 1
+        if self.calls == 1:
+            yield ToolCallStarted(call_id="b1", name="bash")
+            yield ToolCallInputDelta(
+                call_id="b1", json_delta=json.dumps({"command": self._command}))
+            yield ToolCallEnded(call_id="b1")
+            yield FinishedReason(reason="tool_calls")
+        else:
+            self.round2_messages = messages
+            yield TextDelta(text="done")
+            yield FinishedReason(reason="stop")
+
+
+class _RecordingSink:
+    def __init__(self):
+        self.finished = []
+    def node_entered(self, *a, **k): pass
+    def text_delta(self, *a, **k): pass
+    def tool_started(self, *a, **k): pass
+    def tool_finished(self, cid, result): self.finished.append(result)
+    def tool_failed(self, *a, **k): pass
+
+
+@pytest.mark.asyncio
+async def test_implementer_clamps_large_tool_output_in_resent_messages(tmp_path):
+    # 50k 'A's: small enough for one bash call, large enough to require clamping.
+    llm = _BashThenStopLLM("head -c 50000 /dev/zero | tr '\\0' A")
+    sink = _RecordingSink()
+    await Implementer(llm, cwd=tmp_path, tools=_tools()).run(
+        NodeContext(state=_state(), cancel=asyncio.Event(), sink=sink))
+    tool_msgs = [m for m in llm.round2_messages if m.get("role") == "tool"]
+    assert tool_msgs, "expected the tool result to be in the re-sent messages"
+    content = tool_msgs[0]["content"]
+    assert "elided" in content                    # clamped for the LLM
+    assert len(content) < 5000
+    # the sink (display/log) still received the full output (>> the clamped copy)
+    assert any(len(str(r)) > 25000 for r in sink.finished)
 
 
 def _state(attempts=()):

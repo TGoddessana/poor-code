@@ -17,6 +17,7 @@ from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output,
 )
 from poor_code.domain.harness.orientation import render_position
+from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import (
@@ -152,8 +153,11 @@ class ExploringNode(AgentNode):
                         ctx.sink.tool_failed(cid, output)
                     else:
                         ctx.sink.tool_finished(cid, output)
+                # Full output recorded as an excerpt + shown via the sink; the re-sent
+                # exploration transcript gets a clamped copy (FM4).
                 messages.append({
-                    "role": "tool", "tool_call_id": cid, "content": output,
+                    "role": "tool", "tool_call_id": cid,
+                    "content": clamp_tool_output(output),
                 })
         # hand the whole exploration (minus its own system prompt) to stage ②
         return messages[1:], tuple(excerpts.values())

@@ -13,6 +13,7 @@ from typing import Any
 from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLike
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.snapshot import GitSnapshot, default_git_dir
+from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.session.models import Attempt, ChangeRecord, Phase, SessionState
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
@@ -112,7 +113,10 @@ class Implementer:
                         ctx.sink.tool_failed(cid, output)
                     else:
                         ctx.sink.tool_finished(cid, output)
-                messages.append({"role": "tool", "tool_call_id": cid, "content": output})
+                # The sink got the full output (display/log); the model gets a clamped
+                # copy — this list is re-sent every round, so an unbounded dump is O(n^2).
+                messages.append({"role": "tool", "tool_call_id": cid,
+                                 "content": clamp_tool_output(output)})
 
     async def _stream_round(self, messages, sink=None):
         text = ""
