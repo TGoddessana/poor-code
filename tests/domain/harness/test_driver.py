@@ -12,7 +12,8 @@ from poor_code.domain.session.models import (
 class _RouterStub:
     name = "router"
     async def run(self, ctx: NodeContext) -> NodeResult:
-        return NodeResult(output=Request(raw_text="add x", kind=RequestKind.ENGINEERING))
+        return NodeResult(output=Request(raw_text="add x", kind=RequestKind.ENGINEERING),
+                          branch="engineering")
 
 
 class _ExplorerStub:
@@ -44,7 +45,7 @@ async def test_driver_runs_router_then_explorer_then_parks():
 async def test_driver_stops_when_route_returns_none():
     class _Terminal:
         name = "router"
-        async def run(self, ctx): return NodeResult(output=Request(raw_text="?", kind=RequestKind.LIGHTWEIGHT))
+        async def run(self, ctx): return NodeResult(output=Request(raw_text="?", kind=RequestKind.LIGHTWEIGHT), branch="lightweight")
     reg = NodeRegistry(); reg.register(_Terminal())
     driver = Driver(reg, route)
     start = SessionState(cursor=Cursor(phase=Phase.ROUTING, current_node="router"))

@@ -46,7 +46,7 @@ class Router(AgentNode):
         kind = await self._classify_via_llm(ctx)
         if kind is None:  # model gave no usable output → deterministic fallback
             kind = self._classify_seed(req.raw_text)
-        return NodeResult(output=Request(raw_text=req.raw_text, kind=kind))
+        return NodeResult(output=Request(raw_text=req.raw_text, kind=kind), branch=kind.value)
 
     async def _classify_via_llm(self, ctx: NodeContext) -> RequestKind | None:
         try:

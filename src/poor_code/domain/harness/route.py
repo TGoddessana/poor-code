@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from poor_code.domain.harness.node import NodeResult
 from poor_code.domain.session.models import (
-    Layer, Policy, Request, SessionState, VerdictKind,
+    Layer, Policy, SessionState, VerdictKind,
 )
 
 # (node_name, branch) → next_node. branch=None for single-out nodes.
@@ -44,12 +44,6 @@ _SHALLOWEST: dict[Layer, str] = {
 }
 
 
-def _branch(node: str, result: NodeResult) -> str | None:
-    if node == "router" and isinstance(result.output, Request):
-        return result.output.kind.value
-    return None
-
-
 def route(node: str, result: NodeResult, state: SessionState) -> str | None:
     """Next node name, or None to STOP (terminal). A returned name that the
     registry doesn't know = park (Driver handles it)."""
@@ -59,7 +53,7 @@ def route(node: str, result: NodeResult, state: SessionState) -> str | None:
             return _SHALLOWEST[v.layer]
         if v.kind is VerdictKind.ESCALATE:
             return "user"
-    branch = result.branch if result.branch is not None else _branch(node, result)
+    branch = result.branch
     nxt = FORWARD.get((node, branch))
     # FULL_AUTO (headless): no human to answer the interviewer, so skip that node — it
     # would only auto-answer "use your best judgment" and burn round-trips. But KEEP a

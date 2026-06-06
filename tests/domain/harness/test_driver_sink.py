@@ -11,7 +11,8 @@ from poor_code.domain.session.models import (
 class _RouterStub:
     name = "router"
     async def run(self, ctx):
-        return NodeResult(output=Request(raw_text="x", kind=RequestKind.ENGINEERING))
+        return NodeResult(output=Request(raw_text="x", kind=RequestKind.ENGINEERING),
+                          branch="engineering")
 
 
 class _RecordingSink:
