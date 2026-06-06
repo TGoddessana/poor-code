@@ -18,11 +18,15 @@ class _Escape:
 
 ESCAPE = _Escape()
 
+# route() returns the next node name, None (terminal stop), or ESCAPE (bubble to outer graph).
+RouteResult = str | None | _Escape
+
 
 @dataclass(frozen=True)
 class Rewrite:
     """정책 조건부 엣지 재작성 (예: FULL_AUTO 에서 interviewer skip)."""
     when: Callable[[SessionState], bool]
+    # remap is a dict (unhashable) — Rewrite is held only inside a tuple, never hashed.
     remap: dict[str, str]   # 다음 노드 이름 → 대체 이름
 
     def apply(self, nxt: str | None, state: SessionState) -> str | None:
@@ -37,7 +41,7 @@ class EdgeTable:
     back_edges: dict[Layer, str]
     rewrites: tuple[Rewrite, ...] = ()
 
-    def route(self, node: str, result: NodeResult, state: SessionState):
+    def route(self, node: str, result: NodeResult, state: SessionState) -> str | None | _Escape:
         v = result.verdict
         if v is not None:
             if v.kind is VerdictKind.REPAIR and v.layer is not None:
@@ -52,6 +56,8 @@ class EdgeTable:
 
 @dataclass(frozen=True)
 class Graph:
+    """그래프의 정체성: 정점 집합(nodes) + 라우팅 정책(edges) + 진입 노드(entry).
+    CompiledGraph 가 이걸 노드로 감싸 서브그래프로 만든다 (이후 태스크)."""
     nodes: NodeRegistry
     edges: EdgeTable
     entry: str
