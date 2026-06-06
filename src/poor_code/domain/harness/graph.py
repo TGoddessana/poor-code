@@ -61,3 +61,38 @@ class Graph:
     nodes: NodeRegistry
     edges: EdgeTable
     entry: str
+
+    def compile(self, *, name, fork, merge, exit_branch=None) -> "CompiledGraph":
+        return CompiledGraph(self, name=name, fork=fork, merge=merge, exit_branch=exit_branch)
+
+
+class _Merge:
+    """CompiledGraph 의 출력. 바깥 Driver 의 `state = output.apply_to(state)` 한 줄이
+    merge 를 수행한다 (apply_to 규약을 그대로 따른다)."""
+    __slots__ = ("_merge", "_child")
+    def __init__(self, merge, child):
+        self._merge, self._child = merge, child
+    def apply_to(self, parent):
+        return self._merge(parent, self._child)
+
+
+class CompiledGraph:
+    """겉은 Node(name+run), 속은 그래프. fork 로 자식 스코프 진입, 안쪽 Driver 완주,
+    merge 로 결과만 부모에 반영. 안에서 해결 못 한 verdict 는 바깥으로 bubble.
+    exit_branch(child)->str|None 로 정상 종료 시 바깥 분기를 실을 수 있다."""
+
+    def __init__(self, graph: "Graph", *, name: str, fork, merge, exit_branch=None):
+        self.name = name
+        self._graph = graph
+        self._fork = fork
+        self._merge = merge
+        self._exit_branch = exit_branch
+
+    async def run(self, ctx) -> NodeResult:
+        from poor_code.domain.harness.driver import Driver   # lazy: avoid import cycle
+        driver = Driver(self._graph.nodes, self._graph.edges.route)
+        child = await driver.run(self._fork(ctx.state), ctx.cancel, sink=ctx.sink)
+        if driver.last_escape is not None:
+            return NodeResult(verdict=driver.last_escape)   # bubble unresolved verdict
+        branch = self._exit_branch(child) if self._exit_branch is not None else None
+        return NodeResult(output=_Merge(self._merge, child), branch=branch)
