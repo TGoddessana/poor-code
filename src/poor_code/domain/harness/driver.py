@@ -60,6 +60,9 @@ class Driver:
                 state = state.with_repair_hint(v.hint)     # carry hint to the re-entered node
 
             nxt = self._route(node.name, result, state)   # ② ask topology
+            if result.verdict is not None and result.verdict.kind is VerdictKind.ESCALATE:
+                self.last_escape = result.verdict      # wrapping CompiledGraph bubbles this;
+                                                       # top-level still advances to "user" and parks
             if nxt is ESCAPE:
                 self.last_escape = result.verdict          # unresolved here → bubble to outer graph
                 return state
