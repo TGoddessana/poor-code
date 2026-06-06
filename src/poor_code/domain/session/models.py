@@ -41,6 +41,9 @@ class FeedbackEntry:
     prevention_hint: str
     task_ref: str | None = None
 
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return s.with_feedback_entry(self)
+
 
 @dataclass(frozen=True, slots=True)
 class FeedbackMemory:
@@ -232,6 +235,9 @@ class Request:
     raw_text: str
     kind: RequestKind
 
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return s.with_request(self)
+
 
 @dataclass(frozen=True, slots=True)
 class CodeRef:
@@ -268,6 +274,9 @@ class CodeContext:
     summary: str = ""             # explorer 합성 브리핑 (한 단락)
     excerpts: tuple[FileExcerpt, ...] = ()  # explorer가 실제로 읽은 본문
     environment: str = ""         # explorer가 1회 probe한 OS/런타임/툴체인 스냅샷
+
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return s.with_understanding(self).with_repair_hint(None)
 
 
 class QueryKind(str, Enum):
@@ -311,6 +320,9 @@ class Requirement:
     assumptions: tuple[str, ...] = ()
     open_questions: tuple[str, ...] = ()
 
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return s.with_requirement(self)
+
 
 def effective_requirement(state: "SessionState") -> Requirement:
     """The binding Requirement, or a minimal one synthesized from the raw request when
@@ -337,6 +349,9 @@ class AcceptanceSpec:
     """The global, plan-independent definition of 'done' (acceptance_oracle output)."""
     checks: tuple[AcceptanceCheck, ...] = ()
 
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return s.with_acceptance(self)
+
 
 class TaskStatus(str, Enum):
     PENDING = "pending"
@@ -357,6 +372,10 @@ class EditScope:
 class TaskContext:
     refs: tuple[CodeRef, ...] = ()
     snippet: str | None = None
+
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        assert s.cursor is not None and s.cursor.task_id is not None
+        return s.with_task_context(s.cursor.task_id, self)
 
 
 class StepKind(str, Enum):
@@ -416,6 +435,9 @@ class Plan:
     deps: tuple[Dependency, ...] = ()
     file_plan: tuple[FileSlot, ...] = ()
 
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return s.with_plan(self)
+
 
 class AttemptStatus(str, Enum):
     ACTIVE = "active"
@@ -430,6 +452,11 @@ class ValidationResult:
     exit_code: int
     passed: bool
     output: str = ""
+
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        c = s.cursor
+        assert c is not None and c.task_id and c.attempt_id
+        return s.update_attempt(c.task_id, c.attempt_id, run_result=self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -454,6 +481,9 @@ class EnvReport:
     test_command: str = ""              # canonical way to run the project's tests
     install_steps: tuple[str, ...] = () # commands actually run to bootstrap the env
     notes: str = ""                     # gotchas / what is missing
+
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return s.with_env_report(self)
 
 
 class ReportOutcome(str, Enum):
@@ -483,12 +513,18 @@ class Report:
     changeset: ChangeSet | None = None
     summary: str = ""
 
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return s.with_report(self)
+
 
 @dataclass(frozen=True, slots=True)
 class SelectedTask:
     """task_selector → Driver 제어 신호. task_selector가 None을 반환하면 'done' 분기."""
     # NOTE: no store serializer yet — added in Plan 2 when first persisted.
     task_id: str
+
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return s.with_active_task(self.task_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -497,6 +533,10 @@ class TaskCompleted:
     control-only — store에 직렬화하지 않음(상태는 Task.status/Attempt.status로 영속)."""
     task_id: str
     attempt_id: str
+
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return (s.update_attempt(self.task_id, self.attempt_id, status=AttemptStatus.DONE)
+                 .with_task_status(self.task_id, TaskStatus.DONE))
 
 
 @dataclass(frozen=True, slots=True)
@@ -510,6 +550,10 @@ class Attempt:
     gate_verdict: Verdict | None = None
     adversarial_rounds: int = 0                   # 적대적 캡 카운터
     status: AttemptStatus = AttemptStatus.ACTIVE
+
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        assert s.cursor is not None and s.cursor.task_id is not None
+        return s.upsert_attempt(s.cursor.task_id, self).with_repair_hint(None)
 
 
 class Phase(str, Enum):

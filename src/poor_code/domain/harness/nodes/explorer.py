@@ -20,7 +20,7 @@ from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import (
-    CodeContext, CodeRef, FileExcerpt, GroundingStatus, SessionState)
+    CodeContext, CodeRef, FileExcerpt, GroundingStatus, Phase, SessionState)
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
@@ -95,6 +95,7 @@ class _CodeContextOut(BaseModel):
 
 class ExploringNode(AgentNode):
     name = "explorer"
+    phase = Phase.LOCATING
 
     def __init__(self, llm: _LLMClientLike, project_map: ProjectMap, tools: ToolRegistry) -> None:
         super().__init__(llm)

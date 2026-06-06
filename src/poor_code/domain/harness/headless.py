@@ -128,13 +128,12 @@ def _load_project_map(cwd: Path) -> ProjectMap:
 
 
 def _build_driver(llm) -> object:
-    from poor_code.domain.harness import build_default_registry
+    from poor_code.domain.harness import build_default_graph
     from poor_code.domain.harness.driver import Driver
-    from poor_code.domain.harness.route import route
 
     cwd = Path.cwd()
-    registry = build_default_registry(llm=llm, project_map=_load_project_map(cwd))
-    return Driver(registry, route)
+    graph = build_default_graph(llm=llm, project_map=_load_project_map(cwd))
+    return Driver(graph.nodes, graph.edges.route)
 
 
 async def main(instruction: str, *, stdout=None, stderr=None) -> int:

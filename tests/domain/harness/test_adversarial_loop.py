@@ -5,9 +5,32 @@ import pytest
 
 from poor_code.domain.harness.driver import Driver
 from poor_code.domain.harness.registry import NodeRegistry
-from poor_code.domain.harness.route import route
+from poor_code.domain.harness.graph import EdgeTable
+from poor_code.domain.session.models import Layer
 from poor_code.domain.harness.nodes.execution import (
     TaskSelector, EngGate, ValidationRunner, CompletionGate)
+
+# This test drives the execution loop's inner nodes DIRECTLY (flat, with stubs), so it
+# needs a local edge table carrying the inner edges — those edges moved out of the
+# global route() into the implement_loop subgraph. Mirrors the old route.FORWARD inner
+# rows + the loop's exit (task_selector 'done' → global_validator → reporter).
+_LOCAL_EDGES = EdgeTable(
+    forward={
+        ("task_selector", "task"): "composer",
+        ("task_selector", "done"): "global_validator",
+        ("composer", None): "implementer",
+        ("implementer", None): "eng_gate",
+        ("eng_gate", None): "validator",
+        ("validator", None): "validation_runner",
+        ("validation_runner", "pass"): "completion_gate",
+        ("validation_runner", "fail"): "failure_analyst",
+        ("failure_analyst", None): "completion_gate",
+        ("completion_gate", "done"): "task_selector",
+        ("global_validator", "pass"): "reporter",
+    },
+    back_edges={Layer.IMPLEMENTATION: "implementer"},
+)
+route = _LOCAL_EDGES.route
 from poor_code.domain.harness.nodes.composer import Composer
 from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.harness.nodes.validator import Validator, MAX_ADVERSARIAL_ROUNDS

@@ -1,58 +1,52 @@
 """harness — the graph runtime (control). Imports domain/session (data), never ui/.
-All execution agent nodes (composer, implementer, validator, failure_analyst,
-global_validator) are registered; the full graph runs to the 'reporter' park."""
+The task-execution loop (composer, implementer, validator, failure_analyst, …) is
+folded into the `implement_loop` subgraph node; global_validator and the planning/
+understanding nodes are registered at the top level. The full graph runs to 'reporter'."""
 from __future__ import annotations
 
 from poor_code.domain.harness.driver import Driver
+from poor_code.domain.harness.graph import EdgeTable, Graph
 from poor_code.domain.harness.node import Node, NodeContext, NodeResult
 from poor_code.domain.harness.nodes.acceptance_critic import AcceptanceCritic
 from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
-from poor_code.domain.harness.nodes.composer import Composer
-from poor_code.domain.harness.nodes.execution import (
-    TaskSelector, EngGate, ValidationRunner, CompletionGate,
-)
 from poor_code.domain.harness.nodes.explorer import ExploringNode
-from poor_code.domain.harness.nodes.failure_analyst import FailureAnalyst
 from poor_code.domain.harness.nodes.fast_path import FastPathNode
 from poor_code.domain.harness.nodes.gates import AcceptanceGate, PlanGate, UnderstandingGate
 from poor_code.domain.harness.nodes.global_validator import GlobalValidator
-from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.harness.nodes.interviewer import Interviewer
 from poor_code.domain.harness.nodes.plan_reviewer import PlanReviewer
 from poor_code.domain.harness.nodes.planner import Planner
 from poor_code.domain.harness.nodes.provisioner import Provisioner
 from poor_code.domain.harness.nodes.reporter import Reporter
 from poor_code.domain.harness.nodes.router import Router
-from poor_code.domain.harness.nodes.validator import Validator
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.harness.route import FORWARD, route
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.tool.bash import BashTool
-from poor_code.domain.tool.edit import EditTool
 from poor_code.domain.tool.glob import GlobTool
 from poor_code.domain.tool.grep import GrepTool
 from poor_code.domain.tool.list import ListTool
 from poor_code.domain.tool.read import ReadTool
 from poor_code.domain.tool.registry import ToolRegistry
-from poor_code.domain.tool.write import WriteTool
 
 __all__ = [
     "Driver", "Node", "NodeContext", "NodeResult", "NodeRegistry",
     "Router", "ExploringNode", "Interviewer", "Planner", "PlanGate", "FastPathNode",
     "AcceptanceOracle", "AcceptanceGate", "AcceptanceCritic",
-    "TaskSelector", "EngGate", "ValidationRunner", "CompletionGate",
-    "Composer", "Implementer", "Validator", "FailureAnalyst", "GlobalValidator", "Reporter",
+    "GlobalValidator", "Reporter",
     "Provisioner",
     "route", "FORWARD", "build_default_registry",
+    "Graph", "EdgeTable", "build_default_graph",
 ]
 
 
 def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeRegistry:
-    """Assemble the full planning+execution-layer graph. All agent nodes are
-    registered: Router, ExploringNode, Interviewer, Planner, TaskSelector,
-    Composer, Implementer, Validator, FailureAnalyst, GlobalValidator plus the
-    deterministic gates and runners. The graph runs to the 'reporter' park.
-    When `agent` is provided, the lightweight leaf (fast_path) is also registered."""
+    """Assemble the full planning+execution-layer graph. Top-level agent nodes:
+    Router, ExploringNode, Interviewer, AcceptanceOracle/Critic, Planner, PlanReviewer,
+    Provisioner, GlobalValidator, plus the deterministic gates. The task-execution loop
+    (TaskSelector, Composer, Implementer, Validator, FailureAnalyst, runners) is folded
+    into the `implement_loop` subgraph node, not registered here. The graph runs to the
+    'reporter' park. When `agent` is provided, the lightweight leaf (fast_path) is added."""
     reg = NodeRegistry()
     reg.register(Router(llm))
     reg.register(ExploringNode(
@@ -69,18 +63,20 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     reg.register(Provisioner(
         llm, cwd=project_map.cwd,
         tools=ToolRegistry([BashTool(), ReadTool(), ListTool(), GlobTool(), GrepTool()])))
-    reg.register(TaskSelector())
-    reg.register(EngGate())
-    reg.register(ValidationRunner(cwd=project_map.cwd))
-    reg.register(CompletionGate())
-    reg.register(Composer())
-    reg.register(Implementer(
-        llm, cwd=project_map.cwd,
-        tools=ToolRegistry([WriteTool(), EditTool(), BashTool()])))
-    reg.register(Validator(llm))
-    reg.register(FailureAnalyst(llm))
+    # The whole task-execution loop (task_selector→composer→implementer→eng_gate→
+    # validator→validation_runner→{completion_gate|failure_analyst}→…) is folded into
+    # ONE subgraph node. Its 8 inner nodes are registered inside the subgraph, not here.
+    from poor_code.domain.harness.subgraphs.implement_loop import build_implement_loop
+    reg.register(build_implement_loop(llm=llm, cwd=project_map.cwd))
     reg.register(GlobalValidator(llm, cwd=project_map.cwd))
     reg.register(Reporter())
     if agent is not None:
         reg.register(FastPathNode(agent))
     return reg
+
+
+def build_default_graph(*, llm, project_map: ProjectMap, agent=None) -> Graph:
+    """진입 그래프(Graph): 기본 레지스트리 + DEFAULT_EDGES + entry='router'."""
+    from poor_code.domain.harness.route import DEFAULT_EDGES
+    reg = build_default_registry(llm=llm, project_map=project_map, agent=agent)
+    return Graph(nodes=reg, edges=DEFAULT_EDGES, entry="router")

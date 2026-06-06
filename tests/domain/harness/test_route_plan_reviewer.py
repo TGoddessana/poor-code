@@ -15,9 +15,11 @@ def test_plan_reviewer_advance_forwards_to_provisioner():
     assert route("plan_reviewer", res, SessionState()) == "provisioner"
 
 
-def test_provisioner_advance_forwards_to_task_selector():
+def test_provisioner_advance_forwards_to_implement_loop():
+    # the task-execution loop is now folded into the implement_loop subgraph; provisioner
+    # forwards into it (task_selector is the subgraph's INTERNAL entry, not on the outer edge).
     res = NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
-    assert route("provisioner", res, SessionState()) == "task_selector"
+    assert route("provisioner", res, SessionState()) == "implement_loop"
 
 
 def test_plan_reviewer_repair_loops_back_to_planner():

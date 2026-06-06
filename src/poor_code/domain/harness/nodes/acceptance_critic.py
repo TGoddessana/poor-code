@@ -14,7 +14,7 @@ from poor_code.domain.harness.node import (
 from poor_code.domain.harness.nodes.gates import _acceptance_repair_count
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
-    Layer, SessionState, Verdict, VerdictKind,
+    Layer, Phase, SessionState, Verdict, VerdictKind,
 )
 
 _TOOL_NAME = "emit_critique"
@@ -55,6 +55,7 @@ class _CritiqueOut(BaseModel):
 
 class AcceptanceCritic(AgentNode):
     name = "acceptance_critic"
+    phase = Phase.PLANNING
 
     def __init__(self, llm: _LLMClientLike) -> None:
         super().__init__(llm)

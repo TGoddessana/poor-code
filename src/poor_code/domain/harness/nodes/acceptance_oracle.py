@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from poor_code.domain.harness.node import AgentNode, _LLMClientLike
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
-    AcceptanceCheck, AcceptanceSpec, GroundingStatus, SessionState,
+    AcceptanceCheck, AcceptanceSpec, GroundingStatus, Phase, SessionState,
     effective_requirement,
 )
 
@@ -59,6 +59,7 @@ class _AcceptanceSpecOut(BaseModel):
 
 class AcceptanceOracle(AgentNode):
     name = "acceptance_oracle"
+    phase = Phase.PLANNING
 
     def __init__(self, llm: _LLMClientLike) -> None:
         super().__init__(llm)

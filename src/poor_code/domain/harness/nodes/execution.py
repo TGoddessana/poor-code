@@ -12,6 +12,7 @@ from poor_code.domain.harness.nodes.validator import MAX_ADVERSARIAL_ROUNDS
 from poor_code.domain.session.models import (
     AttemptStatus,
     Layer,
+    Phase,
     SelectedTask,
     TaskCompleted,
     TaskStatus,
@@ -36,6 +37,7 @@ class TaskSelector:
     """Middle-cycle walker: choose the next runnable Task or signal done."""
 
     name = "task_selector"
+    phase = Phase.IMPLEMENTING
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         plan = ctx.state.plan
@@ -61,6 +63,7 @@ class EngGate:
     hard, judgment-free floors: there is something to review, and nothing forbidden."""
 
     name = "eng_gate"
+    phase = Phase.IMPLEMENTING
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         task, attempt = _active(ctx.state)
@@ -128,6 +131,7 @@ class ValidationRunner:
     """Binding pass/fail ★. Re-runs Task.how_to_validate as code; exit code decides."""
 
     name = "validation_runner"
+    phase = Phase.IMPLEMENTING
 
     def __init__(self, cwd: Path) -> None:
         self._cwd = cwd
@@ -148,6 +152,7 @@ class CompletionGate:
     full-auto partial under a Policy)."""
 
     name = "completion_gate"
+    phase = Phase.IMPLEMENTING
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         task, attempt = _active(ctx.state)

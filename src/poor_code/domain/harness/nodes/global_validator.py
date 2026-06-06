@@ -14,7 +14,7 @@ from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _L
 from poor_code.domain.harness.nodes.execution import run_shell
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
-    AttemptStatus, ChangeSet, Layer, SessionState, Verdict, VerdictKind)
+    AttemptStatus, ChangeSet, Layer, Phase, SessionState, Verdict, VerdictKind)
 
 MAX_FIXUPS = 2
 _TOOL_NAME = "analyze_regression"
@@ -46,6 +46,7 @@ def build_changeset(state: SessionState) -> ChangeSet:
 
 class GlobalValidator(AgentNode):
     name = "global_validator"
+    phase = Phase.FINALIZING
 
     def __init__(self, llm: _LLMClientLike, cwd: Path) -> None:
         super().__init__(llm)

@@ -4,11 +4,12 @@ prompt is focused. snippet is left None in slice-1 (filled in a later slice)."""
 from __future__ import annotations
 
 from poor_code.domain.harness.node import NodeContext, NodeResult
-from poor_code.domain.session.models import CodeContext, TaskContext
+from poor_code.domain.session.models import CodeContext, Phase, TaskContext
 
 
 class Composer:
     name = "composer"
+    phase = Phase.IMPLEMENTING
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         state = ctx.state

@@ -14,7 +14,7 @@ from poor_code.domain.harness.node import (
 )
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
-    Layer, SessionState, TriggerKind, Verdict, VerdictKind,
+    Layer, Phase, SessionState, TriggerKind, Verdict, VerdictKind,
 )
 
 _TOOL_NAME = "emit_plan_review"
@@ -67,6 +67,7 @@ class _ReviewOut(BaseModel):
 
 class PlanReviewer(AgentNode):
     name = "plan_reviewer"
+    phase = Phase.PLANNING
 
     def __init__(self, llm: _LLMClientLike) -> None:
         super().__init__(llm)

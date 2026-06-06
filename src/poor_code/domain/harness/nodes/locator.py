@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from poor_code.domain.harness.node import AgentNode, _LLMClientLike, validate_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
-from poor_code.domain.session.models import CodeContext, CodeRef, SessionState
+from poor_code.domain.session.models import CodeContext, CodeRef, Phase, SessionState
 
 _TOOL_NAME = "emit_code_context"
 
@@ -38,6 +38,7 @@ class _CodeContextOut(BaseModel):
 
 class Locator(AgentNode):
     name = "locator"
+    phase = Phase.LOCATING
 
     def __init__(self, llm: _LLMClientLike, project_map: ProjectMap) -> None:
         super().__init__(llm)

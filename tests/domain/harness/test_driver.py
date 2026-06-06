@@ -12,7 +12,8 @@ from poor_code.domain.session.models import (
 class _RouterStub:
     name = "router"
     async def run(self, ctx: NodeContext) -> NodeResult:
-        return NodeResult(output=Request(raw_text="add x", kind=RequestKind.ENGINEERING))
+        return NodeResult(output=Request(raw_text="add x", kind=RequestKind.ENGINEERING),
+                          branch="engineering")
 
 
 class _ExplorerStub:
@@ -44,7 +45,7 @@ async def test_driver_runs_router_then_explorer_then_parks():
 async def test_driver_stops_when_route_returns_none():
     class _Terminal:
         name = "router"
-        async def run(self, ctx): return NodeResult(output=Request(raw_text="?", kind=RequestKind.LIGHTWEIGHT))
+        async def run(self, ctx): return NodeResult(output=Request(raw_text="?", kind=RequestKind.LIGHTWEIGHT), branch="lightweight")
     reg = NodeRegistry(); reg.register(_Terminal())
     driver = Driver(reg, route)
     start = SessionState(cursor=Cursor(phase=Phase.ROUTING, current_node="router"))
@@ -228,11 +229,23 @@ async def test_apply_task_context_and_upsert_attempt_and_clears_hint():
 
 
 def test_apply_report_sets_state_report():
-    from poor_code.domain.harness.driver import Driver, _phase_for
+    from poor_code.domain.harness.driver import Driver
     from poor_code.domain.harness.node import NodeResult
-    from poor_code.domain.session.models import Phase, Report, ReportOutcome, SessionState
+    from poor_code.domain.session.models import Report, ReportOutcome, SessionState
 
     r = Report(outcome=ReportOutcome.SUCCEEDED, summary="ok")
     new = Driver._apply(SessionState(), NodeResult(output=r))
     assert new.report is r
-    assert _phase_for("reporter", Phase.IMPLEMENTING) is Phase.FINALIZING
+
+
+def test_apply_delegates_to_output_apply_to():
+    from poor_code.domain.session.models import EnvReport, SessionState
+    er = EnvReport()
+    new = Driver._apply(SessionState(), NodeResult(output=er))
+    assert new.env_report is er
+
+
+def test_apply_noop_when_output_none():
+    from poor_code.domain.session.models import SessionState
+    s = SessionState()
+    assert Driver._apply(s, NodeResult(output=None)) is s

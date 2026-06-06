@@ -3,12 +3,15 @@ It never writes to the store and never decides the next hop (route() does)."""
 from __future__ import annotations
 
 import asyncio
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel, ValidationError
 
-from poor_code.domain.session.models import Query, SessionState, Verdict
+from poor_code.domain.session.models import (
+    Layer, Phase, Query, SessionState, TriggerKind, Verdict, VerdictKind,
+)
 from poor_code.provider.events import (
     FinishedReason,
     LLMEvent,
@@ -99,9 +102,61 @@ class NodeContext:
 
 
 @runtime_checkable
+class StateUpdate(Protocol):
+    def apply_to(self, s: "SessionState") -> "SessionState": ...
+
+
+@runtime_checkable
 class Node(Protocol):
     name: str
     async def run(self, ctx: NodeContext) -> NodeResult: ...
+
+
+# layer → the history-logged node a repair bounce targets, used by the default
+# repair-bounce counter. Close to route._SHALLOWEST but NOT identical: this counts the
+# node that actually appears in history (e.g. "implementer"), whereas route's back-edge
+# may target a wrapping subgraph ("implement_loop"). Kept here so GateNode is self-contained.
+_SHALLOWEST_FOR_COUNTING = {
+    Layer.IMPLEMENTATION: "implementer",
+    Layer.PLAN: "planner",
+    Layer.UNDERSTANDING: "explorer",
+    Layer.ACCEPTANCE: "acceptance_oracle",
+}
+
+
+class GateNode(ABC):
+    """결정론 게이트의 공통 골격. check()==None → ADVANCE; 실패 시 repair 예산 내면
+    REPAIR(layer, hint), 예산 초과면 ESCALATE. repair 바운스 횟수는 history 에서 센다.
+    개별 게이트가 카운트 규칙이 다르면 _repair_count 를 오버라이드한다."""
+    name: str
+    layer: Layer
+    repair_budget: int
+    phase: Phase  # every gate declares its cursor phase (read by the Driver)
+
+    @abstractmethod
+    def check(self, state: SessionState) -> str | None:
+        """None → 통과(ADVANCE). 문자열 → 실패 사유(hint)."""
+        ...
+
+    async def run(self, ctx: NodeContext) -> NodeResult:
+        hint = self.check(ctx.state)
+        if hint is None:
+            return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
+        if self._repair_count(ctx.state) >= self.repair_budget:
+            return NodeResult(verdict=Verdict(
+                kind=VerdictKind.ESCALATE, query=self.escalate_query(hint)))
+        return NodeResult(verdict=Verdict(
+            kind=VerdictKind.REPAIR, layer=self.layer, hint=hint))
+
+    def escalate_query(self, hint: str) -> str:
+        """ESCALATE 시 사용자에게 보일 메시지. 기본은 실패 hint 그대로.
+        게이트별로 접두 문구가 다르면 오버라이드한다."""
+        return hint
+
+    def _repair_count(self, state: SessionState) -> int:
+        target = _SHALLOWEST_FOR_COUNTING.get(self.layer)
+        return sum(1 for t in state.history
+                   if t.trigger is TriggerKind.GATE and t.to_node == target)
 
 
 @runtime_checkable
