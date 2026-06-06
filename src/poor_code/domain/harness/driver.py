@@ -60,11 +60,14 @@ class Driver:
                 state = state.with_repair_hint(v.hint)     # carry hint to the re-entered node
 
             nxt = self._route(node.name, result, state)   # ② ask topology
-            if result.verdict is not None and result.verdict.kind is VerdictKind.ESCALATE:
-                self.last_escape = result.verdict      # wrapping CompiledGraph bubbles this;
-                                                       # top-level still advances to "user" and parks
+            # Two disjoint "can't resolve locally" outcomes both feed last_escape so a
+            # wrapping CompiledGraph can bubble them: ESCALATE → route returned "user"
+            # (fall through; top-level advances to "user" and parks), ESCAPE → unroutable
+            # REPAIR (return now). last_escape is read only by CompiledGraph.run.
+            if v is not None and v.kind is VerdictKind.ESCALATE:
+                self.last_escape = v
             if nxt is ESCAPE:
-                self.last_escape = result.verdict          # unresolved here → bubble to outer graph
+                self.last_escape = v
                 return state
             if nxt is None:
                 return state                              # terminal STOP

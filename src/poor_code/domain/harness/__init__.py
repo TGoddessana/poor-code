@@ -1,6 +1,7 @@
 """harness — the graph runtime (control). Imports domain/session (data), never ui/.
-All execution agent nodes (composer, implementer, validator, failure_analyst,
-global_validator) are registered; the full graph runs to the 'reporter' park."""
+The task-execution loop (composer, implementer, validator, failure_analyst, …) is
+folded into the `implement_loop` subgraph node; global_validator and the planning/
+understanding nodes are registered at the top level. The full graph runs to 'reporter'."""
 from __future__ import annotations
 
 from poor_code.domain.harness.driver import Driver
@@ -40,11 +41,12 @@ __all__ = [
 
 
 def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeRegistry:
-    """Assemble the full planning+execution-layer graph. All agent nodes are
-    registered: Router, ExploringNode, Interviewer, Planner, TaskSelector,
-    Composer, Implementer, Validator, FailureAnalyst, GlobalValidator plus the
-    deterministic gates and runners. The graph runs to the 'reporter' park.
-    When `agent` is provided, the lightweight leaf (fast_path) is also registered."""
+    """Assemble the full planning+execution-layer graph. Top-level agent nodes:
+    Router, ExploringNode, Interviewer, AcceptanceOracle/Critic, Planner, PlanReviewer,
+    Provisioner, GlobalValidator, plus the deterministic gates. The task-execution loop
+    (TaskSelector, Composer, Implementer, Validator, FailureAnalyst, runners) is folded
+    into the `implement_loop` subgraph node, not registered here. The graph runs to the
+    'reporter' park. When `agent` is provided, the lightweight leaf (fast_path) is added."""
     reg = NodeRegistry()
     reg.register(Router(llm))
     reg.register(ExploringNode(
