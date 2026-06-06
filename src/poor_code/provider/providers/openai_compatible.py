@@ -5,6 +5,8 @@ with a hardcoded base_url. This module owns the actual Route assembly.
 """
 from __future__ import annotations
 
+import os
+
 from poor_code.provider.auth import BearerAuth
 from poor_code.provider.capabilities import Capabilities
 from poor_code.provider.client import LLMClient
@@ -24,6 +26,16 @@ def configure(
         framing=SseFraming(),
         capabilities=capabilities,
     )
+    kwargs = {}
+    # Per-call wall-clock budget override (bench tuning). Invalid values fall back
+    # to the LLMClient default rather than crashing provider construction.
+    env_timeout = os.environ.get("POOR_CODE_CALL_TIMEOUT")
+    if env_timeout:
+        try:
+            kwargs["call_timeout"] = float(env_timeout)
+        except ValueError:
+            pass
     return LLMClient(
-        route=route, base_url=base_url, model=model, provider_name=provider_name
+        route=route, base_url=base_url, model=model, provider_name=provider_name,
+        **kwargs,
     )

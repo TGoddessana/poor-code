@@ -137,7 +137,58 @@ async def test_stream_http_error_includes_response_body_in_message():
     assert "404" in str(exc.value)
 
 
-# --- #1: per-call idle timeout + bounded retry on transport stalls -------------
+# --- per-call TOTAL wall-clock budget (FM3) ------------------------------------
+
+def test_call_timeout_default_is_finite_positive():
+    """A total wall-clock budget per call must exist by default — the idle timeout
+    only catches single gaps, so accumulated sub-idle gaps could run to 1800s."""
+    from poor_code.provider.client import DEFAULT_CALL_TIMEOUT
+    assert DEFAULT_CALL_TIMEOUT is not None and DEFAULT_CALL_TIMEOUT > 0
+    assert _make_client()._call_timeout == DEFAULT_CALL_TIMEOUT
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_stream_raises_when_call_exceeds_wall_clock_budget():
+    """Many sub-idle chunks accumulating past the budget must trip a timeout, not
+    run forever. A fake monotonic clock makes this deterministic."""
+    from poor_code.provider.client import LLMCallTimeout
+    body = _sse([
+        {"choices": [{"delta": {"content": "a"}, "finish_reason": None}]},
+        {"choices": [{"delta": {"content": "b"}, "finish_reason": None}]},
+        {"choices": [{"delta": {"content": "c"}, "finish_reason": None}]},
+        {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+    ])
+    respx.post("https://example.test/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=body))
+    client = _make_client(call_timeout=100.0)
+    ticks = iter([0.0, 10.0, 200.0, 300.0, 400.0])  # 3rd chunk is past the 100s budget
+    client._monotonic = lambda: next(ticks)
+    collected = []
+    with pytest.raises(LLMCallTimeout):
+        async for ev in client.stream(messages=[], tools=[]):
+            collected.append(ev)
+    assert TextDelta(text="a") in collected  # earlier chunks streamed before the trip
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_call_timeout_is_not_retried():
+    """The budget cap is not a transport stall — retrying would burn it again."""
+    from poor_code.provider.client import LLMCallTimeout
+    body = _sse([
+        {"choices": [{"delta": {"content": "a"}, "finish_reason": None}]},
+        {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+    ])
+    route = respx.post("https://example.test/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=body))
+    client = _make_client(call_timeout=50.0, max_retries=2)
+    ticks = iter([0.0, 999.0, 999.0, 999.0])
+    client._monotonic = lambda: next(ticks)
+    with pytest.raises(LLMCallTimeout):
+        [_ async for _ in client.stream(messages=[], tools=[])]
+    assert route.call_count == 1
+
 
 def test_idle_read_timeout_is_finite():
     """read=None turns a provider stall into an infinite hang. The read (idle)

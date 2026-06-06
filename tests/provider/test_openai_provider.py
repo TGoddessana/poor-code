@@ -34,3 +34,17 @@ def test_configure_enables_all_capabilities():
 def test_configure_accepts_custom_base_url():
     client = openai.configure(model="m", api_key="k", base_url="https://proxy.test")
     assert client.base_url == "https://proxy.test"
+
+
+def test_configure_reads_call_timeout_from_env(monkeypatch):
+    """Bench operators tune the per-call wall-clock budget without code changes."""
+    monkeypatch.setenv("POOR_CODE_CALL_TIMEOUT", "90")
+    client = openai.configure(model="m", api_key="k")
+    assert client._call_timeout == 90.0
+
+
+def test_configure_uses_default_call_timeout_without_env(monkeypatch):
+    from poor_code.provider.client import DEFAULT_CALL_TIMEOUT
+    monkeypatch.delenv("POOR_CODE_CALL_TIMEOUT", raising=False)
+    client = openai.configure(model="m", api_key="k")
+    assert client._call_timeout == DEFAULT_CALL_TIMEOUT

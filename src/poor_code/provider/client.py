@@ -7,6 +7,7 @@ and a fresh parser instance (so per-stream state in the Protocol is isolated).
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, AsyncIterator
 
 import httpx
@@ -28,6 +29,19 @@ DEFAULT_WRITE_TIMEOUT = 30.0
 # yielded (a stalled connect / first token). Once we have emitted events the
 # stream is half-consumed downstream and cannot be safely restarted.
 DEFAULT_MAX_RETRIES = 2
+# Total wall-clock budget for ONE stream() call. The idle (read) timeout only
+# bounds a single inter-chunk gap; a call that keeps emitting just-under-idle
+# chunks can still run for many minutes (benchmark logs showed 511s calls killing
+# tasks at the 1800s wall). This caps the cumulative duration. It is INDEPENDENT
+# of the idle timeout: a single stall trips read=120s, slow accumulation trips this.
+DEFAULT_CALL_TIMEOUT = 300.0
+
+
+class LLMCallTimeout(Exception):
+    """A single stream() call exceeded its total wall-clock budget. Deliberately NOT
+    an httpx.TransportError, so the transport-retry path ignores it — retrying would
+    just spend the same budget again against an already-slow endpoint. Callers
+    convert it to a graceful node failure (Verdict), never a process crash."""
 
 
 class LLMClient:
@@ -41,6 +55,7 @@ class LLMClient:
         idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
         write_timeout: float = DEFAULT_WRITE_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
+        call_timeout: float | None = DEFAULT_CALL_TIMEOUT,
     ) -> None:
         self.route = route
         self.base_url = base_url.rstrip("/")
@@ -53,6 +68,8 @@ class LLMClient:
             pool=connect_timeout,
         )
         self._max_retries = max_retries
+        self._call_timeout = call_timeout
+        self._monotonic = time.monotonic   # injectable for deterministic timeout tests
         # Token accounting. The client is built once per run, so this meter spans the
         # whole run. `active_label` is set by the node about to stream (a guarded
         # one-liner) so usage is attributed per node; None → totals only.
@@ -78,6 +95,9 @@ class LLMClient:
         self.route.auth.apply(headers)
         url = self.base_url + self.route.endpoint
 
+        deadline = (
+            self._monotonic() + self._call_timeout
+            if self._call_timeout is not None else None)
         attempt = 0
         while True:
             # A fresh parser per attempt so a retried request starts from a clean
@@ -102,6 +122,10 @@ class LLMClient:
                         async for payload in self.route.framing.frames(
                             resp.aiter_bytes()
                         ):
+                            if deadline is not None and self._monotonic() >= deadline:
+                                raise LLMCallTimeout(
+                                    f"LLM call exceeded {self._call_timeout}s "
+                                    "wall-clock budget")
                             try:
                                 chunk = json.loads(payload)
                             except json.JSONDecodeError:
