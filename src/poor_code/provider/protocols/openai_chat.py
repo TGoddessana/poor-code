@@ -72,9 +72,11 @@ class _OpenAIChatParser:
         # usage populated. Emit UsageEnded before bailing on no-choices.
         usage = chunk.get("usage")
         if usage:
+            details = usage.get("prompt_tokens_details") or {}
             yield UsageEnded(
                 input_tokens=usage.get("prompt_tokens", 0),
                 output_tokens=usage.get("completion_tokens", 0),
+                cached_input_tokens=details.get("cached_tokens", 0) or 0,
             )
         elif chunk.get("done") and (
             chunk.get("prompt_eval_count") is not None

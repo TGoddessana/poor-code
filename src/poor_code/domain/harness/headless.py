@@ -153,7 +153,19 @@ async def main(instruction: str, *, stdout=None, stderr=None) -> int:
             request=Request(raw_text=instruction, kind=RequestKind.ENGINEERING),
             policy=Policy.FULL_AUTO)
         final = await run_headless(driver, state, asyncio.Event(), sink=sink)
-        out.write(json.dumps(report_to_dict(final.report), ensure_ascii=False, indent=2) + "\n")
+        payload = report_to_dict(final.report)
+        meter = getattr(llm, "meter", None)
+        if meter is not None:
+            # Real token counts for this run (input/output/cache), total + per-node.
+            # The research found results.json token counts were always 0; this is the
+            # measurement that lets us see context bloat and whether caching happened.
+            payload["token_usage"] = meter.snapshot()
+            t = meter.total
+            err.write(
+                f"tokens: in={t.input_tokens} out={t.output_tokens} "
+                f"cached={t.cached_input_tokens} calls={t.calls}\n")
+            err.flush()
+        out.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
         out.flush()
         return 0
     except Exception as exc:  # noqa: BLE001 — top-level headless guard: report cleanly, exit 1

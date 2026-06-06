@@ -26,6 +26,7 @@ from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
     FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted,
 )
+from poor_code.provider.usage import tag
 
 _TOOL_NAME = "emit_code_context"
 MAX_ITERATIONS = 20
@@ -161,6 +162,7 @@ class ExploringNode(AgentNode):
         text = ""
         pending: dict[str, dict[str, str]] = {}
         order: list[str] = []
+        tag(self._llm, self.name)   # attribute this call's tokens to the explorer
         async for ev in self._llm.stream(messages=messages, tools=self._tools.schemas()):
             match ev:
                 case TextDelta(text=t):

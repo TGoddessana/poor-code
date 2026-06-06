@@ -43,6 +43,13 @@ class FinishedReason(LLMEvent):
 @dataclass(frozen=True)
 class UsageEnded(LLMEvent):
     """Provider's reported token counts for the completed stream.
-    Pricing/cost is computed by the Agent layer, not here."""
+    Pricing/cost is computed by the Agent layer, not here.
+
+    `cached_input_tokens` is the portion of `input_tokens` the provider served
+    from a prefix/KV cache (OpenAI: usage.prompt_tokens_details.cached_tokens).
+    0 when the provider does not report cache hits. Surfacing it lets the harness
+    MEASURE whether prefix caching is actually happening (the open question the
+    low-param research flagged for Ollama Cloud) instead of inferring it."""
     input_tokens: int
     output_tokens: int
+    cached_input_tokens: int = 0

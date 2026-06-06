@@ -178,6 +178,44 @@ async def test_gives_up_after_max_retries_on_persistent_stall():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_stream_records_usage_into_meter():
+    """Every completed stream's token usage funnels into the client's meter — the
+    single accounting point the harness reads for results.json (was always 0)."""
+    body = _sse([
+        {"choices": [{"delta": {"content": "hi"}, "finish_reason": None}]},
+        {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+        {"choices": [], "usage": {"prompt_tokens": 200, "completion_tokens": 30,
+                                  "prompt_tokens_details": {"cached_tokens": 150}}},
+    ])
+    respx.post("https://example.test/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=body))
+    client = _make_client()
+    [_ async for _ in client.stream(messages=[], tools=[])]
+    assert client.meter.total.input_tokens == 200
+    assert client.meter.total.output_tokens == 30
+    assert client.meter.total.cached_input_tokens == 150
+    assert client.meter.total.calls == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_stream_attributes_usage_to_active_label():
+    """When a node tags the client with its name, usage is attributed per-node so
+    the harness can see WHERE tokens (and context bloat) go."""
+    body = _sse([
+        {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+        {"choices": [], "usage": {"prompt_tokens": 50, "completion_tokens": 10}},
+    ])
+    respx.post("https://example.test/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=body))
+    client = _make_client()
+    client.active_label = "planner"
+    [_ async for _ in client.stream(messages=[], tools=[])]
+    assert client.meter.by_node["planner"].input_tokens == 50
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_http_status_error_is_not_retried():
     """A 5xx is a definite answer, not a transport stall — do not retry it."""
     route = respx.post("https://example.test/v1/chat/completions").mock(

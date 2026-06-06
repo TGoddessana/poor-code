@@ -11,8 +11,9 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from poor_code.provider.events import LLMEvent
+from poor_code.provider.events import LLMEvent, UsageEnded
 from poor_code.provider.route import Route
+from poor_code.provider.usage import TokenMeter
 
 # Timeout defaults. The read timeout is an IDLE timeout: the maximum gap between
 # streamed byte chunks, NOT a cap on total response time. A long-but-progressing
@@ -52,6 +53,11 @@ class LLMClient:
             pool=connect_timeout,
         )
         self._max_retries = max_retries
+        # Token accounting. The client is built once per run, so this meter spans the
+        # whole run. `active_label` is set by the node about to stream (a guarded
+        # one-liner) so usage is attributed per node; None → totals only.
+        self.meter = TokenMeter()
+        self.active_label: str | None = None
 
     @property
     def capabilities(self):
@@ -101,6 +107,8 @@ class LLMClient:
                             except json.JSONDecodeError:
                                 continue
                             for event in parser.parse_chunk(chunk):
+                                if isinstance(event, UsageEnded):
+                                    self.meter.record(event, label=self.active_label)
                                 yielded = True
                                 yield event
                 return

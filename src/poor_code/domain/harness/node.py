@@ -20,6 +20,7 @@ from poor_code.provider.events import (
     ToolCallInputDelta,
     ToolCallStarted,
 )
+from poor_code.provider.usage import tag
 
 
 _M = TypeVar("_M", bound=BaseModel)
@@ -241,6 +242,7 @@ class AgentNode:
         response_format: dict[str, Any] | None = None,
     ) -> str:
         tools = [self.output_tool()]
+        tag(self._llm, self.name)   # attribute this call's tokens to this node
         args_by_call: dict[str, str] = {}
         order: list[str] = []
         content: list[str] = []

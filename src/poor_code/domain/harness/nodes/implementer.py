@@ -18,6 +18,7 @@ from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
     FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted)
+from poor_code.provider.usage import tag
 
 MAX_ITERATIONS = 50
 
@@ -117,6 +118,7 @@ class Implementer:
         text = ""
         pending: dict[str, dict[str, str]] = {}
         order: list[str] = []
+        tag(self._llm, self.name)   # attribute this call's tokens to the implementer
         async for ev in self._llm.stream(messages=messages, tools=self._tools.schemas()):
             match ev:
                 case TextDelta(text=t):

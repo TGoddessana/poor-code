@@ -57,3 +57,24 @@ async def test_dispatch_recovers_fenced_content():
     ctx = NodeContext(state=object(), cancel=asyncio.Event())
     result = await node.run(ctx)
     assert result.output.a == 7
+
+
+class _LabelRecordingLLM:
+    """A meter-bearing client that records the active_label at stream time, the way
+    the real LLMClient attributes usage per node."""
+    def __init__(self):
+        self.active_label = None
+        self.seen_label = "<unset>"
+
+    async def stream(self, messages, tools, response_format=None):
+        self.seen_label = self.active_label
+        yield TextDelta(text='```json\n{"a": 1}\n```')
+        yield FinishedReason(reason="stop")
+
+
+@pytest.mark.asyncio
+async def test_agent_node_tags_client_with_its_name():
+    llm = _LabelRecordingLLM()
+    node = _FenceNode(llm)
+    await node.run(NodeContext(state=object(), cancel=asyncio.Event()))
+    assert llm.seen_label == "fencenode"

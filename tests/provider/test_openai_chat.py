@@ -248,3 +248,27 @@ def test_parse_ollama_fallback_not_triggered_when_usage_present():
     }))
     usage_events = [e for e in events if isinstance(e, UsageEnded)]
     assert usage_events == [UsageEnded(input_tokens=100, output_tokens=50)]
+
+
+def test_parse_usage_chunk_extracts_cached_prompt_tokens():
+    """OpenAI reports prefix-cache hits in usage.prompt_tokens_details.cached_tokens.
+    The parser must surface them so the harness can measure cache effectiveness."""
+    parser = OpenAICompatibleChat().for_stream()
+    events = list(parser.parse_chunk({
+        "choices": [],
+        "usage": {"prompt_tokens": 120, "completion_tokens": 45,
+                  "prompt_tokens_details": {"cached_tokens": 90}},
+    }))
+    assert UsageEnded(input_tokens=120, output_tokens=45,
+                      cached_input_tokens=90) in events
+
+
+def test_parse_usage_chunk_cached_defaults_zero_when_absent():
+    """No prompt_tokens_details → cached_input_tokens is 0, not an error."""
+    parser = OpenAICompatibleChat().for_stream()
+    events = list(parser.parse_chunk({
+        "choices": [],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    }))
+    assert UsageEnded(input_tokens=10, output_tokens=5,
+                      cached_input_tokens=0) in events
