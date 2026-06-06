@@ -24,6 +24,10 @@ from poor_code.domain.tool.registry import ToolRegistry
 
 # inner forward edges — copied verbatim from route.FORWARD for these nodes, EXCEPT
 # ("task_selector","done") is intentionally absent so 'done' exits the subgraph.
+# DRIFT WARNING: these rows are a hand-copy of the inner execution edges that USED to
+# live in route.FORWARD. Those rows have been removed from route.FORWARD (they are now
+# internal to this subgraph). If you change an execution-layer edge, change it HERE —
+# route.FORWARD no longer carries it, so the two can silently drift apart.
 _INNER_FORWARD = {
     ("task_selector", "task"): "composer",
     ("composer", None): "implementer",
@@ -70,7 +74,6 @@ def build_implement_loop(*, llm, cwd) -> CompiledGraph:
         # (every other node forwards onward); signal 'done' to the outer graph.
         return "done"
 
-    loop = CompiledGraph(graph, name="implement_loop",
-                         fork=fork, merge=merge, exit_branch=exit_branch)
-    loop.phase = Phase.IMPLEMENTING   # Driver reads node.phase when advancing the cursor
-    return loop
+    return CompiledGraph(graph, name="implement_loop",
+                         fork=fork, merge=merge, exit_branch=exit_branch,
+                         phase=Phase.IMPLEMENTING)

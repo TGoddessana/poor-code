@@ -67,8 +67,8 @@ class Graph:
     edges: EdgeTable
     entry: str
 
-    def compile(self, *, name: str, fork: Fork, merge: Merge, exit_branch: "ExitBranch | None" = None) -> "CompiledGraph":
-        return CompiledGraph(self, name=name, fork=fork, merge=merge, exit_branch=exit_branch)
+    def compile(self, *, name: str, fork: Fork, merge: Merge, exit_branch: "ExitBranch | None" = None, phase=None) -> "CompiledGraph":
+        return CompiledGraph(self, name=name, fork=fork, merge=merge, exit_branch=exit_branch, phase=phase)
 
 
 class _Merge:
@@ -86,12 +86,13 @@ class CompiledGraph:
     merge 로 결과만 부모에 반영. 안에서 해결 못 한 verdict 는 바깥으로 bubble.
     exit_branch(child)->str|None 로 정상 종료 시 바깥 분기를 실을 수 있다."""
 
-    def __init__(self, graph: "Graph", *, name: str, fork: Fork, merge: Merge, exit_branch: "ExitBranch | None" = None):
+    def __init__(self, graph: "Graph", *, name: str, fork: Fork, merge: Merge, exit_branch: "ExitBranch | None" = None, phase=None):
         self.name = name
         self._graph = graph
         self._fork = fork
         self._merge = merge
         self._exit_branch = exit_branch
+        self.phase = phase   # Driver reads node.phase when advancing the cursor
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         from poor_code.domain.harness.driver import Driver   # lazy: avoid import cycle
