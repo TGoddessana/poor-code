@@ -99,6 +99,11 @@ class NodeContext:
 
 
 @runtime_checkable
+class StateUpdate(Protocol):
+    def apply_to(self, s: "SessionState") -> "SessionState": ...
+
+
+@runtime_checkable
 class Node(Protocol):
     name: str
     async def run(self, ctx: NodeContext) -> NodeResult: ...
