@@ -8,14 +8,14 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Callable
 
-from poor_code.domain.harness.graph import ESCAPE
+from poor_code.domain.harness.graph import ESCAPE, RouteResult
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
     Request, SessionState, TriggerKind, Verdict, VerdictKind,
 )
 
-RouteFn = Callable[[str, NodeResult, SessionState], "str | None"]
+RouteFn = Callable[[str, NodeResult, SessionState], RouteResult]
 
 
 class Driver:
