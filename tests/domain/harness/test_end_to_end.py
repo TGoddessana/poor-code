@@ -170,7 +170,6 @@ def _planning_registry(llm, pm):
     from poor_code.domain.harness.nodes.planner import Planner
     from poor_code.domain.harness.nodes.plan_reviewer import PlanReviewer
     from poor_code.domain.harness.nodes.provisioner import Provisioner
-    from poor_code.domain.harness.nodes.execution import TaskSelector
     from poor_code.domain.tool.registry import ToolRegistry
     from poor_code.domain.tool.read import ReadTool
     from poor_code.domain.tool.grep import GrepTool
@@ -187,8 +186,7 @@ def _planning_registry(llm, pm):
     reg.register(PlanReviewer(llm))
     reg.register(Provisioner(llm, cwd=pm.cwd,  # empty cwd → quick exit; keeps impl boundary
                              tools=ToolRegistry([ReadTool(), GrepTool()])))
-    reg.register(TaskSelector())
-    return reg  # task_selector → composer (unregistered) → park
+    return reg  # provisioner → implement_loop (subgraph, unregistered here) → park at boundary
 
 
 @pytest.mark.asyncio
@@ -248,8 +246,12 @@ async def test_interview_done_flows_through_planner_then_task_selector_advances_
     assert state.plan.tasks[0].id == "t1"
     assert state.plan.tasks[0].edit_scope.editable == ("src/provider/google.py",)
     assert len(state.interview) == 2
-    assert state.cursor.current_node == "composer"   # parked after task_selector (Plan 2: now IMPLEMENTING)
-    assert state.cursor.phase is Phase.IMPLEMENTING
+    # The execution loop is folded into the implement_loop subgraph (unregistered in this
+    # planning-only registry), so the planning chain parks at that boundary instead of at
+    # the old inner 'composer'. Same observation: planning completed, execution boundary
+    # reached. (provisioner is the last registered node, so its PLANNING phase is carried.)
+    assert state.cursor.current_node == "implement_loop"   # parked at the execution boundary
+    assert state.cursor.phase is Phase.PLANNING
 
 
 @pytest.mark.asyncio

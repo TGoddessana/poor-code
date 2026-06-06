@@ -22,23 +22,17 @@ FORWARD: dict[tuple[str, str | None], str] = {
     ("planner", None): "plan_gate",
     ("plan_gate", None): "plan_reviewer",          # gate ADVANCE falls through here
     ("plan_reviewer", None): "provisioner",        # reviewer ADVANCE falls through here
-    ("provisioner", None): "task_selector",        # bootstrap env, then enter impl layer
-    ("task_selector", "task"): "composer",
-    ("task_selector", "done"): "global_validator",
-    ("composer", None): "implementer",
-    ("implementer", None): "eng_gate",
-    ("eng_gate", None): "validator",
-    ("validator", None): "validation_runner",
-    ("validation_runner", "pass"): "completion_gate",
-    ("validation_runner", "fail"): "failure_analyst",
-    ("failure_analyst", None): "completion_gate",
-    ("completion_gate", "done"): "task_selector",
+    ("provisioner", None): "implement_loop",       # bootstrap env, then enter the impl subgraph
+    # The whole task-execution loop is folded into the implement_loop subgraph; its
+    # inner edges live in subgraphs/implement_loop.py, not here. It exits 'done' when
+    # task_selector has no more runnable tasks.
+    ("implement_loop", "done"): "global_validator",
     ("global_validator", "pass"): "reporter",
 }
 
 # back-edge target per broken layer (fail-to-shallowest, design.md §6/§18).
 _SHALLOWEST: dict[Layer, str] = {
-    Layer.IMPLEMENTATION: "implementer",
+    Layer.IMPLEMENTATION: "implement_loop",   # re-enter the execution subgraph (implementer lives inside)
     Layer.PLAN: "planner",
     Layer.UNDERSTANDING: "explorer",
     Layer.ACCEPTANCE: "acceptance_oracle",

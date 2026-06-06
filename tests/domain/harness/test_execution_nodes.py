@@ -225,20 +225,21 @@ from poor_code.domain.harness.route import FORWARD
 
 
 def test_execution_forward_edges_present():
+    # The task-execution loop is folded into the implement_loop subgraph; its inner
+    # edges (task_selector/composer/implementer/.../completion_gate) live inside the
+    # subgraph now, NOT in the outer FORWARD table. The outer table only carries the
+    # entry into and exit out of the subgraph.
     assert FORWARD[("plan_gate", None)] == "plan_reviewer"
     assert FORWARD[("plan_reviewer", None)] == "provisioner"
-    assert FORWARD[("provisioner", None)] == "task_selector"
-    assert FORWARD[("task_selector", "task")] == "composer"
-    assert FORWARD[("task_selector", "done")] == "global_validator"
-    assert FORWARD[("composer", None)] == "implementer"
-    assert FORWARD[("implementer", None)] == "eng_gate"
-    assert FORWARD[("eng_gate", None)] == "validator"
-    assert FORWARD[("validator", None)] == "validation_runner"
-    assert FORWARD[("validation_runner", "pass")] == "completion_gate"
-    assert FORWARD[("validation_runner", "fail")] == "failure_analyst"
-    assert FORWARD[("failure_analyst", None)] == "completion_gate"
-    assert FORWARD[("completion_gate", "done")] == "task_selector"
+    assert FORWARD[("provisioner", None)] == "implement_loop"
+    assert FORWARD[("implement_loop", "done")] == "global_validator"
     assert FORWARD[("global_validator", "pass")] == "reporter"
+    # the inner execution edges are no longer on the outer table
+    for inner in (("task_selector", "task"), ("composer", None), ("implementer", None),
+                  ("eng_gate", None), ("validator", None), ("validation_runner", "pass"),
+                  ("validation_runner", "fail"), ("failure_analyst", None),
+                  ("completion_gate", "done"), ("task_selector", "done")):
+        assert inner not in FORWARD
 
 
 def test_build_registry_has_code_nodes():
@@ -254,9 +255,13 @@ def test_build_registry_has_code_nodes():
     pm = ProjectMap(version=2, generated_at=datetime.now(UTC), cwd=Path("."),
                     files=(), parse_errors=())
     reg = build_default_registry(llm=_LLM(), project_map=pm)
+    # the code nodes now live INSIDE the implement_loop subgraph, not the outer registry
+    loop = reg.get("implement_loop")
+    assert loop is not None
+    inner = loop._graph.nodes
     for n in ("task_selector", "eng_gate", "validation_runner", "completion_gate"):
-        assert reg.get(n) is not None
-        assert reg.get(n).name == n
+        assert inner.get(n) is not None
+        assert inner.get(n).name == n
 
 
 @pytest.mark.asyncio
