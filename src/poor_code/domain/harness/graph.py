@@ -5,9 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from poor_code.domain.harness.node import NodeResult
+from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import Layer, SessionState, VerdictKind
+
+
+Fork = Callable[[SessionState], SessionState]
+Merge = Callable[[SessionState, SessionState], SessionState]
+ExitBranch = Callable[[SessionState], "str | None"]
 
 
 class _Escape:
@@ -62,7 +67,7 @@ class Graph:
     edges: EdgeTable
     entry: str
 
-    def compile(self, *, name, fork, merge, exit_branch=None) -> "CompiledGraph":
+    def compile(self, *, name: str, fork: Fork, merge: Merge, exit_branch: "ExitBranch | None" = None) -> "CompiledGraph":
         return CompiledGraph(self, name=name, fork=fork, merge=merge, exit_branch=exit_branch)
 
 
@@ -81,18 +86,24 @@ class CompiledGraph:
     merge 로 결과만 부모에 반영. 안에서 해결 못 한 verdict 는 바깥으로 bubble.
     exit_branch(child)->str|None 로 정상 종료 시 바깥 분기를 실을 수 있다."""
 
-    def __init__(self, graph: "Graph", *, name: str, fork, merge, exit_branch=None):
+    def __init__(self, graph: "Graph", *, name: str, fork: Fork, merge: Merge, exit_branch: "ExitBranch | None" = None):
         self.name = name
         self._graph = graph
         self._fork = fork
         self._merge = merge
         self._exit_branch = exit_branch
 
-    async def run(self, ctx) -> NodeResult:
+    async def run(self, ctx: NodeContext) -> NodeResult:
         from poor_code.domain.harness.driver import Driver   # lazy: avoid import cycle
         driver = Driver(self._graph.nodes, self._graph.edges.route)
         child = await driver.run(self._fork(ctx.state), ctx.cancel, sink=ctx.sink)
         if driver.last_escape is not None:
             return NodeResult(verdict=driver.last_escape)   # bubble unresolved verdict
+        if child.pending_query is not None:
+            # inner node suspended for user input → bubble the query outward. NOTE: on
+            # resume the outer Driver re-enters this node and fork() restarts the subgraph
+            # from its entry (subgraphs are atomic per design §4.7); shared-scope forks see
+            # the user's answer in parent state, so the re-run is consistent.
+            return NodeResult(query=child.pending_query)
         branch = self._exit_branch(child) if self._exit_branch is not None else None
         return NodeResult(output=_Merge(self._merge, child), branch=branch)

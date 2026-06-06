@@ -71,3 +71,33 @@ async def test_compiled_graph_exit_branch():
     parent = SessionState(cursor=Cursor(phase=Phase.ROUTING, current_node="sub"))
     result = await cg.run(NodeContext(state=parent, cancel=asyncio.Event()))
     assert result.branch == "done"
+
+
+@pytest.mark.asyncio
+async def test_compiled_graph_bubbles_pending_query():
+    from poor_code.domain.session.models import Query, QueryKind
+    class _Ask:
+        name = "inner_ask"; phase = Phase.INTERVIEWING
+        async def run(self, ctx):
+            return NodeResult(query=Query(id="q1", kind=QueryKind.CLARIFY, prompt="why?"))
+    reg = NodeRegistry(); reg.register(_Ask())
+    sub = Graph(nodes=reg, edges=EdgeTable(forward={}, back_edges={}), entry="inner_ask")
+    cg = CompiledGraph(
+        sub, name="sub",
+        fork=lambda p: replace(p, cursor=Cursor(phase=Phase.INTERVIEWING, current_node="inner_ask")),
+        merge=lambda p, c: p)   # merge would DROP the query — bubbling must happen before merge
+    parent = SessionState(cursor=Cursor(phase=Phase.ROUTING, current_node="sub"))
+    result = await cg.run(NodeContext(state=parent, cancel=asyncio.Event()))
+    assert result.query is not None and result.query.id == "q1"
+    assert result.output is None and result.verdict is None
+
+
+@pytest.mark.asyncio
+async def test_compiled_graph_exit_branch_defaults_none():
+    cg = CompiledGraph(
+        _sub_graph(), name="sub",
+        fork=lambda p: replace(p, cursor=Cursor(phase=Phase.PLANNING, current_node="inner_producer")),
+        merge=lambda p, c: replace(p, requirement=c.requirement))   # no exit_branch
+    parent = SessionState(cursor=Cursor(phase=Phase.ROUTING, current_node="sub"))
+    result = await cg.run(NodeContext(state=parent, cancel=asyncio.Event()))
+    assert result.branch is None
