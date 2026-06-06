@@ -21,6 +21,7 @@ from poor_code.domain.session.models import (
     EditScope,
     FileSlot,
     GroundingStatus,
+    Phase,
     Plan,
     SessionState,
     Step,
@@ -146,6 +147,7 @@ class _PlanOut(BaseModel):
 
 class Planner(AgentNode):
     name = "planner"
+    phase = Phase.PLANNING
 
     def __init__(self, llm: _LLMClientLike, project_map: ProjectMap) -> None:
         super().__init__(llm)

@@ -13,7 +13,7 @@ from typing import Any
 from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLike
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.snapshot import GitSnapshot, default_git_dir
-from poor_code.domain.session.models import Attempt, ChangeRecord, SessionState
+from poor_code.domain.session.models import Attempt, ChangeRecord, Phase, SessionState
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
@@ -49,6 +49,7 @@ _SYSTEM = (
 
 class Implementer:
     name = "implementer"
+    phase = Phase.IMPLEMENTING
 
     def __init__(self, llm: _LLMClientLike, cwd: Path, tools: ToolRegistry) -> None:
         self._llm = llm

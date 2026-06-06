@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from poor_code.domain.harness.node import AgentNode
 from poor_code.domain.llm_schema import inline_refs
-from poor_code.domain.session.models import FeedbackEntry, SessionState
+from poor_code.domain.session.models import FeedbackEntry, Phase, SessionState
 
 _TOOL_NAME = "emit_feedback"
 
@@ -35,6 +35,7 @@ class _FeedbackOut(BaseModel):
 
 class FailureAnalyst(AgentNode):
     name = "failure_analyst"
+    phase = Phase.IMPLEMENTING
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         task = next((t for t in (state.plan.tasks if state.plan else ())

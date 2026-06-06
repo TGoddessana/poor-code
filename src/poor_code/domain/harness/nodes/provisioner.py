@@ -25,7 +25,7 @@ from typing import Any
 from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLike
 from poor_code.domain.harness.nodes.execution import run_shell
 from poor_code.domain.harness.orientation import render_position
-from poor_code.domain.session.models import EnvReport
+from poor_code.domain.session.models import EnvReport, Phase
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
@@ -91,6 +91,7 @@ _PROVISION_SYSTEM = (
 
 class Provisioner:
     name = "provisioner"
+    phase = Phase.PLANNING
 
     def __init__(self, llm: _LLMClientLike, cwd: Path, tools: ToolRegistry) -> None:
         self._llm = llm

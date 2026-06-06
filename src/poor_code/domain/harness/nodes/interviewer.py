@@ -19,7 +19,7 @@ from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import (
-    AnsweredQuery, CodeRef, GroundingStatus, Query, QueryKind, Requirement, SessionState,
+    AnsweredQuery, CodeRef, GroundingStatus, Phase, Query, QueryKind, Requirement, SessionState,
 )
 
 _TOOL_NAME = "interview_step"
@@ -74,6 +74,7 @@ class _InterviewStepOut(BaseModel):
 
 class Interviewer(AgentNode):
     name = "interviewer"
+    phase = Phase.INTERVIEWING
 
     def __init__(self, llm: _LLMClientLike, project_map: ProjectMap) -> None:
         super().__init__(llm)

@@ -11,7 +11,7 @@ from typing import Callable
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
-    Phase, Request, SessionState, TriggerKind, Verdict, VerdictKind,
+    Request, SessionState, TriggerKind, Verdict, VerdictKind,
 )
 
 RouteFn = Callable[[str, NodeResult, SessionState], "str | None"]
@@ -59,9 +59,11 @@ class Driver:
             nxt = self._route(node.name, result, state)   # ② ask topology
             if nxt is None:
                 return state                              # terminal STOP
+            nxt_node = self._registry.get(nxt)
+            nxt_phase = getattr(nxt_node, "phase", None) or getattr(node, "phase", None) or state.cursor.phase
             state = state.advancing_to(                   # ③ move cursor + log
                 node=nxt,
-                phase=_phase_for(nxt, state.cursor.phase),
+                phase=nxt_phase,
                 trigger=_trigger_for(result.verdict),
                 reason=_reason_for(node.name, result),
                 ts_iso=datetime.now(UTC).isoformat(),
@@ -74,31 +76,6 @@ class Driver:
         if out is None:
             return state
         return out.apply_to(state)
-
-
-def _phase_for(node: str, current: Phase) -> Phase:
-    return {
-        "explorer": Phase.LOCATING,
-        "locator": Phase.LOCATING,
-        "interviewer": Phase.INTERVIEWING,
-        "acceptance_oracle": Phase.PLANNING,
-        "acceptance_gate": Phase.PLANNING,
-        "acceptance_critic": Phase.PLANNING,
-        "planner": Phase.PLANNING,
-        "plan_gate": Phase.PLANNING,
-        "plan_reviewer": Phase.PLANNING,
-        "provisioner": Phase.PLANNING,
-        "task_selector": Phase.IMPLEMENTING,
-        "composer": Phase.IMPLEMENTING,
-        "implementer": Phase.IMPLEMENTING,
-        "eng_gate": Phase.IMPLEMENTING,
-        "validator": Phase.IMPLEMENTING,
-        "validation_runner": Phase.IMPLEMENTING,
-        "failure_analyst": Phase.IMPLEMENTING,
-        "completion_gate": Phase.IMPLEMENTING,
-        "global_validator": Phase.FINALIZING,
-        "reporter": Phase.FINALIZING,
-    }.get(node, current)
 
 
 def _trigger_for(verdict: Verdict | None) -> TriggerKind:

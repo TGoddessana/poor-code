@@ -228,21 +228,20 @@ async def test_apply_task_context_and_upsert_attempt_and_clears_hint():
 
 
 def test_apply_report_sets_state_report():
-    from poor_code.domain.harness.driver import Driver, _phase_for
+    from poor_code.domain.harness.driver import Driver
     from poor_code.domain.harness.node import NodeResult
-    from poor_code.domain.session.models import Phase, Report, ReportOutcome, SessionState
+    from poor_code.domain.session.models import Report, ReportOutcome, SessionState
 
     r = Report(outcome=ReportOutcome.SUCCEEDED, summary="ok")
     new = Driver._apply(SessionState(), NodeResult(output=r))
     assert new.report is r
-    assert _phase_for("reporter", Phase.IMPLEMENTING) is Phase.FINALIZING
 
 
 def test_apply_delegates_to_output_apply_to():
-    from poor_code.domain.session.models import Report, ReportOutcome, SessionState
-    r = Report(outcome=ReportOutcome.SUCCEEDED, summary="ok")
-    new = Driver._apply(SessionState(), NodeResult(output=r))
-    assert new.report is r
+    from poor_code.domain.session.models import EnvReport, SessionState
+    er = EnvReport()
+    new = Driver._apply(SessionState(), NodeResult(output=er))
+    assert new.env_report is er
 
 
 def test_apply_noop_when_output_none():

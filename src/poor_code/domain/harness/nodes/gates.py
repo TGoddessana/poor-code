@@ -7,7 +7,7 @@ from __future__ import annotations
 from poor_code.domain.harness.grounding import validation_floor_hint
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.session.models import (
-    CodeContext, GroundingStatus, Layer, TriggerKind, Verdict, VerdictKind,
+    CodeContext, GroundingStatus, Layer, Phase, TriggerKind, Verdict, VerdictKind,
 )
 
 _PLACEHOLDER_TOKENS = (
@@ -22,6 +22,7 @@ class UnderstandingGate:
     gate bounce already happened and we still have nothing, escalate to the user."""
 
     name = "understanding_gate"
+    phase = Phase.LOCATING
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         cc = ctx.state.understanding or CodeContext()
@@ -52,6 +53,7 @@ class PlanGate:
     validation instructions, and an acyclic dependency graph."""
 
     name = "plan_gate"
+    phase = Phase.PLANNING
 
     _MAX_EDITABLE = 3
     _REPAIR_BUDGET = 2
@@ -169,6 +171,7 @@ class AcceptanceGate:
     acceptance_critic's job, NOT this gate's."""
 
     name = "acceptance_gate"
+    phase = Phase.PLANNING
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         hint = self._invalid_hint(ctx.state.acceptance)
