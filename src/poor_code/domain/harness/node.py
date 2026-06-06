@@ -141,9 +141,15 @@ class GateNode(ABC):
         if hint is None:
             return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
         if self._repair_count(ctx.state) >= self.repair_budget:
-            return NodeResult(verdict=Verdict(kind=VerdictKind.ESCALATE, query=hint))
+            return NodeResult(verdict=Verdict(
+                kind=VerdictKind.ESCALATE, query=self.escalate_query(hint)))
         return NodeResult(verdict=Verdict(
             kind=VerdictKind.REPAIR, layer=self.layer, hint=hint))
+
+    def escalate_query(self, hint: str) -> str:
+        """ESCALATE 시 사용자에게 보일 메시지. 기본은 실패 hint 그대로.
+        게이트별로 접두 문구가 다르면 오버라이드한다."""
+        return hint
 
     def _repair_count(self, state: SessionState) -> int:
         target = _SHALLOWEST_FOR_COUNTING.get(self.layer)

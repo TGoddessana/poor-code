@@ -5,9 +5,9 @@ back-edge to that layer's shallowest producer (design.md §6/§16/§18)."""
 from __future__ import annotations
 
 from poor_code.domain.harness.grounding import validation_floor_hint
-from poor_code.domain.harness.node import GateNode, NodeContext, NodeResult
+from poor_code.domain.harness.node import GateNode
 from poor_code.domain.session.models import (
-    CodeContext, GroundingStatus, Layer, Phase, TriggerKind, Verdict, VerdictKind,
+    CodeContext, GroundingStatus, Layer, Phase, TriggerKind,
 )
 
 _PLACEHOLDER_TOKENS = (
@@ -32,30 +32,8 @@ class UnderstandingGate(GateNode):
             return None
         return cc.search_notes.strip() or "Explorer found no candidates; widen the search."
 
-    async def run(self, ctx: NodeContext) -> NodeResult:
-        # Original behavior preserved verbatim: the ESCALATE query is a special
-        # message (not the check hint), and the budget-of-1 semantics come from
-        # the _already_repaired boolean below.
-        hint = self.check(ctx.state)
-        if hint is None:
-            return NodeResult(output=None, verdict=Verdict(kind=VerdictKind.ADVANCE))
-        if self._already_repaired(ctx.state):
-            return NodeResult(output=None, verdict=Verdict(
-                kind=VerdictKind.ESCALATE,
-                query="No code candidates found even after re-exploring.",
-            ))
-        return NodeResult(output=None, verdict=Verdict(
-            kind=VerdictKind.REPAIR,
-            layer=Layer.UNDERSTANDING,
-            hint=hint,
-        ))
-
-    @staticmethod
-    def _already_repaired(state) -> bool:
-        return any(
-            t.trigger is TriggerKind.GATE and t.to_node == "explorer"
-            for t in state.history
-        )
+    def escalate_query(self, hint: str) -> str:
+        return "No code candidates found even after re-exploring."
 
 
 class PlanGate(GateNode):
@@ -72,19 +50,8 @@ class PlanGate(GateNode):
     def check(self, state) -> str | None:
         return self._invalid_hint(state.plan)
 
-    async def run(self, ctx: NodeContext) -> NodeResult:
-        # Preserve the original ESCALATE query text exactly (prefixed message,
-        # not the bare check hint that the generic GateNode.run would emit).
-        hint = self.check(ctx.state)
-        if hint is None:
-            return NodeResult(output=None, verdict=Verdict(kind=VerdictKind.ADVANCE))
-        if self._repair_count(ctx.state) >= self.repair_budget:
-            return NodeResult(output=None, verdict=Verdict(
-                kind=VerdictKind.ESCALATE,
-                query=f"Plan is still invalid after replanning: {hint}",
-            ))
-        return NodeResult(output=None, verdict=Verdict(
-            kind=VerdictKind.REPAIR, layer=Layer.PLAN, hint=hint))
+    def escalate_query(self, hint: str) -> str:
+        return f"Plan is still invalid after replanning: {hint}"
 
     def _repair_count(self, state) -> int:
         # Preserve original counting: GATE bounces specifically plan_gate -> planner.
@@ -194,18 +161,8 @@ class AcceptanceGate(GateNode):
     def check(self, state) -> str | None:
         return self._invalid_hint(state.acceptance)
 
-    async def run(self, ctx: NodeContext) -> NodeResult:
-        # Preserve the original ESCALATE query text exactly (prefixed message,
-        # not the bare check hint that the generic GateNode.run would emit).
-        hint = self.check(ctx.state)
-        if hint is None:
-            return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
-        if self._repair_count(ctx.state) >= self.repair_budget:
-            return NodeResult(verdict=Verdict(
-                kind=VerdictKind.ESCALATE,
-                query=f"Acceptance check still ill-formed after redesign: {hint}"))
-        return NodeResult(verdict=Verdict(
-            kind=VerdictKind.REPAIR, layer=Layer.ACCEPTANCE, hint=hint))
+    def escalate_query(self, hint: str) -> str:
+        return f"Acceptance check still ill-formed after redesign: {hint}"
 
     def _repair_count(self, state) -> int:
         return _acceptance_repair_count(state)
