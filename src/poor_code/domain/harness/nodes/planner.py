@@ -32,6 +32,20 @@ from poor_code.domain.session.models import (
 
 _TOOL_NAME = "emit_plan"
 
+
+def _derive_editable(task: "_TaskOut") -> tuple[str, ...]:
+    """FM1 — compute a task's editable scope in CODE rather than trusting the weak
+    model to keep edit_scope.editable in sync with its steps. A CREATE task names the
+    new file in its steps but routinely omits it from editable, which made plan_gate's
+    `step.file not in editable` reject every create-from-scratch task (openssl, org
+    json, greenfield). editable = declared editable ∪ the files this task's own steps
+    write (deterministic, per-task, order-preserving, deduped). The gate stays dumb."""
+    editable: list[str] = []
+    for path in (*task.edit_scope.editable, *(s.file for s in task.steps)):
+        if path and path not in editable:
+            editable.append(path)
+    return tuple(editable)
+
 _SYSTEM = (
     "You are the Planner. Convert the binding Requirement into the SMALLEST set of "
     "PATCH-SIZED engineering Tasks that delivers it.\n"
@@ -241,7 +255,7 @@ class Planner(AgentNode):
             purpose=task.purpose,
             description=task.description,
             edit_scope=EditScope(
-                editable=tuple(task.edit_scope.editable),
+                editable=_derive_editable(task),
                 readonly=tuple(task.edit_scope.readonly),
                 forbidden=tuple(task.edit_scope.forbidden),
             ),
