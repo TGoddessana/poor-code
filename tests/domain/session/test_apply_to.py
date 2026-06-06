@@ -44,7 +44,12 @@ def test_acceptance_apply_to():
 
 
 def test_selected_task_apply_to_uses_own_task_id():
-    s = SelectedTask(task_id="t1").apply_to(_base())
+    # Build a base where the task starts PENDING so the ACTIVE assertion is load-bearing.
+    pending_plan = Plan(tasks=(Task(id="t1", title="A", purpose="p",
+                                   status=TaskStatus.PENDING),))
+    base = SessionState(plan=pending_plan,
+                        cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="x"))
+    s = SelectedTask(task_id="t1").apply_to(base)
     assert s.cursor.task_id == "t1"
     assert [t for t in s.plan.tasks if t.id == "t1"][0].status is TaskStatus.ACTIVE
 

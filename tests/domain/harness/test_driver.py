@@ -236,3 +236,16 @@ def test_apply_report_sets_state_report():
     new = Driver._apply(SessionState(), NodeResult(output=r))
     assert new.report is r
     assert _phase_for("reporter", Phase.IMPLEMENTING) is Phase.FINALIZING
+
+
+def test_apply_delegates_to_output_apply_to():
+    from poor_code.domain.session.models import Report, ReportOutcome, SessionState
+    r = Report(outcome=ReportOutcome.SUCCEEDED, summary="ok")
+    new = Driver._apply(SessionState(), NodeResult(output=r))
+    assert new.report is r
+
+
+def test_apply_noop_when_output_none():
+    from poor_code.domain.session.models import SessionState
+    s = SessionState()
+    assert Driver._apply(s, NodeResult(output=None)) is s
