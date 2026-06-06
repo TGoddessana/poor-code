@@ -29,12 +29,15 @@ DEFAULT_WRITE_TIMEOUT = 30.0
 # yielded (a stalled connect / first token). Once we have emitted events the
 # stream is half-consumed downstream and cannot be safely restarted.
 DEFAULT_MAX_RETRIES = 2
-# Total wall-clock budget for ONE stream() call. The idle (read) timeout only
-# bounds a single inter-chunk gap; a call that keeps emitting just-under-idle
-# chunks can still run for many minutes (benchmark logs showed 511s calls killing
-# tasks at the 1800s wall). This caps the cumulative duration. It is INDEPENDENT
-# of the idle timeout: a single stall trips read=120s, slow accumulation trips this.
-DEFAULT_CALL_TIMEOUT = 300.0
+# Total wall-clock budget for ONE stream() call — a RUNAWAY backstop, not a latency
+# knob. The idle (read) timeout already catches a truly hung call (no bytes for 120s);
+# this only bounds a call that keeps trickling chunks forever. It MUST sit well above a
+# low-param model's legitimate call duration: benchmarks measured real, progressing
+# calls at 468-676s, so a cap near those (the old 300s) killed legitimate work and made
+# the harness ABANDON whole runs on the first slow call. 900s clears observed-legit with
+# margin while still bounding a single runaway far under a typical multi-call agent wall.
+# Tune per deployment via POOR_CODE_CALL_TIMEOUT.
+DEFAULT_CALL_TIMEOUT = 900.0
 
 
 class LLMCallTimeout(Exception):
