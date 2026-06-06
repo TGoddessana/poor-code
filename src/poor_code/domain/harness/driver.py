@@ -8,6 +8,7 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Callable
 
+from poor_code.domain.harness.graph import ESCAPE
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
@@ -27,10 +28,12 @@ class Driver:
         self._registry = registry
         self._route = route
         self._on_step = on_step or (lambda _s: None)
+        self.last_escape: Verdict | None = None
 
     async def run(
         self, state: SessionState, cancel: asyncio.Event, *, sink: object | None = None
     ) -> SessionState:
+        self.last_escape = None
         while True:
             assert state.cursor is not None, "Driver requires a cursor"
             node = self._registry.get(state.cursor.current_node)
@@ -57,6 +60,9 @@ class Driver:
                 state = state.with_repair_hint(v.hint)     # carry hint to the re-entered node
 
             nxt = self._route(node.name, result, state)   # ② ask topology
+            if nxt is ESCAPE:
+                self.last_escape = result.verdict          # unresolved here → bubble to outer graph
+                return state
             if nxt is None:
                 return state                              # terminal STOP
             nxt_node = self._registry.get(nxt)
