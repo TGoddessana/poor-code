@@ -3,9 +3,10 @@ It never writes to the store and never decides the next hop (route() does)."""
 from __future__ import annotations
 
 import asyncio
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Protocol, TypeVar, runtime_checkable
+from typing import Any, AsyncIterator, Protocol, TypeVar, Union, get_args, get_origin, runtime_checkable
 
 from pydantic import BaseModel, ValidationError
 
@@ -60,11 +61,78 @@ def strip_code_fence(text: str) -> str:
     return s
 
 
+def _list_item_type(annotation: Any) -> type | None:
+    """If `annotation` denotes a list (incl. Optional[list[...]]), return its item
+    type (the inner pydantic model, when it is one), else None for non-list fields."""
+    origin = get_origin(annotation)
+    if origin in (list, tuple):
+        args = get_args(annotation)
+        return args[0] if args else None
+    if origin is Union:  # Optional[list[X]] / list[X] | None
+        for arg in get_args(annotation):
+            if get_origin(arg) in (list, tuple):
+                args = get_args(arg)
+                return args[0] if args else type(None)
+    return None
+
+
+def _looks_like_item(val: Any, item_t: type | None) -> bool:
+    """True when `val` is itself one item of the list (its keys belong to the item
+    model) rather than a `{wrapper_key: ...}` envelope around the list."""
+    if isinstance(val, dict) and isinstance(item_t, type) and issubclass(item_t, BaseModel):
+        return bool(val) and set(val).issubset(set(item_t.model_fields))
+    return False
+
+
+def _as_list(val: Any, item_t: type | None) -> list:
+    """Coerce a value emitted where a list was expected into a list.
+    A bare item object -> a one-element list; `{wrapper: [...]}` -> the inner list
+    (the documented weak-model deformation); `{wrapper: obj}` -> [obj]; scalar -> [scalar]."""
+    if isinstance(val, list):
+        return val
+    if _looks_like_item(val, item_t):
+        return [val]
+    if isinstance(val, dict):
+        if len(val) == 1:
+            inner = next(iter(val.values()))
+            return inner if isinstance(inner, list) else [inner]
+        return [val]
+    return [val]
+
+
+def coerce_to_schema(data: Any, model: type[BaseModel]) -> Any:
+    """Deterministically repair the SHAPE of weak-model output to match `model`,
+    recursively. Only list-typed fields are reshaped (the failure class Ollama
+    Cloud produces without constrained decoding); everything else is left for
+    validation to accept or reject. Idempotent on already-correct data."""
+    if not isinstance(data, dict):
+        return data
+    out = dict(data)
+    for name, field in model.model_fields.items():
+        if name not in out:
+            continue
+        item_t = _list_item_type(field.annotation)
+        if item_t is not None:
+            items = _as_list(out[name], item_t)
+            if isinstance(item_t, type) and issubclass(item_t, BaseModel):
+                items = [coerce_to_schema(v, item_t) for v in items]
+            out[name] = items
+        elif isinstance(field.annotation, type) and issubclass(field.annotation, BaseModel):
+            out[name] = coerce_to_schema(out[name], field.annotation)
+    return out
+
+
 def validate_output(model_cls: type[_M], raw: str, *, node: str) -> _M:
     """Validate a node's structured-output JSON against its schema, re-raising
-    any failure as StructuredOutputError with the raw payload attached."""
+    any failure as StructuredOutputError with the raw payload attached. The payload
+    is first SHAPE-coerced (coerce_to_schema) so the common weak-model deformation
+    (a list emitted as a singular-key object) validates instead of crashing."""
     try:
-        return model_cls.model_validate_json(raw)
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise StructuredOutputError(node, raw, f"not valid JSON: {e}") from e
+    try:
+        return model_cls.model_validate(coerce_to_schema(data, model_cls))
     except ValidationError as e:
         detail = "; ".join(
             f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['msg']}"

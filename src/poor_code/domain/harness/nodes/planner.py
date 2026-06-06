@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from poor_code.domain.harness.node import AgentNode, _LLMClientLike
+from poor_code.domain.harness.node import AgentNode, _LLMClientLike, validate_output
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
@@ -205,7 +205,10 @@ class Planner(AgentNode):
         return _PlanOut
 
     def parse(self, args_json: str) -> Plan:
-        out = _PlanOut.model_validate_json(args_json)
+        # validate_output shape-coerces the weak-model deformation (e.g. steps emitted
+        # as {"step":[...]}) and wraps any failure as StructuredOutputError — never a
+        # raw ValidationError, which used to crash the whole run with repair count 0.
+        out = validate_output(_PlanOut, args_json, node=self.name)
         tasks = tuple(self._to_task(i, task) for i, task in enumerate(out.tasks, start=1))
         deps = tuple(
             Dependency(task_id=dep.task_id, depends_on=dep.depends_on)

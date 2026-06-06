@@ -9,12 +9,22 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Callable
 
+from pydantic import ValidationError
+
 from poor_code.domain.harness.graph import ESCAPE, RouteResult
-from poor_code.domain.harness.node import NodeContext, NodeResult
+from poor_code.domain.harness.node import NodeContext, NodeResult, StructuredOutputError
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.session.models import (
     Request, SessionState, TriggerKind, Verdict, VerdictKind,
 )
+from poor_code.provider.client import LLMCallTimeout
+
+# Recoverable INFERENCE failures: a weak model produced unusable output, or a call
+# blew its wall-clock budget. These are expected at the tail of a low-param run and
+# must NOT crash the process — the Driver turns them into a graceful ESCALATE so the
+# session still produces a report. Programming errors (KeyError, AssertionError, …)
+# are deliberately NOT caught here; they must surface.
+_RECOVERABLE_INFERENCE_ERRORS = (StructuredOutputError, LLMCallTimeout, ValidationError)
 
 RouteFn = Callable[[str, NodeResult, SessionState], RouteResult]
 
@@ -45,7 +55,16 @@ class Driver:
 
             if sink is not None:
                 sink.node_entered(node.name, state.cursor.phase.value)
-            result = await node.run(NodeContext(state=state, cancel=cancel, sink=sink))
+            try:
+                result = await node.run(NodeContext(state=state, cancel=cancel, sink=sink))
+            except _RECOVERABLE_INFERENCE_ERRORS as exc:
+                # A bad LLM call after the node's own re-roll budget is exhausted, or a
+                # call that blew its time budget. Escalate gracefully instead of dying.
+                result = NodeResult(verdict=Verdict(
+                    kind=VerdictKind.ESCALATE,
+                    query=f"{node.name} failed: {type(exc).__name__}: {str(exc)[:300]}"))
+                if sink is not None and hasattr(sink, "node_repaired"):
+                    sink.node_repaired(node.name, f"escalate: {type(exc).__name__}")
             if result.query is not None:                   # suspend: await user
                 state = state.with_pending_query(result.query)
                 self._on_step(state)                       # checkpoint with pending query
