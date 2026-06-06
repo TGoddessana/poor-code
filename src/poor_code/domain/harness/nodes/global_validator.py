@@ -13,22 +13,29 @@ from pydantic import BaseModel
 from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _LLMClientLike
 from poor_code.domain.harness.nodes.execution import run_shell
 from poor_code.domain.llm_schema import inline_refs
+from poor_code.domain.harness.node import validate_output
 from poor_code.domain.session.models import (
-    AttemptStatus, ChangeSet, Layer, Phase, SessionState, Verdict, VerdictKind)
+    AttemptStatus, ChangeSet, Layer, Phase, SessionState, TaskReopened, TaskStatus,
+    Verdict, VerdictKind)
 
-MAX_FIXUPS = 2
+MAX_FIXUPS = 2          # full re-plan fixups (the heavy fallback) before escalate
+MAX_SCOPED_FIXUPS = 2   # scoped (single-task) repairs before falling back to re-plan
 _TOOL_NAME = "analyze_regression"
 
 _SYSTEM = (
     "You are the Global Validator's analyst. Some task validations failed after all "
     "tasks were implemented — a regression. From the aggregate change set and the "
-    "failing output, identify the likely culprit change and give a concrete hint for "
-    "the planner to fix it. You do not bind pass/fail. Call analyze_regression once."
+    "failing output, identify the likely culprit and give a concrete fix hint. Set "
+    "culprit_task_id to the SINGLE task id (e.g. 't2') whose change caused the failure "
+    "when you can pin it to one — that task alone is re-implemented (cheap). Leave it "
+    "empty only when the failure genuinely needs the whole plan rethought. You do not "
+    "bind pass/fail. Call analyze_regression once."
 )
 
 
 class _AnalyzeOut(BaseModel):
     hint: str = ""
+    culprit_task_id: str = ""
 
 
 def build_changeset(state: SessionState) -> ChangeSet:
@@ -70,19 +77,46 @@ class GlobalValidator(AgentNode):
         if not failures:
             return NodeResult(branch="pass")
 
-        fixups = sum(1 for tr in ctx.state.history
-                     if tr.from_node == "global_validator" and tr.to_node == "planner")
-        if fixups >= MAX_FIXUPS:
+        # Repair hierarchy: scoped single-task repairs first (cheap), then full re-plan
+        # fixups (heavy), then escalate to the user. The heavy fallback being exhausted
+        # is the terminal condition — scoped repairs precede it and don't count here.
+        plan_fixups = self._count(ctx.state, "planner")
+        if plan_fixups >= MAX_FIXUPS:
             summary = "; ".join(f"{tid} exit {code}" for tid, code, _ in failures)
             return NodeResult(verdict=Verdict(
                 kind=VerdictKind.ESCALATE,
-                query=f"Global validation still failing after {MAX_FIXUPS} fixups: {summary}"))
+                query=f"Global validation still failing after fixups: {summary}"))
 
         self._failures = failures
         self._changeset = build_changeset(ctx.state)
-        args_json = await self._dispatch(ctx)
-        hint = _AnalyzeOut.model_validate_json(args_json).hint or "Global validation failed."
+        out = validate_output(_AnalyzeOut, await self._dispatch(ctx), node=self.name)
+        hint = out.hint or "Global validation failed."
+
+        # Scoped repair: if the analyst pinned a single DONE task as the culprit and we
+        # still have scoped budget, reopen ONLY it and bounce to the implement loop —
+        # not a whole re-plan. This is the fix-git case: a one-line bashism should not
+        # restart plan→reviewer→provisioner→all-tasks and die on the wall.
+        scoped = self._count(ctx.state, "implement_loop")
+        culprit = out.culprit_task_id.strip()
+        if culprit and scoped < MAX_SCOPED_FIXUPS and self._is_done_task(ctx.state, culprit):
+            return NodeResult(
+                output=TaskReopened(task_id=culprit),
+                verdict=Verdict(kind=VerdictKind.REPAIR, layer=Layer.IMPLEMENTATION,
+                                hint=hint))
+
+        # Fallback: full re-plan (bounded by MAX_FIXUPS above).
         return NodeResult(verdict=Verdict(kind=VerdictKind.REPAIR, layer=Layer.PLAN, hint=hint))
+
+    @staticmethod
+    def _count(state: SessionState, to_node: str) -> int:
+        return sum(1 for tr in state.history
+                   if tr.from_node == "global_validator" and tr.to_node == to_node)
+
+    @staticmethod
+    def _is_done_task(state: SessionState, task_id: str) -> bool:
+        plan = state.plan
+        return plan is not None and any(
+            t.id == task_id and t.status is TaskStatus.DONE for t in plan.tasks)
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         fails = "\n\n".join(

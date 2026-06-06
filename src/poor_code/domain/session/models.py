@@ -528,6 +528,17 @@ class SelectedTask:
 
 
 @dataclass(frozen=True, slots=True)
+class TaskReopened:
+    """global_validator scoped-repair signal (FM3): a finished task is the regression
+    culprit — reopen it (DONE -> PENDING) so the implement loop re-runs ONLY it,
+    instead of a full re-plan. control-only (status is the persisted state)."""
+    task_id: str
+
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        return s.with_task_status(self.task_id, TaskStatus.PENDING)
+
+
+@dataclass(frozen=True, slots=True)
 class TaskCompleted:
     """completion_gate → Driver 제어 신호: 이 Task가 검증 통과로 완료됨.
     control-only — store에 직렬화하지 않음(상태는 Task.status/Attempt.status로 영속)."""
