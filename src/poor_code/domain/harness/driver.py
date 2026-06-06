@@ -1,7 +1,8 @@
 # src/poor_code/domain/harness/driver.py
-"""Driver — the dumb walker. Reads cursor → runs node → applies output (sole
-writer) → asks route() for next → advances cursor → checkpoints. Smartness lives
-in nodes/gates/route(), never here."""
+"""Driver — the dumb walker. Reads cursor → runs node → applies the node's output
+(via output.apply_to) → asks route() for next → advances cursor → checkpoints. The
+Driver is the only place state is reassigned, but it holds no knowledge of output
+types or topology — that lives in the outputs (apply_to), nodes/gates, and route()."""
 from __future__ import annotations
 
 import asyncio
@@ -49,7 +50,7 @@ class Driver:
                 state = state.with_pending_query(result.query)
                 self._on_step(state)                       # checkpoint with pending query
                 return state                               # cursor stays → re-entrant resume
-            state = self._apply(state, result)            # ① write (sole writer)
+            state = self._apply(state, result)            # ① apply output (output.apply_to)
             v = result.verdict
             if v is not None and v.kind in (VerdictKind.REPAIR, VerdictKind.ESCALATE):
                 detail = v.hint or v.query                 # REPAIR→hint, ESCALATE→query

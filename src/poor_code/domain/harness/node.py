@@ -112,8 +112,10 @@ class Node(Protocol):
     async def run(self, ctx: NodeContext) -> NodeResult: ...
 
 
-# layer → that layer's shallowest producer (mirrors route._SHALLOWEST). Used by the
-# default repair-bounce counter. Kept here so GateNode is self-contained.
+# layer → the history-logged node a repair bounce targets, used by the default
+# repair-bounce counter. Close to route._SHALLOWEST but NOT identical: this counts the
+# node that actually appears in history (e.g. "implementer"), whereas route's back-edge
+# may target a wrapping subgraph ("implement_loop"). Kept here so GateNode is self-contained.
 _SHALLOWEST_FOR_COUNTING = {
     Layer.IMPLEMENTATION: "implementer",
     Layer.PLAN: "planner",

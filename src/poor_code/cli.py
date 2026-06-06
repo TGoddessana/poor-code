@@ -10,9 +10,8 @@ from pathlib import Path
 
 from poor_code.app import PoorCodeApp
 from poor_code.domain.agent import Agent
-from poor_code.domain.harness import build_default_registry
+from poor_code.domain.harness import build_default_graph
 from poor_code.domain.harness.driver import Driver
-from poor_code.domain.harness.route import route
 from poor_code.domain.project_map import ProjectMap, ProjectMapStore
 from poor_code.domain.session import SessionService
 from poor_code.domain.session.store import SessionStore
@@ -97,9 +96,9 @@ def _load_project_map(cwd: Path) -> ProjectMap:
 
 def _make_driver_factory(project_map: ProjectMap, session: SessionService):
     def make(llm):
-        registry = build_default_registry(
+        graph = build_default_graph(
             llm=llm, project_map=project_map, agent=_build_agent(session, llm))
-        return Driver(registry, route)
+        return Driver(graph.nodes, graph.edges.route)
     return make
 
 
