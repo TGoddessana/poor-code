@@ -49,12 +49,27 @@ def test_full_auto_acceptance_gate_skips_critic_to_planner():
     assert route("acceptance_gate", _advance(), state) == "planner"
 
 
-def test_full_auto_does_not_alter_unrelated_edges():
-    # The redirects are surgical: only the interviewer entry and the critic edge move.
-    state = SessionState(policy=Policy.FULL_AUTO)
+def test_supervised_plan_gate_advances_to_plan_reviewer():
+    # TUI: the decomposition critic runs after the structural gate.
+    state = SessionState(policy=Policy.SUPERVISED)
     assert route("plan_gate", _advance(), state) == "plan_reviewer"
+
+
+def test_full_auto_plan_gate_skips_reviewer_to_provisioner():
+    # Headless: the weak LLM plan critic diverges (false-positive replans → burns the
+    # latency budget — weak-verifier-divergence, 2404.17140). Skip it; the deterministic
+    # PlanGate (the strong verifier) already passed. Mirrors the acceptance_critic skip.
+    state = SessionState(policy=Policy.FULL_AUTO)
+    assert route("plan_gate", _advance(), state) == "provisioner"
+
+
+def test_full_auto_does_not_alter_unrelated_edges():
+    # The redirects are surgical: interviewer entry, the acceptance critic, and the
+    # plan reviewer move; nothing else.
+    state = SessionState(policy=Policy.FULL_AUTO)
     assert route("plan_reviewer", _advance(), state) == "provisioner"
     assert route("acceptance_oracle", _advance(), state) == "acceptance_gate"
+    assert route("provisioner", _advance(), state) == "implement_loop"
 
 
 def test_full_auto_understanding_repair_still_loops_to_explorer():

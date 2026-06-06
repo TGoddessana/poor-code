@@ -49,9 +49,15 @@ _SHALLOWEST: dict[Layer, str] = {
 # the global_validator->planner corrective cycle. acceptance_oracle (like the planner)
 # synthesizes its requirement from the request when state.requirement is absent.
 # Mirrors the old inline route() special-case exactly.
+# FULL_AUTO also skips the LLM plan_reviewer: a weak self-verifier diverges via
+# false-positive replans (2404.17140 weak-verifier-divergence — the report's load-
+# bearing finding) and each pass is a full LLM call against the latency wall. The
+# deterministic PlanGate (a strong, exact verifier) already ran; decomposition-quality
+# judgement is exactly where the weak critic hurts. SUPERVISED keeps it (human present).
 _FULL_AUTO_SKIP = Rewrite(
     when=lambda s: s.policy is Policy.FULL_AUTO,
-    remap={"interviewer": "acceptance_oracle", "acceptance_critic": "planner"},
+    remap={"interviewer": "acceptance_oracle", "acceptance_critic": "planner",
+           "plan_reviewer": "provisioner"},
 )
 
 DEFAULT_EDGES = EdgeTable(
