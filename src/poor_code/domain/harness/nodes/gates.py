@@ -5,7 +5,7 @@ back-edge to that layer's shallowest producer (design.md §6/§16/§18)."""
 from __future__ import annotations
 
 from poor_code.domain.harness.grounding import validation_floor_hint
-from poor_code.domain.harness.node import NodeContext, NodeResult
+from poor_code.domain.harness.node import GateNode, NodeContext, NodeResult
 from poor_code.domain.session.models import (
     CodeContext, GroundingStatus, Layer, Phase, TriggerKind, Verdict, VerdictKind,
 )
@@ -16,24 +16,34 @@ _PLACEHOLDER_TOKENS = (
 )
 
 
-class UnderstandingGate:
+class UnderstandingGate(GateNode):
     """Guards the understanding layer: a CodeContext with no candidates means the
     Locator found nothing groundable. Bounce back to it once (repair); if a prior
     gate bounce already happened and we still have nothing, escalate to the user."""
 
     name = "understanding_gate"
+    layer = Layer.UNDERSTANDING
+    repair_budget = 1
     phase = Phase.LOCATING
 
-    async def run(self, ctx: NodeContext) -> NodeResult:
-        cc = ctx.state.understanding or CodeContext()
+    def check(self, state) -> str | None:
+        cc = state.understanding or CodeContext()
         if cc.candidates or cc.grounding is GroundingStatus.GREENFIELD:
+            return None
+        return cc.search_notes.strip() or "Explorer found no candidates; widen the search."
+
+    async def run(self, ctx: NodeContext) -> NodeResult:
+        # Original behavior preserved verbatim: the ESCALATE query is a special
+        # message (not the check hint), and the budget-of-1 semantics come from
+        # the _already_repaired boolean below.
+        hint = self.check(ctx.state)
+        if hint is None:
             return NodeResult(output=None, verdict=Verdict(kind=VerdictKind.ADVANCE))
         if self._already_repaired(ctx.state):
             return NodeResult(output=None, verdict=Verdict(
                 kind=VerdictKind.ESCALATE,
                 query="No code candidates found even after re-exploring.",
             ))
-        hint = cc.search_notes.strip() or "Explorer found no candidates; widen the search."
         return NodeResult(output=None, verdict=Verdict(
             kind=VerdictKind.REPAIR,
             layer=Layer.UNDERSTANDING,
@@ -48,27 +58,40 @@ class UnderstandingGate:
         )
 
 
-class PlanGate:
+class PlanGate(GateNode):
     """Guards the planning layer: a Plan must have bounded tasks, edit scope,
     validation instructions, and an acyclic dependency graph."""
 
     name = "plan_gate"
+    layer = Layer.PLAN
+    repair_budget = 2
     phase = Phase.PLANNING
 
     _MAX_EDITABLE = 3
-    _REPAIR_BUDGET = 2
+
+    def check(self, state) -> str | None:
+        return self._invalid_hint(state.plan)
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        hint = self._invalid_hint(ctx.state.plan)
+        # Preserve the original ESCALATE query text exactly (prefixed message,
+        # not the bare check hint that the generic GateNode.run would emit).
+        hint = self.check(ctx.state)
         if hint is None:
             return NodeResult(output=None, verdict=Verdict(kind=VerdictKind.ADVANCE))
-        if self._repair_count(ctx.state) >= self._REPAIR_BUDGET:
+        if self._repair_count(ctx.state) >= self.repair_budget:
             return NodeResult(output=None, verdict=Verdict(
                 kind=VerdictKind.ESCALATE,
                 query=f"Plan is still invalid after replanning: {hint}",
             ))
         return NodeResult(output=None, verdict=Verdict(
             kind=VerdictKind.REPAIR, layer=Layer.PLAN, hint=hint))
+
+    def _repair_count(self, state) -> int:
+        # Preserve original counting: GATE bounces specifically plan_gate -> planner.
+        return sum(1 for t in state.history
+                   if t.trigger is TriggerKind.GATE
+                   and t.from_node == "plan_gate"
+                   and t.to_node == "planner")
 
     @classmethod
     def _invalid_hint(cls, plan) -> str | None:
@@ -120,13 +143,6 @@ class PlanGate:
         return None
 
     @staticmethod
-    def _repair_count(state) -> int:
-        return sum(1 for t in state.history
-                   if t.trigger is TriggerKind.GATE
-                   and t.from_node == "plan_gate"
-                   and t.to_node == "planner")
-
-    @staticmethod
     def _has_cycle(ids, deps) -> bool:
         graph = {task_id: [] for task_id in ids}
         for dep in deps:
@@ -165,24 +181,34 @@ def _acceptance_repair_count(state) -> int:
                if t.trigger is TriggerKind.GATE and t.to_node == "acceptance_oracle")
 
 
-class AcceptanceGate:
+class AcceptanceGate(GateNode):
     """Deterministic floor on the AcceptanceSpec: it must have at least one check and
     each check must be a runnable command (not prose). Task-DEPENDENT adequacy is the
     acceptance_critic's job, NOT this gate's."""
 
     name = "acceptance_gate"
+    layer = Layer.ACCEPTANCE
+    repair_budget = ACCEPTANCE_REPAIR_BUDGET
     phase = Phase.PLANNING
 
+    def check(self, state) -> str | None:
+        return self._invalid_hint(state.acceptance)
+
     async def run(self, ctx: NodeContext) -> NodeResult:
-        hint = self._invalid_hint(ctx.state.acceptance)
+        # Preserve the original ESCALATE query text exactly (prefixed message,
+        # not the bare check hint that the generic GateNode.run would emit).
+        hint = self.check(ctx.state)
         if hint is None:
             return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
-        if _acceptance_repair_count(ctx.state) >= ACCEPTANCE_REPAIR_BUDGET:
+        if self._repair_count(ctx.state) >= self.repair_budget:
             return NodeResult(verdict=Verdict(
                 kind=VerdictKind.ESCALATE,
                 query=f"Acceptance check still ill-formed after redesign: {hint}"))
         return NodeResult(verdict=Verdict(
             kind=VerdictKind.REPAIR, layer=Layer.ACCEPTANCE, hint=hint))
+
+    def _repair_count(self, state) -> int:
+        return _acceptance_repair_count(state)
 
     @staticmethod
     def _invalid_hint(spec) -> str | None:
