@@ -4,11 +4,17 @@ deps, no built C-extensions); without provisioning every validation dies 'pytest
 found' / 'No module named ...' and the model gets zero feedback to refine a near-correct
 fix — and (observed) wastes its budget hand-faking stub modules to satisfy imports.
 
-Two stages, modeled on the Explorer: ① a bash/read tool loop that detects the project's
-build/test setup and actually installs it, then ② an emit_env_report extraction. The
-resulting EnvReport is injected forward into the implementer so it does not re-discover
-(or fake) the test setup. Best effort by contract: it NEVER fails the run — on a missing
-structured report it falls back to a deterministic seed EnvReport (ready=False)."""
+This is a genuine AGENT, not a script: given the task, the cwd, and a strong prompt, the
+model uses bash/read to PERCEIVE the project's real toolchain (pip / uv / poetry / make,
+C-extensions, system packages) and INSTALL everything the downstream development needs,
+then verifies the tests actually run. We do not hardcode the steps — the model decides.
+
+The forward handoff (EnvReport → implementer) is derived DETERMINISTICALLY, not by a
+second LLM 'emit' call. The earlier emit stage failed 0/4 on weak models because it was
+force-fed thousands of lines of pip/apt logs as context. Instead we (a) capture the bash
+commands the agent actually ran as `install_steps`, and (b) PROBE the test runner
+(`pytest --co`) to set `ready` — measured truth, never a flaky model summary. The agent's
+own closing summary becomes `notes`. Best effort by contract: it NEVER fails the run."""
 from __future__ import annotations
 
 import asyncio
@@ -16,103 +22,91 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
-
-from poor_code.domain.harness.node import (
-    AgentNode, NodeContext, NodeResult, StructuredOutputError, _LLMClientLike,
-    validate_output,
-)
+from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLike
+from poor_code.domain.harness.nodes.execution import run_shell
 from poor_code.domain.harness.orientation import render_position
-from poor_code.domain.llm_schema import inline_refs
-from poor_code.domain.session.models import EnvReport, SessionState
+from poor_code.domain.session.models import EnvReport
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
     FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted,
 )
 
-_TOOL_NAME = "emit_env_report"
 MAX_ITERATIONS = 12
+_TOOL_TAIL = 1600  # tool output fed BACK to the model is tailed: weak models drown in full pip logs
+_TEST_COMMAND = "python -m pytest -q"
+_PROBE = "python -m pytest --co -q"  # collection-only: imports resolve + runner is found
+_PROBE_TIMEOUT = 300
 
-# Deterministic seed/fallback for a standard Python project — offered to the agent as a
-# default and used verbatim when the agent cannot emit a structured report.
+# Deterministic seed for a standard Python project — offered to the agent in its prompt as
+# a sensible default. The agent is free to ignore it and use the project's real toolchain.
 _ENSURE_CC = (
     "command -v cc >/dev/null 2>&1 || command -v gcc >/dev/null 2>&1 || "
     "(apt-get update -qq && apt-get install -y -qq --no-install-recommends "
     "gcc g++ python3-dev) || true"
 )
+_NUMPY = "python -m pip install -q numpy"  # present at BUILD time for C-extension projects
 _EDITABLE_INSTALL = (
     "python -m pip install -q -e '.[test]' || "
     "python -m pip install -q -e '.[dev]' || "
-    "python -m pip install -q -e . || true"
+    "python -m pip install -q -e ."
 )
-_ENSURE_PYTEST = "python -m pip install -q pytest || true"
+
+
+def _has_python_project(cwd: Path) -> bool:
+    return (cwd / "pyproject.toml").exists() or (cwd / "setup.py").exists()
 
 
 def plan_commands(cwd: Path) -> list[str]:
-    """Deterministic seed bootstrap commands for the project rooted at `cwd`. Empty
-    when there is no Python project marker (greenfield / non-Python)."""
-    if (cwd / "pyproject.toml").exists() or (cwd / "setup.py").exists():
-        return [_ENSURE_CC, _EDITABLE_INSTALL, _ENSURE_PYTEST]
+    """Deterministic seed bootstrap commands for a standard Python project rooted at
+    `cwd`, used only to seed the agent's prompt. Empty when there is no Python marker."""
+    if _has_python_project(cwd):
+        return [_ENSURE_CC, _NUMPY, _EDITABLE_INSTALL]
     return []
 
 
 _PROVISION_SYSTEM = (
-    "You are the Provisioner. Your ONE job: make THIS project's tests RUNNABLE so the "
-    "later implementation step can validate its fix. The container ships only source — "
-    "no dependencies, no pytest, no built C-extensions. Use bash to:\n"
-    "1. detect the build/test setup (read pyproject.toml / setup.py / setup.cfg / "
-    "tox.ini / Makefile / README / CI yml),\n"
-    "2. install the project and its test deps the project's documented way (for a "
-    "standard Python project: ensure a C compiler, then `python -m pip install -e "
-    "'.[test]'`), \n"
-    "3. VERIFY it worked by actually running the test runner (e.g. `python -m pytest "
-    "--co -q` to collect, or run one test) and reading the result.\n"
-    "RULES: Do NOT modify source code — you only set up the ENVIRONMENT. Do NOT write "
-    "the fix. Keep calling bash until the test runner actually runs (imports resolve, "
-    "pytest is found), then stop.\n"
-    "A reasonable default sequence for a standard Python project:\n{seed}\n"
+    "You are the Provisioner — an agent whose ONE job is to make THIS project ready for "
+    "all the development and testing work that follows on this task. The container ships "
+    "only source: no dependencies, no test runner, no built C-extensions. You are setting "
+    "up the ENVIRONMENT for everything downstream, not running a single fixed script.\n\n"
+    "Work the problem with bash (and read):\n"
+    "1. PERCEIVE — read the project's manifests to learn its REAL toolchain before acting: "
+    "pyproject.toml, setup.py/.cfg, tox.ini, Makefile, README, requirements*.txt, and any "
+    "lockfile (uv.lock, poetry.lock). Do not assume pip; use what the project actually uses "
+    "(pip, uv, poetry, conda, make).\n"
+    "2. INSTALL — install the project itself plus its test/build dependencies the project's "
+    "documented way, and any SYSTEM packages needed to build native code (a C compiler and "
+    "headers for numpy/scipy/astropy-style C-extensions). If the project uses uv, prefer "
+    "`uv sync` / `uv pip install`; otherwise `python -m pip install -e '.[test]'`.\n"
+    "3. VERIFY — actually run the test runner and read the output (e.g. `python -m pytest "
+    "--co -q` to collect, or run one test). Keep going until imports resolve and the runner "
+    "is found.\n\n"
+    "CONSTRAINTS: Set up the environment ONLY — never edit source, never write the fix, and "
+    "NEVER hand-create stub or fake modules to satisfy an import (install the real thing). "
+    "When the test runner actually runs, briefly summarize what you did and stop.\n\n"
+    "A reasonable default sequence for a standard Python project (adapt as needed):\n{seed}\n"
 )
 
-_REPORT_SYSTEM = (
-    "From your provisioning work above, emit the EnvReport. Set `ready` true only if the "
-    "test runner actually ran (pytest found, imports resolved). `test_command` is the "
-    "canonical command to run this project's tests (e.g. 'python -m pytest -q'). "
-    "`install_steps` are the commands you actually ran to bootstrap. `notes` records "
-    "gotchas or what is still missing. Call emit_env_report once."
-)
 
-
-class _EnvReportOut(BaseModel):
-    ready: bool = False
-    test_command: str = ""
-    install_steps: list[str] = []
-    notes: str = ""
-
-
-class Provisioner(AgentNode):
+class Provisioner:
     name = "provisioner"
 
     def __init__(self, llm: _LLMClientLike, cwd: Path, tools: ToolRegistry) -> None:
-        super().__init__(llm)
+        self._llm = llm
         self._cwd = cwd
         self._tools = tools
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        history = await self._provision(ctx)
-        try:
-            args_json = await self._dispatch(ctx, extra_messages=history)
-            report = self.parse(args_json)
-        except StructuredOutputError:
-            report = EnvReport(
-                ready=False,
-                install_steps=tuple(plan_commands(self._cwd)),
-                notes="provisioner did not emit a structured report; seed steps recorded",
-            )
+        commands, summary = await self._provision(ctx)
+        report = await self._build_report(ctx, commands, summary)
         return NodeResult(output=report)
 
-    # stage ① — the bash/read provisioning loop
-    async def _provision(self, ctx: NodeContext) -> list[dict[str, Any]]:
+    # --- the agentic perceive-and-install loop -------------------------------------
+    async def _provision(self, ctx: NodeContext) -> tuple[list[str], str]:
+        """Drive the model's bash/read loop. Returns (executed bash commands, final
+        free-text summary). Tool outputs are tailed before being fed back so a weak
+        model is not drowned by full pip/apt logs."""
         state = ctx.state
         seed = "\n".join(f"  {c}" for c in plan_commands(self._cwd)) or "  (no Python marker found)"
         request = state.request.raw_text if state.request is not None else ""
@@ -121,14 +115,18 @@ class Provisioner(AgentNode):
             {"role": "user", "content":
                 f"{render_position(self.name, state)}\n\n"
                 f"TASK CONTEXT (the fix to be validated later):\n{request}\n\n"
-                "Set up the test environment now."},
+                "Set up the environment now."},
         ]
         tool_ctx = ToolContext(
             turn_id="provision", cancel=ctx.cancel, cwd=self._cwd, ask=allow_all)
+        executed: list[str] = []
+        summary = ""
         for _ in range(MAX_ITERATIONS):
             if ctx.cancel.is_set():
                 raise asyncio.CancelledError(f"{self.name} cancelled")
             text, calls = await self._stream_round(messages, ctx.sink)
+            if text.strip():
+                summary = text.strip()
             assistant: dict[str, Any] = {"role": "assistant", "content": text}
             if calls:
                 assistant["tool_calls"] = [
@@ -139,6 +137,10 @@ class Provisioner(AgentNode):
             if not calls:
                 break
             for cid, name, args in calls:
+                if name == "bash":
+                    cmd = _extract_command(args)
+                    if cmd:
+                        executed.append(cmd)
                 if ctx.sink is not None:
                     ctx.sink.tool_started(cid, name, _safe_args(args))
                 output = await self._run_tool(name, args, tool_ctx)
@@ -147,8 +149,9 @@ class Provisioner(AgentNode):
                         ctx.sink.tool_failed(cid, output)
                     else:
                         ctx.sink.tool_finished(cid, output)
-                messages.append({"role": "tool", "tool_call_id": cid, "content": output})
-        return messages[1:]  # hand provisioning history (minus its system prompt) to stage ②
+                messages.append({"role": "tool", "tool_call_id": cid,
+                                 "content": _tail(output)})
+        return executed, summary
 
     async def _stream_round(self, messages: list[dict[str, Any]], sink: object | None = None):
         text = ""
@@ -181,34 +184,44 @@ class Provisioner(AgentNode):
         except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
             return f"ERROR: {type(e).__name__}: {e}"
 
-    # stage ② — extraction
-    def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
-        return [
-            {"role": "system", "content": _REPORT_SYSTEM},
-            {"role": "user", "content": "Emit the EnvReport for the provisioning above."},
-        ]
-
-    def output_tool(self) -> dict[str, Any]:
-        return {
-            "type": "function",
-            "function": {
-                "name": _TOOL_NAME,
-                "description": "Emit what the env-prep learned: test command, steps, readiness.",
-                "parameters": inline_refs(_EnvReportOut.model_json_schema()),
-            },
-        }
-
-    def output_model(self) -> type[BaseModel]:
-        return _EnvReportOut
-
-    def parse(self, args_json: str) -> EnvReport:
-        out = validate_output(_EnvReportOut, args_json, node=self.name)
+    # --- deterministic EnvReport derivation ----------------------------------------
+    async def _build_report(
+        self, ctx: NodeContext, commands: list[str], summary: str
+    ) -> EnvReport:
+        """Derive the report from MEASURED state, not a model emit. Skip the probe when
+        nothing was provisioned and there is no Python project (cheap no-op upstream)."""
+        if not commands and not _has_python_project(self._cwd):
+            return EnvReport(ready=False, install_steps=(),
+                             notes=summary or "no python project detected; nothing provisioned")
+        ready, probe_note = await self._probe(ctx)
+        notes = " | ".join(n for n in (summary, probe_note) if n)
         return EnvReport(
-            ready=out.ready,
-            test_command=out.test_command,
-            install_steps=tuple(out.install_steps),
-            notes=out.notes,
+            ready=ready,
+            test_command=_TEST_COMMAND,
+            install_steps=tuple(commands),
+            notes=notes[:600],
         )
+
+    async def _probe(self, ctx: NodeContext) -> tuple[bool, str]:
+        """Measured readiness: can pytest COLLECT the suite? (imports resolve, runner found)"""
+        code, out = await run_shell(_PROBE, self._cwd, ctx.cancel, timeout=_PROBE_TIMEOUT)
+        if code == 0:
+            return True, "pytest collection ok"
+        return False, f"pytest collection failed (exit {code}): {out[-200:].strip()}"
+
+
+def _extract_command(args_json: str) -> str:
+    try:
+        v = json.loads(args_json or "{}")
+        return v.get("command", "") if isinstance(v, dict) else ""
+    except (ValueError, TypeError):
+        return ""
+
+
+def _tail(output: str) -> str:
+    if len(output) <= _TOOL_TAIL:
+        return output
+    return "...[earlier output truncated]...\n" + output[-_TOOL_TAIL:]
 
 
 def _safe_args(args_json: str) -> dict:
