@@ -34,6 +34,13 @@ def build_env() -> dict[str, str]:
     provider = os.environ.get("POOR_CODE_PROVIDER")
     if provider:
         env["POOR_CODE_PROVIDER"] = provider
+    # Let the host pick which branch/tag/commit and repo install.sh installs in the
+    # container. install.sh reads these from the container env (defaulting to main);
+    # without forwarding them here, a host-side override silently has no effect.
+    for opt in ("POOR_CODE_GIT_REF", "POOR_CODE_GIT_URL"):
+        val = os.environ.get(opt)
+        if val:
+            env[opt] = val
     keys = {k: os.environ[k] for k in _KEY_ENVS if os.environ.get(k)}
     if not keys:
         raise KeyError(

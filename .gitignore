@@ -12,6 +12,7 @@ wheels/
 # IDE's
 .vscode/
 .idea/
+.claude/
 .env
 
 # internal docs
@@ -22,3 +23,8 @@ docs/
 
 # local feature worktrees
 .worktrees/
+
+# bench
+runs/
+jobs/
+*.log

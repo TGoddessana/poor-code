@@ -54,6 +54,27 @@ def test_env_passthrough_openai(monkeypatch):
     assert "OLLAMA_API_KEY" not in env
 
 
+def test_env_forwards_git_ref_and_url_when_set(monkeypatch):
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("OLLAMA_API_KEY", "k")
+    monkeypatch.setenv("POOR_CODE_MODEL", "m")
+    monkeypatch.setenv("POOR_CODE_GIT_REF", "feat/x")
+    monkeypatch.setenv("POOR_CODE_GIT_URL", "https://example.com/repo")
+    mod = _load_agent_module()
+    env = mod.build_env()
+    assert env["POOR_CODE_GIT_REF"] == "feat/x"
+    assert env["POOR_CODE_GIT_URL"] == "https://example.com/repo"
+
+
+def test_env_omits_git_ref_when_unset(monkeypatch):
+    _clear_keys(monkeypatch)
+    monkeypatch.delenv("POOR_CODE_GIT_REF", raising=False)
+    monkeypatch.setenv("OLLAMA_API_KEY", "k")
+    monkeypatch.setenv("POOR_CODE_MODEL", "m")
+    mod = _load_agent_module()
+    assert "POOR_CODE_GIT_REF" not in mod.build_env()
+
+
 def test_env_requires_model(monkeypatch):
     _clear_keys(monkeypatch)
     monkeypatch.delenv("POOR_CODE_MODEL", raising=False)
