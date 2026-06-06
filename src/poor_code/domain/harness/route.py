@@ -3,10 +3,9 @@
 (FORWARD); back-edges are logic (route()). Nodes never know their neighbors."""
 from __future__ import annotations
 
+from poor_code.domain.harness.graph import EdgeTable, Rewrite
 from poor_code.domain.harness.node import NodeResult
-from poor_code.domain.session.models import (
-    Layer, Policy, SessionState, VerdictKind,
-)
+from poor_code.domain.session.models import Layer, Policy, SessionState
 
 # (node_name, branch) → next_node. branch=None for single-out nodes.
 FORWARD: dict[tuple[str, str | None], str] = {
@@ -43,31 +42,29 @@ _SHALLOWEST: dict[Layer, str] = {
     Layer.ACCEPTANCE: "acceptance_oracle",
 }
 
+# FULL_AUTO (headless): no human to answer the interviewer, so skip that node — it
+# would only auto-answer "use your best judgment" and burn round-trips. But KEEP a
+# lean acceptance: the acceptance_oracle grounds its global done-check on the issue
+# text (request.raw_text, which carries the reproduction), and that check is the
+# independent witness that defends "all per-task validations pass => issue resolved"
+# (the per-task how_to_validate is self-authored by the same model that writes the
+# fix, so it is self-confirming). We drop only the human-dialogue interviewer and the
+# expensive LLM adequacy critic; the oracle + deterministic gate stay, re-activating
+# the global_validator->planner corrective cycle. acceptance_oracle (like the planner)
+# synthesizes its requirement from the request when state.requirement is absent.
+# Mirrors the old inline route() special-case exactly.
+_FULL_AUTO_SKIP = Rewrite(
+    when=lambda s: s.policy is Policy.FULL_AUTO,
+    remap={"interviewer": "acceptance_oracle", "acceptance_critic": "planner"},
+)
+
+DEFAULT_EDGES = EdgeTable(
+    forward=FORWARD,
+    back_edges=_SHALLOWEST,
+    rewrites=(_FULL_AUTO_SKIP,),
+)
+
 
 def route(node: str, result: NodeResult, state: SessionState) -> str | None:
-    """Next node name, or None to STOP (terminal). A returned name that the
-    registry doesn't know = park (Driver handles it)."""
-    v = result.verdict
-    if v is not None:
-        if v.kind is VerdictKind.REPAIR and v.layer is not None:
-            return _SHALLOWEST[v.layer]
-        if v.kind is VerdictKind.ESCALATE:
-            return "user"
-    branch = result.branch
-    nxt = FORWARD.get((node, branch))
-    # FULL_AUTO (headless): no human to answer the interviewer, so skip that node — it
-    # would only auto-answer "use your best judgment" and burn round-trips. But KEEP a
-    # lean acceptance: the acceptance_oracle grounds its global done-check on the issue
-    # text (request.raw_text, which carries the reproduction), and that check is the
-    # independent witness that defends "all per-task validations pass => issue resolved"
-    # (the per-task how_to_validate is self-authored by the same model that writes the
-    # fix, so it is self-confirming). We drop only the human-dialogue interviewer and the
-    # expensive LLM adequacy critic; the oracle + deterministic gate stay, re-activating
-    # the global_validator->planner corrective cycle. acceptance_oracle (like the planner)
-    # synthesizes its requirement from the request when state.requirement is absent.
-    if state.policy is Policy.FULL_AUTO:
-        if nxt == "interviewer":
-            return "acceptance_oracle"
-        if nxt == "acceptance_critic":
-            return "planner"
-    return nxt
+    """하위호환 진입점 — 진입 그래프의 EdgeTable.route 로 위임."""
+    return DEFAULT_EDGES.route(node, result, state)

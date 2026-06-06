@@ -4,6 +4,7 @@ global_validator) are registered; the full graph runs to the 'reporter' park."""
 from __future__ import annotations
 
 from poor_code.domain.harness.driver import Driver
+from poor_code.domain.harness.graph import EdgeTable, Graph
 from poor_code.domain.harness.node import Node, NodeContext, NodeResult
 from poor_code.domain.harness.nodes.acceptance_critic import AcceptanceCritic
 from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
@@ -44,6 +45,7 @@ __all__ = [
     "Composer", "Implementer", "Validator", "FailureAnalyst", "GlobalValidator", "Reporter",
     "Provisioner",
     "route", "FORWARD", "build_default_registry",
+    "Graph", "EdgeTable", "build_default_graph",
 ]
 
 
@@ -84,3 +86,11 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     if agent is not None:
         reg.register(FastPathNode(agent))
     return reg
+
+
+def build_default_graph(*, llm, project_map, agent=None):
+    """진입 그래프(Graph): 기본 레지스트리 + DEFAULT_EDGES + entry='router'."""
+    from poor_code.domain.harness.graph import Graph
+    from poor_code.domain.harness.route import DEFAULT_EDGES
+    reg = build_default_registry(llm=llm, project_map=project_map, agent=agent)
+    return Graph(nodes=reg, edges=DEFAULT_EDGES, entry="router")
