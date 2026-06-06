@@ -60,6 +60,8 @@ class Driver:
             if nxt is None:
                 return state                              # terminal STOP
             nxt_node = self._registry.get(nxt)
+            # phase priority: next node's attr → current node's attr (park edge, nxt unregistered)
+            # → cursor phase (phaseless nodes e.g. router/fast_path)
             nxt_phase = getattr(nxt_node, "phase", None) or getattr(node, "phase", None) or state.cursor.phase
             state = state.advancing_to(                   # ③ move cursor + log
                 node=nxt,
