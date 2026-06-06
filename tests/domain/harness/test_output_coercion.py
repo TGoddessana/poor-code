@@ -5,6 +5,8 @@ as a singular-key object — e.g. `"steps": {"step": [...]}` instead of `[...]` 
 is a pure ValidationError that used to kill the run. We repair the SHAPE
 deterministically before validation (transport normalization, not schema relaxation:
 the result is still schema-validated)."""
+from typing import Optional
+
 import pytest
 from pydantic import BaseModel
 
@@ -21,6 +23,23 @@ class _Box(BaseModel):
     items: list[_Item] = []
     tags: list[str] = []
     note: str = ""
+
+
+class _OptBox(BaseModel):
+    items: Optional[list[_Item]] = None
+    tags: Optional[list[str]] = None
+
+
+def test_coerce_preserves_none_for_optional_list():
+    # None is valid for Optional[list[...]]; coercion must NOT wrap it as [None].
+    out = coerce_to_schema({"items": None, "tags": None}, _OptBox)
+    assert out["items"] is None
+    assert out["tags"] is None
+
+
+def test_validate_output_accepts_optional_list_as_none():
+    box = validate_output(_OptBox, '{"items": null, "tags": null}', node="t")
+    assert box.items is None and box.tags is None
 
 
 def test_coerce_unwraps_singular_key_object_into_list():

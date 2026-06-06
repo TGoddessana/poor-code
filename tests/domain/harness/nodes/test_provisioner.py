@@ -69,6 +69,28 @@ class _RunThenStopLLM:
             yield FinishedReason(reason="stop")
 
 
+class _LabelRecordingLLM:
+    """Records the client's active_label at stream time (token-attribution check)."""
+    def __init__(self):
+        self.active_label = None
+        self.seen_label = "<unset>"
+    async def stream(self, messages, tools, response_format=None):
+        self.seen_label = self.active_label
+        yield TextDelta(text="env is ready")
+        yield FinishedReason(reason="stop")
+
+
+@pytest.mark.asyncio
+async def test_provisioner_tags_token_usage_with_its_name(tmp_path, monkeypatch):
+    # Provisioner has its own stream loop (not AgentNode) — it must tag() so its
+    # tokens are not misattributed to the previous node (plan_reviewer).
+    monkeypatch.setattr(nodes.provisioner, "run_shell",
+                        _fake_probe(code=0, out="collected 1 item"))
+    llm = _LabelRecordingLLM()
+    await Provisioner(llm, cwd=tmp_path, tools=_tools()).run(_ctx())
+    assert llm.seen_label == "provisioner"
+
+
 @pytest.mark.asyncio
 async def test_run_captures_executed_commands_into_install_steps(tmp_path, monkeypatch):
     # Probe is deterministic and isolated from the agentic bash loop.

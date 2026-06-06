@@ -64,3 +64,24 @@ async def test_programming_errors_still_propagate():
     reg.register(_BoomNode(KeyError("real bug")))
     with pytest.raises(KeyError):
         await Driver(reg, _route).run(_start(), asyncio.Event())
+
+
+@pytest.mark.asyncio
+async def test_raw_validation_error_propagates_not_masked():
+    """A raw pydantic ValidationError is a programming bug (a node built a model
+    wrong), NOT LLM output — all LLM output goes through validate_output, which
+    raises StructuredOutputError. So a raw ValidationError must surface, not be
+    masked as a graceful escalation."""
+    from pydantic import BaseModel, ValidationError
+
+    class _M(BaseModel):
+        x: int
+
+    try:
+        _M(x="not-an-int")  # build the exception instance to raise
+    except ValidationError as e:
+        ve = e
+    reg = NodeRegistry()
+    reg.register(_BoomNode(ve))
+    with pytest.raises(ValidationError):
+        await Driver(reg, _route).run(_start(), asyncio.Event())

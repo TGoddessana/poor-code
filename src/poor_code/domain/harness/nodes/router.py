@@ -9,7 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _LLMClientLike
+from poor_code.domain.harness.node import (
+    AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output)
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import Request, RequestKind, SessionState
 
@@ -51,7 +52,7 @@ class Router(AgentNode):
     async def _classify_via_llm(self, ctx: NodeContext) -> RequestKind | None:
         try:
             args_json = await self._dispatch(ctx)
-            kind = _ClassificationOut.model_validate_json(args_json).kind
+            kind = validate_output(_ClassificationOut, args_json, node=self.name).kind
         except Exception:  # noqa: BLE001 — any LLM/parse failure → seed fallback
             return None
         return RequestKind(kind)

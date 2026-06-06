@@ -9,8 +9,6 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Callable
 
-from pydantic import ValidationError
-
 from poor_code.domain.harness.graph import ESCAPE, RouteResult
 from poor_code.domain.harness.node import NodeContext, NodeResult, StructuredOutputError
 from poor_code.domain.harness.registry import NodeRegistry
@@ -22,9 +20,11 @@ from poor_code.provider.client import LLMCallTimeout
 # Recoverable INFERENCE failures: a weak model produced unusable output, or a call
 # blew its wall-clock budget. These are expected at the tail of a low-param run and
 # must NOT crash the process — the Driver turns them into a graceful ESCALATE so the
-# session still produces a report. Programming errors (KeyError, AssertionError, …)
-# are deliberately NOT caught here; they must surface.
-_RECOVERABLE_INFERENCE_ERRORS = (StructuredOutputError, LLMCallTimeout, ValidationError)
+# session still produces a report. EVERY node validates LLM output through
+# validate_output, which wraps bad output as StructuredOutputError — so a raw
+# pydantic ValidationError reaching here is a PROGRAMMING bug, not LLM output, and is
+# deliberately NOT caught (alongside KeyError, AssertionError, …); it must surface.
+_RECOVERABLE_INFERENCE_ERRORS = (StructuredOutputError, LLMCallTimeout)
 
 RouteFn = Callable[[str, NodeResult, SessionState], RouteResult]
 

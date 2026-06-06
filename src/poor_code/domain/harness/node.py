@@ -109,8 +109,8 @@ def coerce_to_schema(data: Any, model: type[BaseModel]) -> Any:
         return data
     out = dict(data)
     for name, field in model.model_fields.items():
-        if name not in out:
-            continue
+        if name not in out or out[name] is None:
+            continue  # None is valid for an Optional field — don't wrap it as [None]
         item_t = _list_item_type(field.annotation)
         if item_t is not None:
             items = _as_list(out[name], item_t)

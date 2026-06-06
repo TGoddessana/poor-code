@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult
+from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, validate_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import Layer, Phase, SessionState, Verdict, VerdictKind
 
@@ -72,7 +72,7 @@ class Validator(AgentNode):
         return _JudgeOut
 
     def parse(self, args_json: str) -> Verdict:
-        out = _JudgeOut.model_validate_json(args_json)
+        out = validate_output(_JudgeOut, args_json, node=self.name)
         if out.verdict == "repair_impl":
             return Verdict(kind=VerdictKind.REPAIR, layer=Layer.IMPLEMENTATION, hint=out.hint)
         if out.verdict == "repair_plan":

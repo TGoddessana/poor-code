@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from poor_code.domain.harness.node import AgentNode
+from poor_code.domain.harness.node import AgentNode, validate_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import FeedbackEntry, Phase, SessionState
 
@@ -64,7 +64,7 @@ class FailureAnalyst(AgentNode):
         return _FeedbackOut
 
     def parse(self, args_json: str) -> FeedbackEntry:
-        out = _FeedbackOut.model_validate_json(args_json)
+        out = validate_output(_FeedbackOut, args_json, node=self.name)
         return FeedbackEntry(failure_type=out.failure_type, symptom=out.symptom,
                              prevention_hint=out.prevention_hint, task_ref=self._task_ref)
 

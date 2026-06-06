@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from poor_code.domain.harness.node import AgentNode, _LLMClientLike
+from poor_code.domain.harness.node import AgentNode, _LLMClientLike, validate_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
     AcceptanceCheck, AcceptanceSpec, GroundingStatus, Phase, SessionState,
@@ -98,7 +98,7 @@ class AcceptanceOracle(AgentNode):
         return _AcceptanceSpecOut
 
     def parse(self, args_json: str) -> AcceptanceSpec:
-        out = _AcceptanceSpecOut.model_validate_json(args_json)
+        out = validate_output(_AcceptanceSpecOut, args_json, node=self.name)
         return AcceptanceSpec(checks=tuple(
             AcceptanceCheck(criterion=c.criterion, command=c.command, rationale=c.rationale)
             for c in out.checks))
