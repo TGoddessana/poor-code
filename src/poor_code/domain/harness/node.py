@@ -9,7 +9,9 @@ from typing import Any, AsyncIterator, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel, ValidationError
 
-from poor_code.domain.session.models import Layer, Query, SessionState, TriggerKind, Verdict, VerdictKind
+from poor_code.domain.session.models import (
+    Layer, Phase, Query, SessionState, TriggerKind, Verdict, VerdictKind,
+)
 from poor_code.provider.events import (
     FinishedReason,
     LLMEvent,
@@ -127,9 +129,10 @@ class GateNode(ABC):
     name: str
     layer: Layer
     repair_budget: int
+    phase: Phase  # every gate declares its cursor phase (read by the Driver)
 
     @abstractmethod
-    def check(self, state) -> str | None:
+    def check(self, state: SessionState) -> str | None:
         """None → 통과(ADVANCE). 문자열 → 실패 사유(hint)."""
         ...
 
@@ -142,7 +145,7 @@ class GateNode(ABC):
         return NodeResult(verdict=Verdict(
             kind=VerdictKind.REPAIR, layer=self.layer, hint=hint))
 
-    def _repair_count(self, state) -> int:
+    def _repair_count(self, state: SessionState) -> int:
         target = _SHALLOWEST_FOR_COUNTING.get(self.layer)
         return sum(1 for t in state.history
                    if t.trigger is TriggerKind.GATE and t.to_node == target)
