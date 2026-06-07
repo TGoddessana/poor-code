@@ -11,6 +11,7 @@ from textual.widget import Widget
 from poor_code.ui.widgets.chat_log import ChatLog
 from poor_code.ui.widgets.prompt_box import PromptBox
 from poor_code.ui.widgets.status_footer import StatusFooter
+from poor_code.ui.widgets.stepper import StepperBar
 
 
 def _copy_to_system_clipboard(text: str) -> bool:
@@ -38,6 +39,7 @@ def _copy_to_system_clipboard(text: str) -> bool:
 
 class ChatScreen(Screen):
     def compose(self) -> ComposeResult:
+        yield StepperBar(id="stepper-bar")
         yield ChatLog(id="chat-log")
         yield PromptBox()
         yield StatusFooter(id="status-footer")

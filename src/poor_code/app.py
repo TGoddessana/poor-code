@@ -39,6 +39,7 @@ class PoorCodeApp(App):
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+c", "cancel_or_quit", "Cancel/Quit"),
+        ("ctrl+i", "open_state", "State"),
     ]
 
     app_state: reactive[AppState] = reactive(AppState(), layout=False)
@@ -203,3 +204,10 @@ class PoorCodeApp(App):
             self._cancel.set()
         else:
             self.exit()
+
+    def action_open_state(self) -> None:
+        from poor_code.ui.screens.state_inspector import StateInspector
+        if isinstance(self.screen, StateInspector):
+            self.pop_screen()
+        else:
+            self.push_screen(StateInspector())
