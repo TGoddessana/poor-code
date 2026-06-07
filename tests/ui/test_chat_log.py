@@ -606,3 +606,18 @@ def test_format_turn_footer_failed_without_duration_returns_empty():
         error="boom",
     )
     assert _format_turn_footer(t, fallback_model="ignored") == ""
+
+
+def test_tool_entry_flashes_on_completion(monkeypatch):
+    from poor_code.ui.store import ToolCallView
+    from poor_code.ui.widgets.chat_log import ToolCallEntry
+    running = ToolCallView(tool_call_id="1", tool_name="bash", args={}, status="running")
+    entry = ToolCallEntry(running)
+    flashed = {"v": False}
+    monkeypatch.setattr(entry, "add_class", lambda *a, **k: flashed.__setitem__("v", "tool-done-flash" in a))
+    monkeypatch.setattr(entry, "remove_children", lambda: None)
+    monkeypatch.setattr(entry, "mount", lambda *a, **k: None)
+    monkeypatch.setattr(entry, "set_timer", lambda *a, **k: None)
+    done = ToolCallView(tool_call_id="1", tool_name="bash", args={}, status="done", result="ok")
+    entry.refresh_from(done)
+    assert flashed["v"] is True

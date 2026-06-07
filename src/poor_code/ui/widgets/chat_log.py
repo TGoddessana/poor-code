@@ -133,6 +133,9 @@ class ToolCallEntry(Widget):
         self._tc = tc
         if was_running and tc.status != "running":
             self._stop_spinner()
+        if was_running and tc.status in ("done", "failed"):
+            self.add_class("tool-done-flash")
+            self.set_timer(0.6, lambda: self.remove_class("tool-done-flash"))
         self.remove_children()
         for child in self.compose():
             self.mount(child)

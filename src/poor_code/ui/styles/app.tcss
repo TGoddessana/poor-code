@@ -226,3 +226,5 @@ StateInspector {
     color: $accent;
     margin-bottom: 1;
 }
+
+.tool-done-flash { background: $success; }
