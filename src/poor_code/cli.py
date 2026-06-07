@@ -28,7 +28,9 @@ from poor_code.infra.system_prompt import SystemPromptComposer
 from poor_code.infra.turn_assembler import TurnAssembler
 from poor_code.domain.project_map import make_default_builder
 from poor_code.provider.providers import PROVIDER_LABELS, build_llm
+from poor_code.slash.commands.help import HelpCommand
 from poor_code.slash.commands.login import LoginCommand
+from poor_code.slash.commands.state import StateCommand
 from poor_code.slash.dispatcher import SlashDispatcher
 from poor_code.slash.registry import SlashRegistry
 
@@ -117,7 +119,7 @@ def main() -> None:
     cwd = Path.cwd()
     session = _start_session(cwd)
     agent = _build_agent(session, _initial_llm())
-    slash = SlashDispatcher(SlashRegistry([LoginCommand()]))
+    slash = SlashDispatcher(SlashRegistry([LoginCommand(), StateCommand(), HelpCommand()]))
     builder = _build_project_map_builder()
     make_driver = _make_driver_factory(_load_project_map(cwd), session)
     PoorCodeApp(
