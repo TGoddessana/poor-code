@@ -434,6 +434,7 @@ class Plan:
     tasks: tuple[Task, ...] = ()
     deps: tuple[Dependency, ...] = ()
     file_plan: tuple[FileSlot, ...] = ()
+    plan_md: str = ""   # rich markdown body; tasks/deps are the machine skeleton
 
     def apply_to(self, s: "SessionState") -> "SessionState":
         return s.with_plan(self)

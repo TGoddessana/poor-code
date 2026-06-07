@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from poor_code.domain.session.models import (
+    Plan,
     WorkItemPolicies,
     Session,
     SessionState,
@@ -47,3 +48,9 @@ def test_policies_is_value_object():
     p2 = WorkItemPolicies()
     assert p1 == p2
     assert p1 is not p2
+
+
+def test_plan_carries_markdown_body():
+    p = Plan(plan_md="## t1: do X\n## t2: do Y")
+    assert p.plan_md.startswith("## t1")
+    assert p.tasks == ()  # default still empty
