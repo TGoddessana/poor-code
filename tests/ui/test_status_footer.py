@@ -101,3 +101,19 @@ def test_footer_renders_failed():
     )
     rendered = StatusFooter._format(state)
     assert "map: failed" in rendered
+
+
+def test_footer_shows_awaiting_input():
+    s = AppState(awaiting_input=True, is_processing=True)
+    assert "awaiting your answer" in StatusFooter._format(s)
+
+
+def test_footer_shows_current_phase_while_processing():
+    s = AppState(is_processing=True, current_phase="planning")
+    out = StatusFooter._format(s)
+    assert "Planning" in out
+
+
+def test_footer_shows_last_error():
+    s = AppState(last_error="boom")
+    assert "boom" in StatusFooter._format(s)

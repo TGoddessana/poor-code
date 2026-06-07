@@ -39,7 +39,7 @@ class StatusFooter(Static):
             and state.project_map.parse_error_count > 0
         )
         self.set_class(ctx_danger or map_danger, "danger")
-        self.set_class((ctx_warn or map_warn) and not (ctx_danger or map_danger), "warn")
+        self.set_class((ctx_warn or map_warn or state.awaiting_input) and not (ctx_danger or map_danger), "warn")
 
     @staticmethod
     def _format(state: AppState) -> str:
@@ -51,8 +51,21 @@ class StatusFooter(Static):
             f" ↑ {_k(u.input_tokens)}  ↓ {_k(u.output_tokens)}   "
             f"{cost}   {ctx}   {model}"
         )
-        suffix = StatusFooter._format_map(state)
-        return base + suffix
+        base += StatusFooter._format_map(state)
+        if state.awaiting_input:
+            base += "   · ↓ awaiting your answer"
+        elif state.is_processing and state.current_phase:
+            base += f"   · ⟳ {StatusFooter._phase_label(state.current_phase)}"
+        if state.last_error:
+            base += f"   · ⚠ {state.last_error}"
+        return base
+
+    @staticmethod
+    def _phase_label(phase: str) -> str:
+        return {
+            "routing": "Routing", "locating": "Exploring", "interviewing": "Clarifying",
+            "planning": "Planning", "implementing": "Building", "finalizing": "Finalizing",
+        }.get(phase, phase)
 
     @staticmethod
     def _format_map(state: AppState) -> str:
