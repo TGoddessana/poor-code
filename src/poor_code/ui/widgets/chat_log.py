@@ -263,6 +263,14 @@ class TurnBlock(Widget):
             return ""
         return state.model or ""
 
+    def _query_interactive(self, seg) -> bool:
+        from poor_code.ui.store import QuerySegment
+        state = getattr(self.app, "app_state", None)
+        return bool(
+            isinstance(seg, QuerySegment) and seg.options
+            and state is not None and state.awaiting_input
+        )
+
     def _make_segment_widget(self, seg) -> Widget:
         if isinstance(seg, TextSegment):
             md = StreamingMarkdown(seg.text, classes="assistant-msg")
@@ -270,7 +278,7 @@ class TurnBlock(Widget):
             return md
         if isinstance(seg, ToolCallView):
             return ToolCallEntry(seg)
-        if isinstance(seg, QuerySegment) and seg.options and getattr(self.app, "app_state", None) is not None and self.app.app_state.awaiting_input:
+        if self._query_interactive(seg):
             return QueryWidget(seg)
         return StaticSegment(seg)
 
@@ -289,7 +297,7 @@ class TurnBlock(Widget):
         # Existing segment widgets in DOM order.
         existing_segs: list[Widget] = [
             c for c in self.children
-            if isinstance(c, (Markdown, ToolCallEntry, StaticSegment))
+            if isinstance(c, (Markdown, ToolCallEntry, StaticSegment, QueryWidget))
         ]
         # Anchor for new segment mounts — segments must stay above both the
         # error trailer and the per-turn footer. The footer is mounted during
@@ -309,7 +317,11 @@ class TurnBlock(Widget):
                     self.app.call_later(w.write_delta, seg.text)
                 elif isinstance(seg, ToolCallView) and isinstance(w, ToolCallEntry):
                     w.refresh_from(seg)
-                elif isinstance(seg, (NodeLabelSegment, QuerySegment, PlanSegment, ReportSegment, UserAnswerSegment, NodeResultSegment)) and isinstance(w, StaticSegment):
+                elif isinstance(seg, (NodeLabelSegment, PlanSegment, ReportSegment, UserAnswerSegment, NodeResultSegment)) and isinstance(w, StaticSegment):
+                    w.refresh_from(seg)
+                elif isinstance(seg, QuerySegment) and self._query_interactive(seg) and isinstance(w, QueryWidget):
+                    pass  # keep the live picker (focus/selection) while still awaiting
+                elif isinstance(seg, QuerySegment) and not self._query_interactive(seg) and isinstance(w, StaticSegment):
                     w.refresh_from(seg)
                 else:
                     # Kind mismatch — replace.
