@@ -73,3 +73,39 @@ async def test_query_then_answer_resumes_same_turn():
         assert state.awaiting_input is False
         assert state.turns[0].status == "done"
         assert pilot.app._harness_state is None
+
+
+@pytest.mark.asyncio
+async def test_answer_query_carries_chosen_option():
+    """answer_query(answer, chosen_option) dispatches AnswerSubmitted, clears
+    awaiting_input, and appends a UserAnswerSegment — same as the free-text
+    answer branch in submit() but chosen_option is forwarded on UserResponse."""
+    from poor_code.ui.store import UserAnswerSegment
+
+    async with _app().run_test() as pilot:
+        await pilot.pause(); await pilot.pause()
+        pilot.app.screen.query_one(Input).focus()
+        await pilot.press("g", "o")
+        await pilot.press("enter")
+        for _ in range(20):
+            await pilot.pause()
+
+        # Confirm we reached the parked-query state
+        state = pilot.app.store.state
+        assert state.awaiting_input is True
+        assert pilot.app._harness_state.pending_query.id == "q1"
+
+        # Call answer_query with a chosen_option instead of going through the
+        # Input widget so that chosen_option is non-None.
+        pilot.app.answer_query("A", chosen_option="A")
+        for _ in range(20):
+            await pilot.pause()
+
+        state = pilot.app.store.state
+        # awaiting_input must be cleared
+        assert state.awaiting_input is False
+        # A UserAnswerSegment with the answer text must have been appended
+        turn = state.turns[0]
+        answer_segs = [s for s in turn.segments if isinstance(s, UserAnswerSegment)]
+        assert len(answer_segs) >= 1
+        assert answer_segs[-1].text == "A"

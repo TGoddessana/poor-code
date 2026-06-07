@@ -180,6 +180,19 @@ class PoorCodeApp(App):
         ))
         self._harness_state = None
 
+    def answer_query(self, answer: str, chosen_option: str | None = None) -> None:
+        """Answer the parked query (used by the inline QueryWidget). Mirrors the
+        answer branch of submit() but carries chosen_option."""
+        parked = self._harness_state
+        if parked is None or parked.pending_query is None:
+            return
+        self._cancel = asyncio.Event()
+        resp = UserResponse(
+            query_id=parked.pending_query.id, answer=answer, chosen_option=chosen_option)
+        state = parked.with_user_response(resp)
+        self.store.dispatch(AnswerSubmitted(turn_id=self._turn_id, answer=answer))
+        self.run_worker(self._drive(state), group="turn", exclusive=True)
+
     def set_llm(self, llm: Any) -> None:
         self.agent.llm = llm
         self._harness_driver = self._make_driver(llm)
