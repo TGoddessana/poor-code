@@ -14,6 +14,7 @@ from poor_code.messages import (
     AssistantTextDelta,
     Event,
     NodeEntered,
+    NodeProduced,
     PlanReady,
     ProjectMapBuildFailed,
     ProjectMapBuildFinished,
@@ -59,6 +60,23 @@ class NodeLabelSegment:
     """A graph-node boundary header. Streamed text/tools below it belong to this node."""
     node: str
     phase: str
+    activity: str = ""
+    retry: int = 0
+
+
+@dataclass(frozen=True)
+class UserAnswerSegment:
+    """The user's reply to a Query, echoed into the log."""
+    text: str
+
+
+@dataclass(frozen=True)
+class NodeResultSegment:
+    """Inline 'result card' — what a node produced (data moving through the agent)."""
+    node: str
+    phase: str
+    headline: str
+    detail: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -80,7 +98,10 @@ class ReportSegment:
     lines: tuple[str, ...] = ()
 
 
-Segment = TextSegment | ToolCallView | NodeLabelSegment | QuerySegment | PlanSegment | ReportSegment
+Segment = (
+    TextSegment | ToolCallView | NodeLabelSegment | QuerySegment
+    | PlanSegment | ReportSegment | UserAnswerSegment | NodeResultSegment
+)
 
 
 @dataclass(frozen=True)
@@ -139,6 +160,8 @@ class AppState:
     last_turn_tokens: int = 0
     project_map: ProjectMapStatus | None = None
     awaiting_input: bool = False
+    current_phase: str | None = None
+    phases_seen: tuple[str, ...] = ()
 
 
 # =========================================================================
@@ -394,8 +417,23 @@ def reduce(state: AppState, action: Action) -> AppState:
             meta = lookup(m) if m else None
             return replace(state, provider_name=p, model=m, model_meta=meta)
 
-        case NodeEntered(turn_id=tid, node=node, phase=phase):
-            return _append_segment(state, tid, NodeLabelSegment(node=node, phase=phase))
+        case NodeEntered(turn_id=tid, node=node, phase=phase, activity=activity):
+            i = _find_turn_by_id(state, tid)
+            seen = state.phases_seen if phase in state.phases_seen else state.phases_seen + (phase,)
+            base = replace(state, current_phase=phase, phases_seen=seen)
+            if i is None:
+                return base
+            segs = base.turns[i].segments
+            # Dedupe consecutive identical node → bump retry instead of a new label.
+            if segs and isinstance(segs[-1], NodeLabelSegment) and segs[-1].node == node:
+                bumped = replace(segs[-1], retry=segs[-1].retry + 1, activity=activity or segs[-1].activity)
+                new_segs = _replace_segment(segs, len(segs) - 1, bumped)
+                return replace(base, turns=_update_turn_at(base.turns, i, segments=new_segs))
+            return _append_segment(base, tid, NodeLabelSegment(node=node, phase=phase, activity=activity))
+
+        case NodeProduced(turn_id=tid, node=node, phase=phase, headline=headline, detail=detail):
+            return _append_segment(
+                state, tid, NodeResultSegment(node=node, phase=phase, headline=headline, detail=detail))
 
         case QueryRaised(turn_id=tid, kind=kind, prompt=prompt, options=options):
             i = _find_turn_by_id(state, tid)
@@ -405,10 +443,11 @@ def reduce(state: AppState, action: Action) -> AppState:
                 state, tid, QuerySegment(prompt=prompt, options=options, kind=kind))
             return replace(with_seg, awaiting_input=True)
 
-        case AnswerSubmitted(turn_id=_tid, answer=_answer):
+        case AnswerSubmitted(turn_id=tid, answer=answer):
             if not state.awaiting_input:
                 return state
-            return replace(state, awaiting_input=False)
+            with_seg = _append_segment(state, tid, UserAnswerSegment(text=answer))
+            return replace(with_seg, awaiting_input=False)
 
         case PlanReady(turn_id=tid, lines=lines):
             return _append_segment(state, tid, PlanSegment(lines=lines))

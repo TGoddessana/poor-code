@@ -16,7 +16,11 @@ def test_node_entered_appends_label_segment():
     assert seg.node == "explorer" and seg.phase == "locating"
 
 
-def test_node_entered_unknown_turn_is_noop():
+def test_node_entered_unknown_turn_still_tracks_phase():
+    # Unknown turn_id: no segment appended, but phase tracking still updates.
     state = _state_with_running_turn()
     out = reduce(state, NodeEntered(turn_id="NOPE", node="x", phase="y"))
-    assert out is state
+    assert out.current_phase == "y"
+    assert out.phases_seen == ("y",)
+    # Turns are unmodified — no segment appended for a missing turn.
+    assert out.turns == state.turns
