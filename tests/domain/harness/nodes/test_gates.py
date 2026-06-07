@@ -67,40 +67,7 @@ def _task(**overrides) -> Task:
     return Task(**data)
 
 
-def _task_with_steps(steps, **kw) -> Task:
-    return Task(id="t1", title="t", purpose="p",
-                edit_scope=EditScope(editable=("x.py",)),
-                how_to_validate="pytest -q", steps=tuple(steps), **kw)
 
-
-@pytest.mark.asyncio
-async def test_plan_gate_rejects_task_without_steps():
-    assert "no steps" in PlanGate._invalid_hint(Plan(tasks=(_task_with_steps(()),)))
-
-
-def test_plan_gate_rejects_empty_body_step():
-    step = Step(id="t1.s1", kind=StepKind.IMPL, file="x.py", body="")
-    hint = PlanGate._invalid_hint(Plan(tasks=(_task_with_steps((step,)),)))
-    assert hint is not None and "empty body" in hint
-
-
-def test_plan_gate_rejects_placeholder_body():
-    step = Step(id="t1.s1", kind=StepKind.IMPL, file="x.py",
-                body="def f():\n    # TODO: implement later\n    pass")
-    hint = PlanGate._invalid_hint(Plan(tasks=(_task_with_steps((step,)),)))
-    assert hint is not None and "placeholder" in hint
-
-
-def test_plan_gate_rejects_step_file_outside_editable():
-    step = Step(id="t1.s1", kind=StepKind.IMPL, file="other.py", body="x = 1")
-    hint = PlanGate._invalid_hint(Plan(tasks=(_task_with_steps((step,)),)))
-    assert hint is not None and "outside editable" in hint
-
-
-def test_plan_gate_accepts_well_formed_steps():
-    step = Step(id="t1.s1", kind=StepKind.IMPL, file="x.py", body="x = 1",
-                run="pytest -q", expected="PASS")
-    assert PlanGate._invalid_hint(Plan(tasks=(_task_with_steps((step,)),))) is None
 
 
 @pytest.mark.asyncio
@@ -163,21 +130,6 @@ async def test_plan_gate_rejects_too_many_editable_files():
     assert "split" in res.verdict.hint.lower()
 
 
-@pytest.mark.asyncio
-async def test_plan_gate_rejects_prose_validation():
-    res = await PlanGate().run(_ctx(SessionState(plan=Plan(tasks=(
-        _task(how_to_validate="Check that the server returns 55."),
-    )))))
-    assert res.verdict.kind is VerdictKind.REPAIR
-    assert "command" in res.verdict.hint.lower()
-
-
-@pytest.mark.asyncio
-async def test_plan_gate_accepts_runnable_validation():
-    res = await PlanGate().run(_ctx(SessionState(plan=Plan(tasks=(
-        _task(how_to_validate="curl -s localhost:3000/fib/10 | grep -q 55"),
-    )))))
-    assert res.verdict.kind is VerdictKind.ADVANCE
 
 
 @pytest.mark.asyncio
@@ -233,3 +185,29 @@ async def test_plan_gate_repair_count_ignores_non_plangate_bounces():
     state = SessionState(plan=Plan(), history=(from_validator, from_validator, from_plangate))
     res = await PlanGate().run(_ctx(state))
     assert res.verdict.kind is VerdictKind.REPAIR
+
+
+def _plan(**kw):
+    return Plan(**kw)
+
+
+def test_plan_gate_accepts_skeleton_without_steps():
+    plan = _plan(
+        plan_md="## t1: server.py — handler",
+        tasks=(Task(id="t1", title="h", purpose="", edit_scope=EditScope(editable=("server.py",))),),
+    )
+    assert PlanGate._invalid_hint(plan) is None  # no steps/how_to_validate required
+
+
+def test_plan_gate_rejects_orphan_skeleton_id():
+    plan = _plan(
+        plan_md="## t1: server.py",
+        tasks=(Task(id="t2", title="h", purpose="", edit_scope=EditScope(editable=("server.py",))),),
+    )
+    hint = PlanGate._invalid_hint(plan)
+    assert hint is not None and "t2" in hint
+
+
+def test_plan_gate_still_rejects_empty_editable_and_cycles():
+    assert PlanGate._invalid_hint(_plan(plan_md="## t1", tasks=(
+        Task(id="t1", title="h", purpose="", edit_scope=EditScope(editable=())),))) is not None
