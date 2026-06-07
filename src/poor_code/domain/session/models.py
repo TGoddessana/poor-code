@@ -448,16 +448,22 @@ class AttemptStatus(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class ValidationResult:
-    """run_result — pass/fail 구속 ★. validation_runner(코드)만 생성."""
+    """run_result — pass/fail 구속 ★. validation_runner(코드)만 생성.
+    `check_results` carries this attempt's per-acceptance-check (criterion, passed)
+    so the binding result AND the ledger record persist atomically in one apply_to."""
     command: str
     exit_code: int
     passed: bool
     output: str = ""
+    check_results: tuple[tuple[str, bool], ...] = ()
 
     def apply_to(self, s: "SessionState") -> "SessionState":
         c = s.cursor
         assert c is not None and c.task_id and c.attempt_id
-        return s.update_attempt(c.task_id, c.attempt_id, run_result=self)
+        changes: dict = {"run_result": self}
+        if self.check_results:
+            changes["check_results"] = self.check_results
+        return s.update_attempt(c.task_id, c.attempt_id, **changes)
 
 
 @dataclass(frozen=True, slots=True)

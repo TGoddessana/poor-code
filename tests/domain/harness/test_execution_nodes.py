@@ -180,6 +180,86 @@ async def test_validation_runner_cancel_mid_run(tmp_path):
         await asyncio.wait_for(_run_and_cancel(), timeout=10)
 
 
+from poor_code.domain.session.models import AcceptanceSpec, AcceptanceCheck
+
+
+def _accept_runner_state(*, prior_check_results=(), how_to_validate=""):
+    """Active task t1 with two prior attempts: a1 (the baseline carrying
+    prior_check_results) and a2 (the cursor's current attempt being validated now)."""
+    plan = Plan(tasks=(Task(
+        id="t1", title="A", purpose="p", how_to_validate=how_to_validate,
+        attempts=(Attempt(id="a1", check_results=tuple(prior_check_results)),
+                  Attempt(id="a2"))),))
+    cur = Cursor(phase=Phase.IMPLEMENTING, current_node="validation_runner",
+                 task_id="t1", attempt_id="a2")
+    spec = AcceptanceSpec(checks=(
+        AcceptanceCheck(criterion="A", command="cmd-a"),
+        AcceptanceCheck(criterion="B", command="cmd-b")))
+    return SessionState(plan=plan, cursor=cur, acceptance=spec)
+
+
+@pytest.mark.asyncio
+async def test_validation_runner_passes_when_no_regression(monkeypatch, tmp_path):
+    async def fake_run_shell(command, cwd, cancel, *a, **k):
+        return 0, "ok"
+    monkeypatch.setattr(
+        "poor_code.domain.harness.nodes.execution.run_shell", fake_run_shell)
+    state = _accept_runner_state(prior_check_results=(("A", True),))
+    r = await ValidationRunner(cwd=tmp_path).run(_ctx(state))
+    assert r.output.passed is True
+    assert r.branch == "pass"
+
+
+@pytest.mark.asyncio
+async def test_validation_runner_fails_on_regression(monkeypatch, tmp_path):
+    async def fake_run_shell(command, cwd, cancel, *a, **k):
+        return (1, "boom") if command == "cmd-a" else (0, "ok")
+    monkeypatch.setattr(
+        "poor_code.domain.harness.nodes.execution.run_shell", fake_run_shell)
+    # A was green on the prior attempt; now it fails → regression.
+    state = _accept_runner_state(prior_check_results=(("A", True),))
+    r = await ValidationRunner(cwd=tmp_path).run(_ctx(state))
+    assert r.output.passed is False
+    assert "A" in r.output.output and "regressed" in r.output.output
+    assert r.branch == "fail"
+
+
+@pytest.mark.asyncio
+async def test_validation_runner_falls_back_to_how_to_validate_without_acceptance(
+        monkeypatch, tmp_path):
+    seen = {}
+    async def fake_run_shell(command, cwd, cancel, *a, **k):
+        seen["command"] = command
+        return 0, "ok"
+    monkeypatch.setattr(
+        "poor_code.domain.harness.nodes.execution.run_shell", fake_run_shell)
+    plan = Plan(tasks=(Task(id="t1", title="A", purpose="p",
+                            how_to_validate="pytest -q",
+                            attempts=(Attempt(id="a1"),)),))
+    cur = Cursor(phase=Phase.IMPLEMENTING, current_node="validation_runner",
+                 task_id="t1", attempt_id="a1")
+    state = SessionState(plan=plan, cursor=cur, acceptance=None)
+    r = await ValidationRunner(cwd=tmp_path).run(_ctx(state))
+    assert seen["command"] == "pytest -q"
+    assert r.output.passed is True and r.branch == "pass"
+
+
+@pytest.mark.asyncio
+async def test_validation_runner_records_check_results(monkeypatch, tmp_path):
+    async def fake_run_shell(command, cwd, cancel, *a, **k):
+        return (0, "ok") if command == "cmd-a" else (1, "boom")
+    monkeypatch.setattr(
+        "poor_code.domain.harness.nodes.execution.run_shell", fake_run_shell)
+    state = _accept_runner_state()
+    r = await ValidationRunner(cwd=tmp_path).run(_ctx(state))
+    # the output records each check's result, and apply_to persists it onto the attempt
+    assert r.output.check_results == (("A", True), ("B", False))
+    new_state = r.output.apply_to(state)
+    task = new_state.plan.tasks[0]
+    active = next(a for a in task.attempts if a.id == "a2")
+    assert active.check_results == (("A", True), ("B", False))
+
+
 from poor_code.domain.harness.nodes.execution import CompletionGate, MAX_ATTEMPTS
 from poor_code.domain.session.models import TaskCompleted
 

@@ -129,8 +129,25 @@ async def run_shell(
     return proc.returncode, out_bytes.decode("utf-8", errors="replace")[:_OUTPUT_LIMIT]
 
 
+def _prev_green_criteria(state, task) -> set[str]:
+    """Criteria that were GREEN on an EARLIER attempt of THIS task (union over the
+    task's prior attempts' check_results). Excludes the cursor's latest attempt so a
+    just-recorded result never counts itself as a baseline. This is the no-regression
+    floor: a check that was once green must stay green."""
+    latest_id = state.cursor.attempt_id if state.cursor is not None else None
+    green: set[str] = set()
+    for a in task.attempts:
+        if a.id == latest_id:
+            continue
+        green |= {crit for crit, ok in a.check_results if ok}
+    return green
+
+
 class ValidationRunner:
-    """Binding pass/fail ★. Re-runs Task.how_to_validate as code; exit code decides."""
+    """Binding pass/fail ★. Runs the GLOBAL acceptance spec (Task.how_to_validate is
+    usually empty now): PASS when no PREVIOUSLY-GREEN acceptance check has regressed,
+    FAIL (with a regression hint) otherwise. Persists this attempt's per-check results
+    too. Falls back to Task.how_to_validate when there is NO acceptance spec."""
 
     name = "validation_runner"
     phase = Phase.IMPLEMENTING
@@ -140,11 +157,36 @@ class ValidationRunner:
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         task, _ = _active(ctx.state)
-        command = task.how_to_validate
-        exit_code, output = await run_shell(command, self._cwd, ctx.cancel)
-        passed = exit_code == 0
+        checks = ctx.state.acceptance.checks if ctx.state.acceptance else ()
+        if not checks:
+            # fallback: old behavior so non-acceptance flows still work
+            command = task.how_to_validate
+            exit_code, output = await run_shell(command, self._cwd, ctx.cancel)
+            passed = exit_code == 0
+            result = ValidationResult(
+                command=command, exit_code=exit_code, passed=passed, output=output)
+            return NodeResult(output=result, branch="pass" if passed else "fail")
+
+        prev_green = _prev_green_criteria(ctx.state, task)
+        results: list[tuple[str, bool]] = []
+        outputs: list[str] = []
+        for c in checks:
+            code, out = await run_shell(c.command, self._cwd, ctx.cancel)
+            results.append((c.criterion, code == 0))
+            if code != 0:
+                outputs.append(f"[{c.criterion}] exit {code}: {out[:200]}")
+        now_green = {crit for crit, ok in results if ok}
+        regressed = sorted(prev_green - now_green)
+        passed = not regressed
+        summary = ("regressed: " + ", ".join(regressed)) if regressed else (
+            "all known-green checks still pass; "
+            f"{len(now_green)}/{len(checks)} acceptance checks green")
         result = ValidationResult(
-            command=command, exit_code=exit_code, passed=passed, output=output)
+            command="; ".join(c.command for c in checks),
+            exit_code=0 if passed else 1,
+            passed=passed,
+            output=summary + ("\n" + "\n".join(outputs) if outputs else ""),
+            check_results=tuple(results))
         return NodeResult(output=result, branch="pass" if passed else "fail")
 
 
