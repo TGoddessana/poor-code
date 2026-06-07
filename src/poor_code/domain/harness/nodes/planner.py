@@ -137,7 +137,7 @@ class Planner(AgentNode):
             Dependency(task_id=rid, depends_on=id_map.get(dep, dep))
             for t, rid in resolved
             for dep in t.depends_on
-            if dep in id_map  # only keep deps that reference a real (possibly blank) emitted id
+            if dep
         )
         return Plan(tasks=tasks, deps=deps, file_plan=(), plan_md=out.plan_md)
 

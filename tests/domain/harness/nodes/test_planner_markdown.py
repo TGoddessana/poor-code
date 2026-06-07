@@ -12,21 +12,29 @@ def _planner():
     return Planner(llm=None, project_map=pm)
 
 
-def test_blank_id_falls_back_consistently_in_deps():
-    # Task 1 has a blank id (weak model emission) — should resolve to "t1".
-    # Task 2 depends on the blank id "", which must resolve to the same "t1".
+def test_blank_id_task_dep_uses_resolved_id():
+    # Task with a blank id (weak-model emission) resolves to t1; its own dependency
+    # must record the RESOLVED task_id, never "".
     args = json.dumps({"plan_md": "## t1\n## t2", "tasks": [
-        {"id": "", "title": "a", "editable": ["a.py"], "depends_on": []},
-        {"id": "t2", "title": "b", "editable": ["b.py"], "depends_on": [""]},
+        {"id": "", "title": "a", "editable": ["a.py"], "depends_on": ["t2"]},
+        {"id": "t2", "title": "b", "editable": ["b.py"], "depends_on": []},
     ]})
     plan = _planner().parse(args)
     ids = {t.id for t in plan.tasks}
-    # t2 must have a dep pointing at the resolved id for the blank task, not ""
-    assert len(plan.deps) == 1, f"expected 1 dep, got {plan.deps}"
-    # every dependency endpoint must reference an existing task id
-    for d in plan.deps:
-        assert d.task_id in ids, f"dep task_id {d.task_id!r} not in {ids}"
-        assert d.depends_on in ids, f"dep depends_on {d.depends_on!r} not in {ids}"
+    assert "" not in ids                       # blank resolved away
+    assert len(plan.deps) == 1
+    d = plan.deps[0]
+    assert d.task_id != "" and d.task_id in ids
+    assert d.depends_on == "t2"
+
+def test_unknown_dependency_is_kept_for_plan_gate():
+    # A depends_on referencing a non-emitted task id must survive parse (raw),
+    # so plan_gate can flag it — parse must NOT silently drop it.
+    args = json.dumps({"plan_md": "## t1", "tasks": [
+        {"id": "t1", "title": "a", "editable": ["a.py"], "depends_on": ["t99"]},
+    ]})
+    plan = _planner().parse(args)
+    assert any(d.depends_on == "t99" for d in plan.deps)
 
 
 def test_parse_md_and_skeleton():
