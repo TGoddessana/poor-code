@@ -10,9 +10,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from poor_code.domain.harness.ledger import render_build_ledger
+from poor_code.domain.harness.ledger import render_build_ledger, task_section, render_acceptance
 from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLike
-from poor_code.domain.harness.nodes.validator import _task_section
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.snapshot import GitSnapshot, default_git_dir
 from poor_code.domain.harness.tool_output import clamp_tool_output
@@ -187,10 +186,9 @@ class Implementer:
                        "Node server — use an available runtime like python3). If a command "
                        "fails with 'not found', switch runtimes, do not retry it:\n"
                        f"{state.understanding.environment}\n")
-        accept = "\n".join(f"  - ({c.criterion}) {c.command}"
-                           for c in (state.acceptance.checks if state.acceptance else ())) or "  (none)"
+        accept = render_acceptance(state)
         ledger = render_build_ledger(state)
-        task_md = _task_section(state.plan, task.id) if state.plan else task.title
+        task_md = task_section(state.plan, task.id) if state.plan else task.title
         return (f"ACCEPTANCE SPEC (full target; your slice is THIS TASK below):\n{accept}\n\n"
                 f"COMPLETED WORK (ledger):\n{ledger}\n\n"
                 f"{header}"

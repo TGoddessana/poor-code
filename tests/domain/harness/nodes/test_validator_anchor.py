@@ -29,18 +29,18 @@ def test_validator_messages_editable_scope_still_present():
 
 
 def test_task_section_fallback_when_no_marker():
-    from poor_code.domain.harness.nodes.validator import _task_section
+    from poor_code.domain.harness.ledger import task_section
     from poor_code.domain.session.models import Plan
     plan = Plan(tasks=(), plan_md="## t2: something else")
     # no "## t1" in md — should return full md (not just task_id)
-    result = _task_section(plan, "t1")
+    result = task_section(plan, "t1")
     assert result == "## t2: something else"
 
 
 def test_task_section_extracts_correct_slice():
-    from poor_code.domain.harness.nodes.validator import _task_section
+    from poor_code.domain.harness.ledger import task_section
     from poor_code.domain.session.models import Plan
     md = "## t1: first\ncontent1\n## t2: second\ncontent2"
     plan = Plan(tasks=(), plan_md=md)
-    assert _task_section(plan, "t1") == "## t1: first\ncontent1"
-    assert _task_section(plan, "t2") == "## t2: second\ncontent2"
+    assert task_section(plan, "t1") == "## t1: first\ncontent1"
+    assert task_section(plan, "t2") == "## t2: second\ncontent2"

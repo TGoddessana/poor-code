@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from poor_code.domain.harness.ledger import render_build_ledger, task_section, render_acceptance
 from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, validate_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import Layer, Phase, SessionState, Verdict, VerdictKind
@@ -16,15 +17,6 @@ from poor_code.domain.session.models import Layer, Phase, SessionState, Verdict,
 MAX_ADVERSARIAL_ROUNDS = 2
 _TOOL_NAME = "judge"
 
-
-def _task_section(plan, task_id: str) -> str:
-    md = (plan.plan_md if plan else "") or ""
-    marker = f"## {task_id}"
-    i = md.find(marker)
-    if i == -1:
-        return md or task_id
-    j = md.find("\n## ", i + len(marker))
-    return md[i:] if j == -1 else md[i:j]
 
 _SYSTEM = (
     "You are an adversarial Validator. Inspect the implementer's patch against the "
@@ -58,15 +50,13 @@ class Validator(AgentNode):
         return NodeResult(verdict=self.parse(args_json))
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
-        from poor_code.domain.harness.ledger import render_build_ledger
         task = self._active_task(state)
         attempt = self._latest_attempt(state)
         diff = "" if attempt is None or attempt.patch is None else attempt.patch.diff
         editable = ", ".join(task.edit_scope.editable) or "(unspecified)"
         forbidden = ", ".join(task.edit_scope.forbidden) or "(none)"
-        accept = "\n".join(f"  - ({c.criterion}) {c.command}"
-                           for c in (state.acceptance.checks if state.acceptance else ())) or "  (none)"
-        task_md = _task_section(state.plan, task.id) if state.plan else task.title
+        accept = render_acceptance(state)
+        task_md = task_section(state.plan, task.id) if state.plan else task.title
         ledger = render_build_ledger(state)
         return [
             {"role": "system", "content": _SYSTEM},
