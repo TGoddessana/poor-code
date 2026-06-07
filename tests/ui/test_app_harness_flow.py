@@ -49,6 +49,12 @@ def _app() -> PoorCodeApp:
     return PoorCodeApp(agent=agent, make_driver=_make_driver_factory())
 
 
+def test_app_holds_static_narrator():
+    from poor_code.ui.narrator import StaticNarrator
+    app = _app()
+    assert isinstance(app._narrator, StaticNarrator)
+
+
 @pytest.mark.asyncio
 async def test_engineering_request_runs_through_driver_and_ends():
     async with _app().run_test() as pilot:

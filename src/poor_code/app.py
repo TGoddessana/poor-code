@@ -27,6 +27,7 @@ from poor_code.messages import (
 )
 from poor_code.provider.client import LLMClient
 from poor_code.slash.dispatcher import SlashDispatcher
+from poor_code.ui.narrator import StaticNarrator
 from poor_code.ui.screens.chat import ChatScreen
 from poor_code.ui.store import (
     AnswerSubmitted, AppState, ProviderChanged, PromptSubmitted, Store,
@@ -61,6 +62,7 @@ class PoorCodeApp(App):
         self._harness_state: SessionState | None = None
         self._turn_id: str | None = None
         self._turn_started: float = 0.0
+        self._narrator = StaticNarrator()
 
     def on_mount(self) -> None:
         self.store.subscribe(lambda s: setattr(self, "app_state", s))
@@ -146,7 +148,7 @@ class PoorCodeApp(App):
         self.run_worker(self._drive(state), group="turn", exclusive=True)
 
     async def _drive(self, state: SessionState) -> None:
-        sink = TurnSink(self._turn_id, self.store.dispatch)
+        sink = TurnSink(self._turn_id, self.store.dispatch, narrator=self._narrator)
         model = getattr(self.agent.llm, "model", "") or ""
         try:
             final = await self._harness_driver.run(state, self._cancel, sink=sink)
