@@ -162,6 +162,7 @@ class NodeEntered(Event):
     turn_id: str
     node: str
     phase: str
+    activity: str = ""   # human-readable present-tense narration; "" → UI falls back
 
 
 @dataclass(frozen=True)
@@ -188,3 +189,15 @@ class ReportReady(Event):
     outcome: str
     summary: str
     lines: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class NodeProduced(Event):
+    """A node finished and produced data. Carries a one-line headline + optional
+    detail lines for an inline 'result card'. Strings are supplied by whoever
+    drives (static narrator today, LLM-driver later) — UI just renders them."""
+    turn_id: str
+    node: str
+    phase: str
+    headline: str
+    detail: tuple[str, ...] = ()

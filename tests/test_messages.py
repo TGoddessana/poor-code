@@ -49,6 +49,8 @@ from poor_code.messages import (
     AssistantMessageCompleted,
     AssistantTextDelta,
     Event,
+    NodeEntered,
+    NodeProduced,
     ToolCallFailed,
     ToolCallFinished,
     ToolCallStarted,
@@ -101,3 +103,18 @@ def test_events_are_frozen_and_subclass_event(ev):
     assert isinstance(ev, Event)
     with pytest.raises(dataclasses.FrozenInstanceError):
         ev.turn_id = "mutated"  # type: ignore[misc]
+
+
+def test_node_entered_has_optional_activity():
+    e = NodeEntered(turn_id="t", node="explorer", phase="locating")
+    assert e.activity == ""
+    e2 = NodeEntered(turn_id="t", node="explorer", phase="locating", activity="살펴봅니다")
+    assert e2.activity == "살펴봅니다"
+
+
+def test_node_produced_carries_headline_and_detail():
+    e = NodeProduced(turn_id="t", node="explorer", phase="locating",
+                     headline="5 files", detail=("a.py", "b.py"))
+    assert e.headline == "5 files"
+    assert e.detail == ("a.py", "b.py")
+    assert NodeProduced(turn_id="t", node="x", phase="p", headline="h").detail == ()
