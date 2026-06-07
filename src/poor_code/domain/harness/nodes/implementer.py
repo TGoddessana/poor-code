@@ -127,9 +127,7 @@ class Implementer:
         async for ev in self._llm.stream(messages=messages, tools=self._tools.schemas()):
             match ev:
                 case TextDelta(text=t):
-                    text += t
-                    if sink is not None:
-                        sink.text_delta(t)
+                    text += t   # keep accumulator for parsing; do NOT leak to UI
                 case ToolCallStarted(call_id=cid, name=name):
                     pending[cid] = {"name": name, "args": ""}
                     order.append(cid)

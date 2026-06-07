@@ -62,7 +62,8 @@ class _Sink:
 
 
 @pytest.mark.asyncio
-async def test_explorer_emits_tool_events_and_text():
+async def test_explorer_emits_tool_events_but_not_text():
+    """Tool events (start/done) must reach the sink; raw reasoning prose must NOT."""
     node = ExploringNode(_ExploreThenEmitLLM(), project_map=_empty_map(),
                          tools=ToolRegistry([_GrepStub()]))
     sink = _Sink()
@@ -70,6 +71,9 @@ async def test_explorer_emits_tool_events_and_text():
         state=SessionState(request=Request(raw_text="find x", kind=RequestKind.ENGINEERING)),
         cancel=asyncio.Event(), sink=sink)
     await node.run(ctx)
-    assert ("text", "searching ") in sink.events
+    # Raw text deltas must NOT be forwarded to the UI sink
+    assert all(kind != "text" for kind, _ in sink.events), \
+        f"Unexpected text events in sink: {sink.events}"
+    # Tool events MUST still be visible
     assert ("start", "grep") in sink.events
     assert ("done", "a.py:1: hit") in sink.events
