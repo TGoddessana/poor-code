@@ -52,6 +52,7 @@ PromptBox Input {
     border-left: thick $accent;
     background: $boost;
     color: $text;
+    text-style: bold;
     padding: 0 1;
     margin-bottom: 1;
 }
@@ -73,7 +74,9 @@ PromptBox Input {
 
 .tool-entry {
     border-left: solid $primary;
+    background: $panel;
     padding-left: 1;
+    margin-bottom: 0;
 }
 
 .tool-running { color: $warning; }
@@ -146,5 +149,80 @@ LoginScreen {
     color: $text-muted;
     height: 1;
     margin-top: 0;
+    margin-bottom: 1;
+}
+
+.stepper-bar {
+    height: 1;
+    color: $text-muted;
+    text-style: bold;
+    padding: 0 1;
+    margin-bottom: 1;
+    border-bottom: solid $primary;
+}
+
+.static-segment {
+    height: auto;
+}
+
+.static-segment-body {
+    color: $text;
+    padding: 0 1;
+}
+
+.static-segment-body.node-label {
+    color: $accent;
+    text-style: bold;
+    margin-top: 1;
+}
+
+.static-segment-body.node-result {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+.static-segment-body.user-answer {
+    color: $text;
+    border-left: thick $secondary;
+    background: $boost;
+    margin-left: 2;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+.query-widget {
+    border-left: thick $warning;
+    background: $boost;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+.query-prompt {
+    text-style: bold;
+    color: $text;
+}
+
+#query-options {
+    background: transparent;
+    border: none;
+    height: auto;
+    max-height: 8;
+}
+
+StateInspector {
+    align: center middle;
+}
+
+#inspector-box {
+    width: 70;
+    height: auto;
+    padding: 1 2;
+    border: round $accent;
+    background: $surface;
+}
+
+.inspector-title {
+    text-style: bold;
+    color: $accent;
     margin-bottom: 1;
 }
