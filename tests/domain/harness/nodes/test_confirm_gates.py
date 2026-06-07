@@ -5,8 +5,9 @@ import pytest
 from poor_code.domain.harness.node import NodeContext
 from poor_code.domain.harness.nodes.confirm_gates import SpecConfirmGate, PlanConfirmGate
 from poor_code.domain.session.models import (
-    AcceptanceCheck, AcceptanceSpec, AnsweredQuery, EditScope, Plan, Policy, Query,
-    QueryKind, Requirement, SessionState, Task, UserResponse,
+    AcceptanceCheck, AcceptanceSpec, AnsweredQuery, EditScope, Layer, Plan, Policy,
+    Query, QueryKind, Requirement, SessionState, Task, Transition, TriggerKind,
+    UserResponse, VerdictKind,
 )
 
 
@@ -14,9 +15,16 @@ def _ctx(state):
     return NodeContext(state=state, cancel=asyncio.Event())
 
 
-def _answered(query_id: str) -> AnsweredQuery:
+def _answered(query_id: str, answer: str = "ok") -> AnsweredQuery:
     q = Query(id=query_id, kind=QueryKind.APPROVE, prompt="...")
-    return AnsweredQuery(query=q, response=UserResponse(query_id=query_id, answer="ok"))
+    return AnsweredQuery(query=q, response=UserResponse(query_id=query_id, answer=answer))
+
+
+def _bounce(from_node: str, to_node: str) -> Transition:
+    """A GATE back-edge transition, as the Driver logs it when a gate returns a
+    REPAIR verdict (trigger=GATE, from_node=gate, to_node=layer producer)."""
+    return Transition(from_node=from_node, to_node=to_node,
+                      trigger=TriggerKind.GATE, reason="reject", ts_iso="2026-06-07T00:00:00")
 
 
 _REQ = Requirement(summary="build fib", acceptance=("n=10->55",))
@@ -76,3 +84,90 @@ async def test_unrelated_answered_query_does_not_advance():
         interview=(_answered("confirm_plan"),))
     res = await SpecConfirmGate().run(_ctx(s))
     assert res.query is not None
+
+
+# --- Task 11: reject-with-comment → bounded layer repair ---
+
+@pytest.mark.asyncio
+async def test_reject_routes_to_repair():
+    # Spec gate, a non-approval comment, no prior repair bounces → REPAIR ACCEPTANCE.
+    s = SessionState(
+        policy=Policy.SUPERVISED, requirement=_REQ, acceptance=_SPEC,
+        interview=(_answered("confirm_spec", "add more edge cases"),))
+    res = await SpecConfirmGate().run(_ctx(s))
+    assert res.query is None
+    assert res.verdict is not None
+    assert res.verdict.kind is VerdictKind.REPAIR
+    assert res.verdict.layer is Layer.ACCEPTANCE
+    assert "add more edge cases" in (res.verdict.hint or "")
+
+
+@pytest.mark.asyncio
+async def test_plan_reject_routes_to_plan_layer():
+    s = SessionState(
+        policy=Policy.SUPERVISED, plan=_PLAN,
+        interview=(_answered("confirm_plan", "split task t1"),))
+    res = await PlanConfirmGate().run(_ctx(s))
+    assert res.verdict is not None
+    assert res.verdict.kind is VerdictKind.REPAIR
+    assert res.verdict.layer is Layer.PLAN
+    assert "split task t1" in (res.verdict.hint or "")
+
+
+@pytest.mark.asyncio
+async def test_approval_advances():
+    s = SessionState(
+        policy=Policy.SUPERVISED, requirement=_REQ, acceptance=_SPEC,
+        interview=(_answered("confirm_spec", "approve"),))
+    res = await SpecConfirmGate().run(_ctx(s))
+    assert res.verdict is None and res.query is None and res.output is None
+
+
+@pytest.mark.asyncio
+async def test_reject_cap_advances():
+    # cap=3 prior bounces from this gate already in history → advance, no new repair.
+    cap = SpecConfirmGate.repair_cap
+    history = tuple(_bounce("spec_confirm_gate", "acceptance_oracle") for _ in range(cap))
+    s = SessionState(
+        policy=Policy.SUPERVISED, requirement=_REQ, acceptance=_SPEC,
+        history=history,
+        # cap+1 answers so the latest IS fresh relative to the cap bounces consumed.
+        interview=tuple(_answered("confirm_spec", "still not good") for _ in range(cap + 1)),
+    )
+    res = await SpecConfirmGate().run(_ctx(s))
+    assert res.verdict is None and res.query is None and res.output is None
+
+
+@pytest.mark.asyncio
+async def test_no_infinite_loop_on_reentry():
+    # Re-entry scenario: the gate emitted a query, got ONE reject, returned REPAIR,
+    # the Driver logged ONE GATE bounce, the layer re-ran, and the gate is re-entered.
+    # The SAME (now-consumed) reject AnsweredQuery is still in state.interview. The gate
+    # must NOT emit the same repair again; with no NEW answer it re-queries for a fresh
+    # decision (idempotency: answers_seen(1) <= rejects_consumed(1) → stale → re-query).
+    gate = SpecConfirmGate()
+
+    # 1) First reject → REPAIR.
+    s1 = SessionState(
+        policy=Policy.SUPERVISED, requirement=_REQ, acceptance=_SPEC,
+        interview=(_answered("confirm_spec", "needs work"),))
+    r1 = await gate.run(_ctx(s1))
+    assert r1.verdict is not None and r1.verdict.kind is VerdictKind.REPAIR
+
+    # 2) Driver logged the bounce; layer re-ran; gate re-entered with NO new answer.
+    s2 = SessionState(
+        policy=Policy.SUPERVISED, requirement=_REQ, acceptance=_SPEC,
+        history=(_bounce("spec_confirm_gate", "acceptance_oracle"),),
+        interview=(_answered("confirm_spec", "needs work"),))  # SAME stale answer
+    r2 = await gate.run(_ctx(s2))
+    assert r2.verdict is None              # NOT another repair → no loop
+    assert r2.query is not None           # re-queries for a fresh decision
+
+    # 3) User now answers afresh with approval → advance.
+    s3 = SessionState(
+        policy=Policy.SUPERVISED, requirement=_REQ, acceptance=_SPEC,
+        history=(_bounce("spec_confirm_gate", "acceptance_oracle"),),
+        interview=(_answered("confirm_spec", "needs work"),
+                   _answered("confirm_spec", "approve")))
+    r3 = await gate.run(_ctx(s3))
+    assert r3.verdict is None and r3.query is None
