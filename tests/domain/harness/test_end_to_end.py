@@ -169,6 +169,8 @@ def _planning_registry(llm, pm):
     from poor_code.domain.harness.nodes.interviewer import Interviewer
     from poor_code.domain.harness.nodes.planner import Planner
     from poor_code.domain.harness.nodes.plan_reviewer import PlanReviewer
+    from poor_code.domain.harness.nodes.confirm_gates import (
+        SpecConfirmGate, PlanConfirmGate)
     from poor_code.domain.harness.nodes.provisioner import Provisioner
     from poor_code.domain.tool.registry import ToolRegistry
     from poor_code.domain.tool.read import ReadTool
@@ -181,9 +183,11 @@ def _planning_registry(llm, pm):
     reg.register(AcceptanceOracle(llm))
     reg.register(AcceptanceGate())
     reg.register(AcceptanceCritic(llm))
+    reg.register(SpecConfirmGate())
     reg.register(Planner(llm, project_map=pm))
     reg.register(PlanGate())
     reg.register(PlanReviewer(llm))
+    reg.register(PlanConfirmGate())
     reg.register(Provisioner(llm, cwd=pm.cwd,  # empty cwd → quick exit; keeps impl boundary
                              tools=ToolRegistry([ReadTool(), GrepTool()])))
     return reg  # provisioner → implement_loop (subgraph, unregistered here) → park at boundary
@@ -191,7 +195,7 @@ def _planning_registry(llm, pm):
 
 @pytest.mark.asyncio
 async def test_interview_done_flows_through_planner_then_task_selector_advances_to_composer(tmp_path: Path):
-    from poor_code.domain.session.models import UserResponse
+    from poor_code.domain.session.models import UserResponse, QueryKind
     llm = ScriptedLLM(
         kind="engineering",
         code_context={"candidates": [{"file": "src/auth.py", "symbol": "login"}],
@@ -205,20 +209,17 @@ async def test_interview_done_flows_through_planner_then_task_selector_advances_
                                                 "acceptance": ["providers/google.py"]}},
         ],
         plan={
+            "plan_md": ("## t1: src/provider/google.py — Add Google provider\n"
+                        "Implement a Google OAuth provider class so users can log in "
+                        "with Google. Targets the auth acceptance check."),
             "tasks": [
                 {
+                    "id": "t1",
                     "title": "Add Google provider",
-                    "purpose": "Support google login",
-                    "edit_scope": {"editable": ["src/provider/google.py"]},
-                    "how_to_validate": "pytest tests/test_auth.py",
-                    "steps": [{
-                        "kind": "impl", "file": "src/provider/google.py",
-                        "body": "class Google:\n    pass",
-                        "run": "pytest tests/test_auth.py", "expected": "PASS",
-                    }],
+                    "editable": ["src/provider/google.py"],
+                    "depends_on": [],
                 },
             ],
-            "deps": [],
         },
     )
     registry = _planning_registry(llm, _map())
@@ -233,8 +234,14 @@ async def test_interview_done_flows_through_planner_then_task_selector_advances_
         state = await driver.run(state, asyncio.Event())
         if state.pending_query is None:
             break
-        questions_asked += 1
         q = state.pending_query
+        # The two SUPERVISED confirm gates (spec + plan) suspend with an APPROVE query;
+        # approve them so the chain proceeds. Only the interviewer's real questions count.
+        if q.kind is QueryKind.APPROVE:
+            state = state.with_user_response(
+                UserResponse(query_id=q.id, answer="approve"))
+            continue
+        questions_asked += 1
         state = state.with_user_response(
             UserResponse(query_id=q.id, answer="new",
                          chosen_option=(q.options[0] if q.options else None)))
@@ -245,7 +252,10 @@ async def test_interview_done_flows_through_planner_then_task_selector_advances_
     assert state.plan is not None
     assert state.plan.tasks[0].id == "t1"
     assert state.plan.tasks[0].edit_scope.editable == ("src/provider/google.py",)
-    assert len(state.interview) == 2
+    # interview now also records the two confirm-gate approvals (AnsweredQuery); count
+    # only the interviewer's own questions (q* ids), which must be exactly the 2 asked.
+    interview_qs = [aq for aq in state.interview if aq.query.id.startswith("q")]
+    assert len(interview_qs) == 2
     # The execution loop is folded into the implement_loop subgraph (unregistered in this
     # planning-only registry), so the planning chain parks at that boundary instead of at
     # the old inner 'composer'. Same observation: planning completed, execution boundary

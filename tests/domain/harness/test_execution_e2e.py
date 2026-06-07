@@ -7,7 +7,7 @@ import pytest
 
 from poor_code.domain.harness import build_default_registry, Driver, route
 from poor_code.domain.session.models import (
-    SessionState, Cursor, Phase, Request, RequestKind, ReportOutcome, TaskStatus)
+    SessionState, Cursor, Phase, Policy, Request, RequestKind, ReportOutcome, TaskStatus)
 from poor_code.domain.session.store import SessionStore
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.provider.events import (
@@ -32,13 +32,11 @@ class E2ELLM:
             "emit_acceptance": {"checks": [{"criterion": "out.txt exists",
                                             "command": "test -f out.txt"}]},
             "emit_critique": {"adequate": True, "counterexample": None},
-            "emit_plan": {"tasks": [{"title": "make out.txt", "purpose": "p",
-                                     "edit_scope": {"editable": ["out.txt"]},
-                                     "how_to_validate": "test -f out.txt",
-                                     "steps": [{"kind": "impl", "file": "out.txt",
-                                                "body": "hi", "run": "test -f out.txt",
-                                                "expected": "exit 0"}]}],
-                          "deps": []},
+            "emit_plan": {
+                "plan_md": ("## t1: out.txt — make out.txt\n"
+                            "Create out.txt so the acceptance check `test -f out.txt` passes."),
+                "tasks": [{"id": "t1", "title": "make out.txt",
+                           "editable": ["out.txt"], "depends_on": []}]},
             "emit_plan_review": {"ok": True},
             "judge": {"verdict": "advance", "hint": ""},
         }
@@ -82,7 +80,10 @@ async def test_full_execution_reaches_reporter_and_writes_file(tmp_path):
     driver = Driver(reg, route, on_step=on_step)
     start = SessionState(
         cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
-        request=Request(raw_text="create out.txt", kind=RequestKind.ENGINEERING))
+        request=Request(raw_text="create out.txt", kind=RequestKind.ENGINEERING),
+        # FULL_AUTO so the SUPERVISED confirm gates (spec/plan) are skipped — this test
+        # drives the graph in a single run() with no human to answer them.
+        policy=Policy.FULL_AUTO)
     final = await driver.run(start, asyncio.Event())
 
     # the graph ran through reporter (registered) and terminated
