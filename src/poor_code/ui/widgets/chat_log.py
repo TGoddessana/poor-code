@@ -11,6 +11,7 @@ from poor_code.ui.store import (
     ReportSegment, TextSegment, ToolCallView, UserAnswerSegment,
 )
 from poor_code.ui.widgets.banner import Banner
+from poor_code.ui.widgets.query_widget import QueryWidget
 from poor_code.ui.widgets.streaming_markdown import StreamingMarkdown
 
 __all__ = ["ChatLog", "TurnBlock", "ToolCallEntry", "StaticSegment", "SPINNER_FRAMES"]
@@ -266,6 +267,8 @@ class TurnBlock(Widget):
             return md
         if isinstance(seg, ToolCallView):
             return ToolCallEntry(seg)
+        if isinstance(seg, QuerySegment) and seg.options and getattr(self.app, "app_state", None) is not None and self.app.app_state.awaiting_input:
+            return QueryWidget(seg)
         return StaticSegment(seg)
 
     @staticmethod
