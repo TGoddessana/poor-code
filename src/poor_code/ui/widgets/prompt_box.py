@@ -34,6 +34,14 @@ RUNNING_FRAMES = [
 ]
 
 
+def _placeholder_for(state) -> str | None:
+    if getattr(state, "awaiting_input", False):
+        return "Type your answer, or pick an option above"
+    if state.is_processing:
+        return "Ctrl+C to cancel"
+    return None  # → original placeholder
+
+
 def compute_mascot_mode(state: AppState) -> MascotMode:
     if not state.is_processing:
         return "idle"
@@ -67,12 +75,7 @@ class PromptBox(Container):
             return
         self._cached_is_processing = key
         inp = self.query_one(Input)
-        if state.awaiting_input:
-            inp.placeholder = "답을 입력하세요"
-        elif state.is_processing:
-            inp.placeholder = "Ctrl+C로 취소"
-        else:
-            inp.placeholder = self._original_placeholder
+        inp.placeholder = _placeholder_for(state) or self._original_placeholder
 
     def _sync_mascot(self, state: AppState) -> None:
         new_mode = compute_mascot_mode(state)

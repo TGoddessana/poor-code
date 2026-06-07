@@ -261,7 +261,7 @@ async def test_placeholder_changes_when_processing():
         pilot.app.store.dispatch(PromptSubmitted(cmd_id="x", user_text="hello"))
         await pilot.pause()
 
-        assert inp.placeholder == "Ctrl+C로 취소"
+        assert inp.placeholder == "Ctrl+C to cancel"
 
         from poor_code.messages import TurnStarted, TurnEnded
         pilot.app.store.dispatch(TurnStarted(cmd_id="x", turn_id="t1"))
