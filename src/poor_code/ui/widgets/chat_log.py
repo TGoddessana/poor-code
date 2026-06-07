@@ -7,7 +7,8 @@ from textual.widget import Widget
 from textual.widgets import Markdown, Static
 
 from poor_code.ui.store import (
-    AppState, NodeLabelSegment, PlanSegment, QuerySegment, ReportSegment, TextSegment, ToolCallView,
+    AppState, NodeLabelSegment, NodeResultSegment, PlanSegment, QuerySegment,
+    ReportSegment, TextSegment, ToolCallView, UserAnswerSegment,
 )
 from poor_code.ui.widgets.banner import Banner
 from poor_code.ui.widgets.streaming_markdown import StreamingMarkdown
@@ -17,14 +18,24 @@ __all__ = ["ChatLog", "TurnBlock", "ToolCallEntry", "StaticSegment", "SPINNER_FR
 
 def _render_segment(seg) -> str:
     if isinstance(seg, NodeLabelSegment):
-        return f"▸ {seg.node}"
+        gate = "  ⚠ decision needed" if seg.node.endswith("_gate") and "confirm" in seg.node else ""
+        text = seg.activity or seg.node
+        suffix = f" (×{seg.retry + 1})" if seg.retry else ""
+        return f"▸ {text}{suffix}{gate}"
+    if isinstance(seg, NodeResultSegment):
+        head = f"  ⤷ {seg.headline}"
+        if seg.detail:
+            head += "\n" + "\n".join(f"     {d}" for d in seg.detail)
+        return head
+    if isinstance(seg, UserAnswerSegment):
+        return f"↳ {seg.text}"
     if isinstance(seg, QuerySegment):
         lines = [f"❓ {seg.prompt}"]
         for i, opt in enumerate(seg.options, start=1):
             lines.append(f"   [{i}] {opt}")
         return "\n".join(lines)
     if isinstance(seg, PlanSegment):
-        return "📋 계획\n" + "\n".join(f"   {ln}" for ln in seg.lines)
+        return "📋 Plan\n" + "\n".join(f"   {ln}" for ln in seg.lines)
     if isinstance(seg, ReportSegment):
         icon = "✅" if seg.outcome == "succeeded" else "⚠️"
         body = [f"{icon} {seg.summary}"]
@@ -43,7 +54,14 @@ class StaticSegment(Widget):
         self._seg = seg
 
     def compose(self) -> ComposeResult:
-        yield Static(_render_segment(self._seg), classes="static-segment-body")
+        cls = "static-segment-body"
+        if isinstance(self._seg, UserAnswerSegment):
+            cls += " user-answer"
+        elif isinstance(self._seg, NodeResultSegment):
+            cls += " node-result"
+        elif isinstance(self._seg, NodeLabelSegment):
+            cls += " node-label"
+        yield Static(_render_segment(self._seg), classes=cls)
 
     def refresh_from(self, seg) -> None:
         if seg == self._seg:
@@ -285,7 +303,7 @@ class TurnBlock(Widget):
                     self.app.call_later(w.write_delta, seg.text)
                 elif isinstance(seg, ToolCallView) and isinstance(w, ToolCallEntry):
                     w.refresh_from(seg)
-                elif isinstance(seg, (NodeLabelSegment, QuerySegment, PlanSegment, ReportSegment)) and isinstance(w, StaticSegment):
+                elif isinstance(seg, (NodeLabelSegment, QuerySegment, PlanSegment, ReportSegment, UserAnswerSegment, NodeResultSegment)) and isinstance(w, StaticSegment):
                     w.refresh_from(seg)
                 else:
                     # Kind mismatch — replace.
