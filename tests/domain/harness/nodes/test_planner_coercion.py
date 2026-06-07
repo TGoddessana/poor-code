@@ -1,6 +1,7 @@
-"""FM2: the planner must survive the exact fibonacci-killer payload — a weak model
-wrapping the steps array as `{"step": [...]}` — by coercing the shape, not crashing
-with a raw ValidationError (which terminated the whole run, repair count 0)."""
+"""FM2: the planner must survive weak-model deformations — e.g. tasks array wrapped
+as `{"task": [...]}` — by coercing the shape, not crashing with a raw ValidationError
+(which terminated the whole run, repair count 0). Tests adapted to the new skeleton
+schema (_SkeletonTaskOut: id, title, editable, depends_on)."""
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,29 +18,25 @@ def _planner():
     return Planner(llm=object(), project_map=pm)
 
 
-def test_parse_coerces_steps_emitted_as_singular_key_object():
-    raw = (
-        '{"tasks":[{"title":"fib","purpose":"p",'
-        '"edit_scope":{"editable":["fib.py"]},'
-        '"how_to_validate":"python -c x",'
-        '"steps":{"step":[{"kind":"impl","file":"fib.py","body":"def f(): pass",'
-        '"run":"python -c x","expected":"PASS"}]}}]}'
-    )
-    plan = _planner().parse(raw)
-    assert len(plan.tasks) == 1
-    assert plan.tasks[0].steps[0].file == "fib.py"
-    assert plan.tasks[0].steps[0].body == "def f(): pass"
-
-
 def test_parse_coerces_tasks_emitted_as_singular_key_object():
-    raw = '{"tasks":{"task":[{"title":"t","purpose":"p"}]}}'
+    # Weak model wraps tasks list as {"task": [...]} instead of plain list.
+    raw = '{"tasks":{"task":[{"id":"t1","title":"t","editable":["fib.py"],"depends_on":[]}]}}'
     plan = _planner().parse(raw)
     assert len(plan.tasks) == 1
     assert plan.tasks[0].title == "t"
+    assert plan.tasks[0].edit_scope.editable == ("fib.py",)
+
+
+def test_parse_coerces_editable_emitted_as_singular_key_object():
+    # Weak model wraps editable list as {"file": [...]} instead of plain list.
+    raw = '{"tasks":[{"id":"t1","title":"fib","editable":{"file":["fib.py"]},"depends_on":[]}]}'
+    plan = _planner().parse(raw)
+    assert len(plan.tasks) == 1
+    assert plan.tasks[0].edit_scope.editable == ("fib.py",)
 
 
 def test_parse_raises_structured_output_error_not_raw_validation_error():
-    # tasks[].title is required; omitting it must surface as StructuredOutputError
+    # tasks[].id is required; omitting it must surface as StructuredOutputError
     # (caught downstream as a recoverable LLM failure), never a raw ValidationError.
     with pytest.raises(StructuredOutputError):
-        _planner().parse('{"tasks":[{"purpose":"p"}]}')
+        _planner().parse('{"tasks":[{"title":"no-id-field"}]}')

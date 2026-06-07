@@ -30,19 +30,18 @@ def _map():
 
 
 @pytest.mark.asyncio
-async def test_planner_system_prompt_teaches_patch_size_and_example():
-    llm = FakeLLM({"tasks": [], "deps": []})
+async def test_planner_system_prompt_teaches_patch_size_and_skeleton():
+    llm = FakeLLM({"tasks": []})
     state = SessionState(requirement=Requirement(summary="x"))
     await Planner(llm, project_map=_map()).run(NodeContext(state, cancel=asyncio.Event()))
     system = llm.seen_messages[0]["content"]
-    # rubric signals
+    # Core rubric: patch-sized deliverables
     assert "patch" in system.lower()
-    assert "one primary" in system.lower() or "one editable" in system.lower()
-    assert "observable" in system.lower()
-    # worked example with a runnable validation
-    assert "curl" in system
-    assert "process.exit(1)" in system
-    # service-persistence teaching: launch-and-leave-running, validate via bare probe
-    # against the live instance (NOT start-then-stop)
-    assert "bare probe" in system.lower()
-    assert "leaves it running" in system.lower()
+    # Markdown-first design
+    assert "plan_md" in system
+    assert "markdown" in system.lower()
+    # Skeleton fields
+    assert "editable" in system.lower()
+    assert "depends_on" in system.lower()
+    # Implementer delegation (planner does NOT write steps)
+    assert "implementer" in system.lower()

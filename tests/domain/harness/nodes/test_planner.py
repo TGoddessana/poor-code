@@ -16,7 +16,6 @@ from poor_code.domain.session.models import (
     RequestKind,
     Requirement,
     SessionState,
-    StepKind,
 )
 from poor_code.provider.events import (
     FinishedReason,
@@ -102,37 +101,28 @@ async def test_planner_surfaces_repair_hint_and_prior_plan():
 def test_system_prompt_carries_strengthening_levers():
     from poor_code.domain.harness.nodes.planner import _SYSTEM
     low = _SYSTEM.lower()
-    assert "literal" in low
-    assert "steps" in low and "body" in low and "expected" in low
-    assert "todo" in low and "edge cases" in low
     assert "do not invent" in low
+    assert "editable" in low  # tasks carry editable files
+    assert "implementer" in low  # delegates steps to implementer
 
 
 @pytest.mark.asyncio
-async def test_planner_parses_steps_with_deterministic_ids():
+async def test_planner_parses_skeleton_task_with_editable_and_deps():
     payload = {
-        "file_plan": [{"path": "x.py", "responsibility": "f"}],
-        "tasks": [{
-            "title": "add f", "purpose": "p",
-            "edit_scope": {"editable": ["x.py", "tests/x_test.py"]},
-            "how_to_validate": "pytest tests/x_test.py -q",
-            "steps": [
-                {"kind": "test", "file": "tests/x_test.py",
-                 "body": "def test_f():\n    assert f() == 1",
-                 "run": "pytest tests/x_test.py -q", "expected": "PASS"},
-                {"kind": "impl", "file": "x.py", "anchor": "end of file",
-                 "body": "def f():\n    return 1"},
-            ],
-        }],
+        "tasks": [
+            {"id": "t1", "title": "add f", "editable": ["x.py", "tests/x_test.py"], "depends_on": []},
+            {"id": "t2", "title": "wire f", "editable": ["main.py"], "depends_on": ["t1"]},
+        ],
     }
     res = await Planner(FakeLLM(payload), project_map=_map()).run(
         NodeContext(_state(), cancel=asyncio.Event())
     )
-    task = res.output.tasks[0]
-    assert [s.id for s in task.steps] == ["t1.s1", "t1.s2"]
-    assert task.steps[0].kind is StepKind.TEST
-    assert task.steps[1].body == "def f():\n    return 1"
-    assert task.steps[0].expected == "PASS"
+    plan = res.output
+    assert plan.tasks[0].id == "t1"
+    assert plan.tasks[0].edit_scope.editable == ("x.py", "tests/x_test.py")
+    assert plan.tasks[0].steps == ()
+    assert plan.tasks[0].how_to_validate == ""
+    assert any(d.task_id == "t2" and d.depends_on == "t1" for d in plan.deps)
 
 
 @pytest.mark.asyncio
@@ -140,24 +130,18 @@ async def test_planner_emits_plan_with_deterministic_task_ids():
     llm = FakeLLM({
         "tasks": [
             {
+                "id": "t1",
                 "title": "Add Google provider",
-                "purpose": "Support google login provider",
-                "description": "Create the provider module.",
-                "edit_scope": {
-                    "editable": ["src/provider/google.py"],
-                    "readonly": ["src/auth.py"],
-                    "forbidden": ["src/poor_code/messages.py"],
-                },
-                "how_to_validate": "pytest tests/test_auth.py",
+                "editable": ["src/provider/google.py"],
+                "depends_on": [],
             },
             {
+                "id": "t2",
                 "title": "Wire provider selection",
-                "purpose": "Expose google through login",
-                "edit_scope": {"editable": ["src/auth.py"]},
-                "how_to_validate": "pytest tests/test_auth.py",
+                "editable": ["src/auth.py"],
+                "depends_on": ["t1"],
             },
         ],
-        "deps": [{"task_id": "t2", "depends_on": "t1"}],
     })
     res = await Planner(llm, project_map=_map()).run(
         NodeContext(_state(), cancel=asyncio.Event())
@@ -167,8 +151,7 @@ async def test_planner_emits_plan_with_deterministic_task_ids():
     assert plan.tasks[0].id == "t1"
     assert plan.tasks[1].id == "t2"
     assert plan.tasks[0].edit_scope.editable == ("src/provider/google.py",)
-    assert plan.tasks[0].how_to_validate == "pytest tests/test_auth.py"
-    assert plan.deps[0].depends_on == "t1"
+    assert plan.deps[0].task_id == "t2" and plan.deps[0].depends_on == "t1"
 
 
 @pytest.mark.asyncio
@@ -221,25 +204,17 @@ async def test_planner_falls_back_to_request_when_requirement_absent():
 
 
 @pytest.mark.asyncio
-async def test_planner_emits_file_plan():
+async def test_planner_file_plan_always_empty_in_new_schema():
+    # file_plan is no longer emitted by the model; the planner always returns file_plan=().
     llm = FakeLLM({
-        "file_plan": [
-            {"path": "server.py", "responsibility": "HTTP server on :3000"},
-        ],
-        "tasks": [{
-            "title": "server",
-            "purpose": "serve fib",
-            "edit_scope": {"editable": ["server.py"]},
-            "how_to_validate": "curl -fs localhost:3000/fib/10 | grep -qx 55",
-        }],
-        "deps": [],
+        "tasks": [{"id": "t1", "title": "server", "editable": ["server.py"], "depends_on": []}],
     })
     res = await Planner(llm, project_map=_map()).run(
         NodeContext(_state(), cancel=asyncio.Event())
     )
     plan = res.output
-    assert plan.file_plan[0].path == "server.py"
-    assert plan.file_plan[0].responsibility == "HTTP server on :3000"
+    assert plan.file_plan == ()
+    assert plan.tasks[0].edit_scope.editable == ("server.py",)
 
 
 @pytest.mark.asyncio
@@ -259,7 +234,6 @@ async def test_planner_prompt_teaches_cohesion_not_behavior_split():
         NodeContext(_state(), cancel=asyncio.Event())
     )
     system = llm.seen_messages[0]["content"].lower()
-    assert "responsibility" in system          # split by responsibility...
-    assert "change together" in system         # ...files that change together stay together
-    assert "file_plan" in system               # file-plan-first instruction
-    assert "fewer" in system                    # bias to merge
+    assert "fewer" in system                   # bias to merge
+    assert "merge" in system                   # explicit merge instruction
+    assert "plan_md" in system                 # markdown-first design
