@@ -1,7 +1,7 @@
 from poor_code.messages import NodeEntered, NodeProduced
 from poor_code.ui.store import (
     AppState, NodeLabelSegment, NodeResultSegment, TurnView, UserAnswerSegment,
-    AnswerSubmitted, reduce,
+    AnswerSubmitted, PromptSubmitted, reduce,
 )
 
 
@@ -61,3 +61,19 @@ def test_node_produced_appends_result_segment():
     seg = s.turns[0].segments[-1]
     assert isinstance(seg, NodeResultSegment)
     assert seg.headline == "5 files / 2 tests" and seg.detail == ("a.py",)
+
+
+def test_prompt_submitted_resets_phase_tracking():
+    s = AppState(current_phase="finalizing", phases_seen=("routing", "finalizing"))
+    s2 = reduce(s, PromptSubmitted(cmd_id="c2", user_text="next request"))
+    assert s2.current_phase is None
+    assert s2.phases_seen == ()
+
+
+def test_answer_submitted_does_not_reset_phase_tracking():
+    # answer branch continues the same turn → phases must persist
+    s = AppState(turns=(_turn(),), awaiting_input=True,
+                 current_phase="planning", phases_seen=("routing", "planning"))
+    s2 = reduce(s, AnswerSubmitted(turn_id="t1", answer="x"))
+    assert s2.current_phase == "planning"
+    assert s2.phases_seen == ("routing", "planning")

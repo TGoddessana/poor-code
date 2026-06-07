@@ -276,7 +276,8 @@ def reduce(state: AppState, action: Action) -> AppState:
                 turn_id=None, cmd_id=cid, user_text=text, status="pending"
             )
             return replace(
-                state, turns=state.turns + (new_turn,), is_processing=True
+                state, turns=state.turns + (new_turn,), is_processing=True,
+                current_phase=None, phases_seen=(),
             )
 
         case TurnStarted(cmd_id=cid, turn_id=tid):

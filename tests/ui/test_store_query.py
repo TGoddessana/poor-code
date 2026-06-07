@@ -1,5 +1,5 @@
 from poor_code.ui.store import (
-    AppState, TurnView, QuerySegment, AnswerSubmitted, reduce,
+    AppState, TurnView, QuerySegment, UserAnswerSegment, AnswerSubmitted, reduce,
 )
 from poor_code.messages import QueryRaised
 
@@ -24,3 +24,5 @@ def test_answer_submitted_clears_awaiting():
         turn_id="T", query_id="q1", kind="clarify", prompt="why?"))
     state = reduce(state, AnswerSubmitted(turn_id="T", answer="because"))
     assert state.awaiting_input is False
+    assert isinstance(state.turns[0].segments[-1], UserAnswerSegment)
+    assert state.turns[0].segments[-1].text == "because"
