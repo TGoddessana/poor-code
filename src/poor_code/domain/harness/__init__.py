@@ -9,6 +9,7 @@ from poor_code.domain.harness.graph import EdgeTable, Graph
 from poor_code.domain.harness.node import Node, NodeContext, NodeResult
 from poor_code.domain.harness.nodes.acceptance_critic import AcceptanceCritic
 from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
+from poor_code.domain.harness.nodes.confirm_gates import PlanConfirmGate, SpecConfirmGate
 from poor_code.domain.harness.nodes.explorer import ExploringNode
 from poor_code.domain.harness.nodes.fast_path import FastPathNode
 from poor_code.domain.harness.nodes.gates import AcceptanceGate, PlanGate, UnderstandingGate
@@ -33,6 +34,7 @@ __all__ = [
     "Driver", "Node", "NodeContext", "NodeResult", "NodeRegistry",
     "Router", "ExploringNode", "Interviewer", "Planner", "PlanGate", "FastPathNode",
     "AcceptanceOracle", "AcceptanceGate", "AcceptanceCritic",
+    "SpecConfirmGate", "PlanConfirmGate",
     "GlobalValidator", "Reporter",
     "Provisioner",
     "route", "FORWARD", "build_default_registry",
@@ -57,9 +59,11 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     reg.register(AcceptanceOracle(llm))
     reg.register(AcceptanceGate())
     reg.register(AcceptanceCritic(llm))
+    reg.register(SpecConfirmGate())
     reg.register(Planner(llm, project_map=project_map))
     reg.register(PlanGate())
     reg.register(PlanReviewer(llm))
+    reg.register(PlanConfirmGate())
     reg.register(Provisioner(
         llm, cwd=project_map.cwd,
         tools=ToolRegistry([BashTool(), ReadTool(), ListTool(), GlobTool(), GrepTool()])))

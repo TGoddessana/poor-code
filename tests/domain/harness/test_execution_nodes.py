@@ -310,7 +310,8 @@ def test_execution_forward_edges_present():
     # subgraph now, NOT in the outer FORWARD table. The outer table only carries the
     # entry into and exit out of the subgraph.
     assert FORWARD[("plan_gate", None)] == "plan_reviewer"
-    assert FORWARD[("plan_reviewer", None)] == "provisioner"
+    assert FORWARD[("plan_reviewer", None)] == "plan_confirm_gate"
+    assert FORWARD[("plan_confirm_gate", None)] == "provisioner"
     assert FORWARD[("provisioner", None)] == "implement_loop"
     assert FORWARD[("implement_loop", "done")] == "global_validator"
     assert FORWARD[("global_validator", "pass")] == "reporter"

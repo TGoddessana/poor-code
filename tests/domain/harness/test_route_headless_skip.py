@@ -78,3 +78,24 @@ def test_full_auto_understanding_repair_still_loops_to_explorer():
     from poor_code.domain.session.models import Layer
     res = NodeResult(verdict=Verdict(kind=VerdictKind.REPAIR, layer=Layer.UNDERSTANDING))
     assert route("understanding_gate", res, state) == "explorer"
+
+
+def test_full_auto_skips_spec_confirm_gate_to_planner():
+    # In FULL_AUTO, acceptance_critic (when reached under SUPERVISED) would normally
+    # forward to spec_confirm_gate; the remap skips it straight to planner.
+    state = SessionState(policy=Policy.FULL_AUTO)
+    assert route("acceptance_critic", _advance(), state) == "planner"
+
+
+def test_full_auto_skips_plan_confirm_gate_to_provisioner():
+    # In FULL_AUTO, plan_reviewer (when reached under SUPERVISED) would normally
+    # forward to plan_confirm_gate; the remap skips it straight to provisioner.
+    state = SessionState(policy=Policy.FULL_AUTO)
+    assert route("plan_reviewer", _advance(), state) == "provisioner"
+
+
+def test_full_auto_skips_confirm_gates():
+    # Direct remap entries exist in _FULL_AUTO_SKIP for both confirm gates.
+    from poor_code.domain.harness.route import _FULL_AUTO_SKIP
+    assert _FULL_AUTO_SKIP.remap["spec_confirm_gate"] == "planner"
+    assert _FULL_AUTO_SKIP.remap["plan_confirm_gate"] == "provisioner"

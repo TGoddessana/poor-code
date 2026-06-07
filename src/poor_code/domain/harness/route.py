@@ -18,10 +18,12 @@ FORWARD: dict[tuple[str, str | None], str] = {
     ("interviewer", None): "acceptance_oracle",
     ("acceptance_oracle", None): "acceptance_gate",
     ("acceptance_gate", None): "acceptance_critic",  # gate ADVANCE falls through here
-    ("acceptance_critic", None): "planner",          # critic ADVANCE falls through here
+    ("acceptance_critic", None): "spec_confirm_gate",  # critic ADVANCE falls through here
+    ("spec_confirm_gate", None): "planner",
     ("planner", None): "plan_gate",
     ("plan_gate", None): "plan_reviewer",          # gate ADVANCE falls through here
-    ("plan_reviewer", None): "provisioner",        # reviewer ADVANCE falls through here
+    ("plan_reviewer", None): "plan_confirm_gate",  # reviewer ADVANCE falls through here
+    ("plan_confirm_gate", None): "provisioner",
     ("provisioner", None): "implement_loop",       # bootstrap env, then enter the impl subgraph
     # The whole task-execution loop is folded into the implement_loop subgraph; its
     # inner edges live in subgraphs/implement_loop.py, not here. It exits 'done' when
@@ -57,7 +59,8 @@ _SHALLOWEST: dict[Layer, str] = {
 _FULL_AUTO_SKIP = Rewrite(
     when=lambda s: s.policy is Policy.FULL_AUTO,
     remap={"interviewer": "acceptance_oracle", "acceptance_critic": "planner",
-           "plan_reviewer": "provisioner"},
+           "spec_confirm_gate": "planner",
+           "plan_reviewer": "provisioner", "plan_confirm_gate": "provisioner"},
 )
 
 DEFAULT_EDGES = EdgeTable(

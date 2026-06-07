@@ -10,9 +10,10 @@ def test_plan_gate_advance_forwards_to_plan_reviewer():
     assert route("plan_gate", res, SessionState()) == "plan_reviewer"
 
 
-def test_plan_reviewer_advance_forwards_to_provisioner():
+def test_plan_reviewer_advance_forwards_to_plan_confirm_gate():
+    # plan_reviewer now routes through plan_confirm_gate before provisioner
     res = NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
-    assert route("plan_reviewer", res, SessionState()) == "provisioner"
+    assert route("plan_reviewer", res, SessionState()) == "plan_confirm_gate"
 
 
 def test_provisioner_advance_forwards_to_implement_loop():

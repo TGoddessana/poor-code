@@ -63,3 +63,12 @@ def test_interviewer_forwards_to_acceptance_oracle():
     res = NodeResult(output=Requirement(summary="done"))
     nxt = route("interviewer", res, SessionState())
     assert nxt == "acceptance_oracle"
+
+
+def test_spec_and_plan_confirm_in_forward_chain():
+    from poor_code.domain.harness.route import FORWARD
+    assert FORWARD[("acceptance_critic", None)] == "spec_confirm_gate"
+    assert FORWARD[("spec_confirm_gate", None)] == "planner"
+    assert FORWARD[("plan_gate", None)] == "plan_reviewer"
+    assert FORWARD[("plan_reviewer", None)] == "plan_confirm_gate"
+    assert FORWARD[("plan_confirm_gate", None)] == "provisioner"
