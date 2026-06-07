@@ -54,7 +54,7 @@ class Driver:
                 return state
 
             if sink is not None:
-                sink.node_entered(node.name, state.cursor.phase.value)
+                sink.node_entered(node.name, state.cursor.phase.value, state=state)
             try:
                 result = await node.run(NodeContext(state=state, cancel=cancel, sink=sink))
             except _RECOVERABLE_INFERENCE_ERRORS as exc:
@@ -70,6 +70,8 @@ class Driver:
                 self._on_step(state)                       # checkpoint with pending query
                 return state                               # cursor stays → re-entrant resume
             state = self._apply(state, result)            # ① apply output (output.apply_to)
+            if sink is not None and result.output is not None and hasattr(sink, "node_produced"):
+                sink.node_produced(node.name, state.cursor.phase.value, result=result)
             v = result.verdict
             if v is not None and v.kind in (VerdictKind.REPAIR, VerdictKind.ESCALATE):
                 detail = v.hint or v.query                 # REPAIR→hint, ESCALATE→query

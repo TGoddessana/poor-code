@@ -35,7 +35,7 @@ class StderrSink:
         self._out.flush()
 
     # node-facing
-    def node_entered(self, node: str, phase: str) -> None:
+    def node_entered(self, node: str, phase: str, *, state: object | None = None, activity: str = "") -> None:
         self._w(f"▸ {node} [{phase}]")
 
     def node_repaired(self, node: str, detail: str) -> None:

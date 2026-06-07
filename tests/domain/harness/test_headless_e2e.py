@@ -19,7 +19,7 @@ class _TraceSink:
     def __init__(self) -> None:
         self.entered: list[str] = []
 
-    def node_entered(self, node: str, phase: str) -> None:
+    def node_entered(self, node: str, phase: str, *, state=None, activity="") -> None:
         self.entered.append(node)
 
     def __getattr__(self, _name):  # no-op for every other sink method

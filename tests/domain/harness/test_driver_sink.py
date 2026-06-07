@@ -18,7 +18,7 @@ class _RouterStub:
 class _RecordingSink:
     def __init__(self):
         self.entered = []
-    def node_entered(self, node, phase):
+    def node_entered(self, node, phase, *, state=None, activity=""):
         self.entered.append((node, phase))
 
 
@@ -51,7 +51,7 @@ class _RepairRecordingSink:
     def __init__(self):
         self.entered = []
         self.repaired = []
-    def node_entered(self, node, phase):
+    def node_entered(self, node, phase, *, state=None, activity=""):
         self.entered.append(node)
     def node_repaired(self, node, detail):
         self.repaired.append((node, detail))
