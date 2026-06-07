@@ -1,7 +1,7 @@
 # src/poor_code/domain/harness/nodes/planner.py
 """Planner — converts a binding Requirement into bounded implementation tasks.
 
-This is still a thin AgentNode: it does not inspect file bodies or execute tools.
+A thin AgentNode: it does not inspect file bodies or execute tools.
 It receives Requirement as binding input and CodeContext as reference material,
 then emits a Plan through one structured-output tool call.
 """
@@ -120,18 +120,24 @@ class Planner(AgentNode):
         # as {"task":[...]}) and wraps any failure as StructuredOutputError — never a
         # raw ValidationError, which used to crash the whole run with repair count 0.
         out = validate_output(_PlanOut, args_json, node=self.name)
+        resolved = [(t, (t.id or f"t{i}")) for i, t in enumerate(out.tasks, start=1)]
         tasks = tuple(
             Task(
-                id=t.id or f"t{i}",
-                title=t.title or (t.id or f"t{i}"),
+                id=rid,
+                title=t.title or rid,
                 purpose="",
                 edit_scope=EditScope(editable=tuple(dict.fromkeys(p for p in t.editable if p))),
             )
-            for i, t in enumerate(out.tasks, start=1)
+            for t, rid in resolved
         )
+        # id_map resolves a model-emitted raw id (possibly blank) to the canonical
+        # resolved id, so depends_on references are consistent with Task.id values.
+        id_map = {t.id: rid for t, rid in resolved}
         deps = tuple(
-            Dependency(task_id=t.id, depends_on=dep)
-            for t in out.tasks for dep in t.depends_on if dep
+            Dependency(task_id=rid, depends_on=id_map.get(dep, dep))
+            for t, rid in resolved
+            for dep in t.depends_on
+            if dep in id_map  # only keep deps that reference a real (possibly blank) emitted id
         )
         return Plan(tasks=tasks, deps=deps, file_plan=(), plan_md=out.plan_md)
 

@@ -12,6 +12,23 @@ def _planner():
     return Planner(llm=None, project_map=pm)
 
 
+def test_blank_id_falls_back_consistently_in_deps():
+    # Task 1 has a blank id (weak model emission) — should resolve to "t1".
+    # Task 2 depends on the blank id "", which must resolve to the same "t1".
+    args = json.dumps({"plan_md": "## t1\n## t2", "tasks": [
+        {"id": "", "title": "a", "editable": ["a.py"], "depends_on": []},
+        {"id": "t2", "title": "b", "editable": ["b.py"], "depends_on": [""]},
+    ]})
+    plan = _planner().parse(args)
+    ids = {t.id for t in plan.tasks}
+    # t2 must have a dep pointing at the resolved id for the blank task, not ""
+    assert len(plan.deps) == 1, f"expected 1 dep, got {plan.deps}"
+    # every dependency endpoint must reference an existing task id
+    for d in plan.deps:
+        assert d.task_id in ids, f"dep task_id {d.task_id!r} not in {ids}"
+        assert d.depends_on in ids, f"dep depends_on {d.depends_on!r} not in {ids}"
+
+
 def test_parse_md_and_skeleton():
     args = json.dumps({
         "plan_md": "## t1: server.py — /fib handler\n## t2: server.py — validation",

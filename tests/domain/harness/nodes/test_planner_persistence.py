@@ -17,4 +17,4 @@ def test_planner_system_delegates_steps_to_implementer():
     s = _SYSTEM.lower()
     # The implementer, not the planner, derives concrete steps.
     assert "implementer" in s
-    assert "steps" not in s or "derive concrete steps" in s
+    assert "derive concrete steps" in s
