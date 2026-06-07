@@ -36,6 +36,18 @@ def task_section(plan, task_id: str) -> str:
     return md or task_id
 
 
+def has_section(md: str, task_id: str) -> bool:
+    """True if plan_md has a '## <task_id>' heading matching the id as a full token
+    (so 't1' does not match 't10'). Mirrors task_section's matching."""
+    md = md or ""
+    for _, line in _iter_section_starts(md):
+        head = line[3:].strip()
+        token = head.split(":", 1)[0].split()[0] if head else ""
+        if token == task_id:
+            return True
+    return False
+
+
 def _iter_section_starts(md: str):
     idx = 0
     for line in md.splitlines(keepends=True):

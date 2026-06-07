@@ -6,8 +6,9 @@ from poor_code.domain.harness.node import NodeContext
 from poor_code.domain.harness.nodes.global_validator import (
     GlobalValidator, build_changeset, MAX_FIXUPS)
 from poor_code.domain.session.models import (
-    SessionState, Plan, Task, EditScope, Cursor, Phase, TaskStatus,
-    Attempt, AttemptStatus, ChangeRecord, Transition, TriggerKind, VerdictKind, Layer)
+    AcceptanceCheck, AcceptanceSpec, SessionState, Plan, Task, EditScope, Cursor, Phase,
+    TaskStatus, Attempt, AttemptStatus, ChangeRecord, Transition, TriggerKind, VerdictKind,
+    Layer)
 from poor_code.provider.events import (
     FinishedReason, ToolCallEnded, ToolCallInputDelta, ToolCallStarted)
 
@@ -35,10 +36,14 @@ def _done_task(tid, validate, fname):
                 how_to_validate=validate, status=TaskStatus.DONE, attempts=(att,))
 
 
-def _state(tasks, history=()):
+def _state(tasks, history=(), acceptance=None):
     return SessionState(
-        plan=Plan(tasks=tasks), history=history,
+        plan=Plan(tasks=tasks), history=history, acceptance=acceptance,
         cursor=Cursor(phase=Phase.FINALIZING, current_node="global_validator"))
+
+
+def _failing_acceptance():
+    return AcceptanceSpec(checks=(AcceptanceCheck(criterion="must pass", command="false"),))
 
 
 def test_build_changeset_aggregates_done_attempt_diffs():
@@ -58,7 +63,8 @@ async def test_global_validator_pass_when_all_validations_succeed(tmp_path):
 
 @pytest.mark.asyncio
 async def test_global_validator_repairs_plan_on_regression(tmp_path):
-    st = _state((_done_task("t1", "false", "a.txt"),))  # `false` → exit 1
+    # acceptance check `false` exits 1 → triggers repair
+    st = _state((_done_task("t1", "true", "a.txt"),), acceptance=_failing_acceptance())
     res = await GlobalValidator(_AnalyzeLLM("t1 regressed"), cwd=tmp_path).run(
         NodeContext(state=st, cancel=asyncio.Event()))
     assert res.verdict.kind is VerdictKind.REPAIR
@@ -72,7 +78,9 @@ async def test_global_validator_escalates_at_fixup_cap(tmp_path):
         Transition(from_node="global_validator", to_node="planner",
                    trigger=TriggerKind.GATE, reason="fixup", ts_iso="t")
         for _ in range(MAX_FIXUPS))
-    st = _state((_done_task("t1", "false", "a.txt"),), history=fixups)
+    # acceptance check `false` exits 1; escalate because fixup cap reached
+    st = _state((_done_task("t1", "true", "a.txt"),), history=fixups,
+                acceptance=_failing_acceptance())
     res = await GlobalValidator(_NoLLM(), cwd=tmp_path).run(
         NodeContext(state=st, cancel=asyncio.Event()))
     assert res.verdict.kind is VerdictKind.ESCALATE

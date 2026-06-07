@@ -1,8 +1,9 @@
-"""global_validator [A+C ★] — the finishing gate. CODE part (binding): re-run
-EVERY task's how_to_validate in the work tree; all exit 0 → pass (→ reporter).
-A failure means a regression (finishing task B broke task A). AGENT part
-(advisory): analyze the ChangeSet + failures and hint which change to fix, then
-emit repair(plan) → planner fixup. The fixup loop is capped by MAX_FIXUPS."""
+"""global_validator [A+C ★] — the finishing gate. CODE part (binding): run the
+global ACCEPTANCE spec checks (the authoritative validation); all exit 0 → pass
+(→ reporter). A failure means the implementation doesn't satisfy the acceptance
+criteria. AGENT part (advisory): analyze the ChangeSet + failures and hint which
+change to fix, then emit repair(plan) → planner fixup. The fixup loop is capped
+by MAX_FIXUPS."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -65,10 +66,6 @@ class GlobalValidator(AgentNode):
         plan = ctx.state.plan
         assert plan is not None, "global_validator requires a plan"
         failures: list[tuple[str, int, str]] = []
-        for task in plan.tasks:
-            code, out = await run_shell(task.how_to_validate, self._cwd, ctx.cancel)
-            if code != 0:
-                failures.append((task.id, code, out))
         if ctx.state.acceptance is not None:
             for chk in ctx.state.acceptance.checks:
                 code, out = await run_shell(chk.command, self._cwd, ctx.cancel)

@@ -211,3 +211,13 @@ def test_plan_gate_rejects_orphan_skeleton_id():
 def test_plan_gate_still_rejects_empty_editable_and_cycles():
     assert PlanGate._invalid_hint(_plan(plan_md="## t1", tasks=(
         Task(id="t1", title="h", purpose="", edit_scope=EditScope(editable=())),))) is not None
+
+
+def test_plan_gate_rejects_prefix_collision_only_section():
+    from poor_code.domain.session.models import Plan, Task, EditScope
+    # plan_md has only a t10 section; skeleton task t1 must be flagged as missing its section
+    plan = Plan(plan_md="## t10: a.py — x", tasks=(
+        Task(id="t1", title="h", purpose="", edit_scope=EditScope(editable=("a.py",))),
+        Task(id="t10", title="h", purpose="", edit_scope=EditScope(editable=("a.py",))),))
+    hint = PlanGate._invalid_hint(plan)
+    assert hint is not None and "t1 " in (hint + " ")   # t1 flagged (not satisfied by '## t10')

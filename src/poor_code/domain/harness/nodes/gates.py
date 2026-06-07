@@ -5,6 +5,7 @@ back-edge to that layer's shallowest producer (design.md §6/§16/§18)."""
 from __future__ import annotations
 
 from poor_code.domain.harness.grounding import validation_floor_hint
+from poor_code.domain.harness.ledger import has_section
 from poor_code.domain.harness.node import GateNode
 from poor_code.domain.session.models import (
     CodeContext, GroundingStatus, Layer, Phase, TriggerKind,
@@ -68,7 +69,7 @@ class PlanGate(GateNode):
             if len(task.edit_scope.editable) > cls._MAX_EDITABLE:
                 return (f"Task {task.id} edits {len(task.edit_scope.editable)} files — "
                         "too broad; split into patch-sized tasks (<=3 files).")
-            if md and task.id not in md:
+            if md and not has_section(md, task.id):
                 return (f"Task {task.id} is in the skeleton but not described in plan_md; "
                         f"every skeleton task must have a '## {task.id}:' section.")
         for dep in plan.deps:

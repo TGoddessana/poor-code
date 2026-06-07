@@ -41,6 +41,13 @@ def test_task_section_fallback():
     assert task_section(Plan(plan_md="## tX: x"), "t9") == "## tX: x"
     assert task_section(None, "t1") == "t1"
 
+def test_has_section_exact_token():
+    from poor_code.domain.harness.ledger import has_section
+    md = "## t1: a\n## t10: b"
+    assert has_section(md, "t1") and has_section(md, "t10")
+    assert not has_section("## t10: b", "t1")
+
+
 def test_render_acceptance():
     from poor_code.domain.harness.ledger import render_acceptance
     from poor_code.domain.session.models import SessionState, AcceptanceSpec, AcceptanceCheck

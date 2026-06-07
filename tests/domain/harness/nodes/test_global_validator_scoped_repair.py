@@ -13,7 +13,8 @@ from poor_code.domain.harness.nodes.global_validator import (
     GlobalValidator, MAX_SCOPED_FIXUPS,
 )
 from poor_code.domain.session.models import (
-    Layer, Plan, SessionState, Task, TaskStatus, Transition, TriggerKind, VerdictKind,
+    AcceptanceCheck, AcceptanceSpec, Layer, Plan, SessionState, Task, TaskStatus,
+    Transition, TriggerKind, VerdictKind,
 )
 
 
@@ -29,13 +30,18 @@ def _llm(payload):
     return _LLM()
 
 
+def _failing_acceptance():
+    return AcceptanceSpec(checks=(AcceptanceCheck(criterion="regression-check", command="false"),))
+
+
 def _state(history=()):
-    # two DONE tasks; t2's validation fails (regression). t1 passes.
+    # two DONE tasks; acceptance check fails (regression). Both tasks have passing validation.
     t1 = Task(id="t1", title="a", purpose="p", how_to_validate="true",
               status=TaskStatus.DONE)
-    t2 = Task(id="t2", title="b", purpose="p", how_to_validate="false",
+    t2 = Task(id="t2", title="b", purpose="p", how_to_validate="true",
               status=TaskStatus.DONE)
-    return SessionState(plan=Plan(tasks=(t1, t2)), history=tuple(history))
+    return SessionState(plan=Plan(tasks=(t1, t2)), history=tuple(history),
+                        acceptance=_failing_acceptance())
 
 
 def _gv_transition(to_node):
