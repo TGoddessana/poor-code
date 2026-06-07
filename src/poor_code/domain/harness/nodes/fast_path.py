@@ -8,11 +8,13 @@ this node returns — one casual exchange per turn."""
 from __future__ import annotations
 
 from poor_code.domain.harness.node import NodeContext, NodeResult
+from poor_code.domain.session.models import Phase
 from poor_code.messages import SendPrompt
 
 
 class FastPathNode:
     name = "fast_path"
+    phase = Phase.ROUTING
 
     def __init__(self, agent) -> None:
         self._agent = agent

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output)
 from poor_code.domain.llm_schema import inline_refs
-from poor_code.domain.session.models import Request, RequestKind, SessionState
+from poor_code.domain.session.models import Phase, Request, RequestKind, SessionState
 
 _TOOL_NAME = "classify_request"
 
@@ -37,6 +37,7 @@ class _ClassificationOut(BaseModel):
 
 class Router(AgentNode):
     name = "router"
+    phase = Phase.ROUTING
 
     def __init__(self, llm: _LLMClientLike) -> None:
         super().__init__(llm)

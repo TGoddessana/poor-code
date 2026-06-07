@@ -25,7 +25,7 @@ from __future__ import annotations
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.render_md import render_plan_md, render_spec_md
 from poor_code.domain.session.models import (
-    Layer, Policy, Query, QueryKind, TriggerKind, Verdict, VerdictKind,
+    Layer, Phase, Policy, Query, QueryKind, TriggerKind, Verdict, VerdictKind,
     effective_requirement,
 )
 
@@ -100,6 +100,7 @@ class _ConfirmGate:
 
 class SpecConfirmGate(_ConfirmGate):
     name = "spec_confirm_gate"
+    phase = Phase.INTERVIEWING
     query_id = "confirm_spec"
     layer = Layer.ACCEPTANCE
 
@@ -109,6 +110,7 @@ class SpecConfirmGate(_ConfirmGate):
 
 class PlanConfirmGate(_ConfirmGate):
     name = "plan_confirm_gate"
+    phase = Phase.PLANNING
     query_id = "confirm_plan"
     layer = Layer.PLAN
 
