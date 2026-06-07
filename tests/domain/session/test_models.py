@@ -54,3 +54,9 @@ def test_plan_carries_markdown_body():
     p = Plan(plan_md="## t1: do X\n## t2: do Y")
     assert p.plan_md.startswith("## t1")
     assert p.tasks == ()  # default still empty
+
+
+def test_attempt_carries_check_results():
+    from poor_code.domain.session.models import Attempt
+    a = Attempt(id="t1.a1", check_results=(("n=10 -> 55", True), ("neg", False)))
+    assert dict(a.check_results)["n=10 -> 55"] is True

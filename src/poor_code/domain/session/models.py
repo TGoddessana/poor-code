@@ -562,6 +562,7 @@ class Attempt:
     gate_verdict: Verdict | None = None
     adversarial_rounds: int = 0                   # 적대적 캡 카운터
     status: AttemptStatus = AttemptStatus.ACTIVE
+    check_results: tuple[tuple[str, bool], ...] = ()  # per-acceptance-check (criterion, passed) recorded by the validator/runner
 
     def apply_to(self, s: "SessionState") -> "SessionState":
         assert s.cursor is not None and s.cursor.task_id is not None
