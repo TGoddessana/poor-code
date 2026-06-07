@@ -49,7 +49,7 @@ def build_implement_loop(*, llm, cwd) -> CompiledGraph:
     reg.register(Implementer(
         llm, cwd=cwd, tools=ToolRegistry([WriteTool(), EditTool(), BashTool()])))
     reg.register(EngGate())
-    reg.register(Validator(llm))
+    reg.register(Validator(llm, cwd=cwd))
     reg.register(ValidationRunner(cwd=cwd))
     reg.register(FailureAnalyst(llm))
     reg.register(CompletionGate())

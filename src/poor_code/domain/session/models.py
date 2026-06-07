@@ -461,6 +461,19 @@ class ValidationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ChecksObserved:
+    """validator output — per-acceptance-check (criterion, passed) observed by running
+    the acceptance commands for real. Recorded onto the cursor's latest attempt so the
+    ledger and downstream nodes reason from reality, not the implementer's narrative."""
+    results: tuple[tuple[str, bool], ...] = ()
+
+    def apply_to(self, s: "SessionState") -> "SessionState":
+        c = s.cursor
+        assert c is not None and c.task_id and c.attempt_id
+        return s.update_attempt(c.task_id, c.attempt_id, check_results=self.results)
+
+
+@dataclass(frozen=True, slots=True)
 class ChangeRecord:
     """직접변경 결과. diff는 git에서 사후추출."""
     files: tuple[str, ...] = ()

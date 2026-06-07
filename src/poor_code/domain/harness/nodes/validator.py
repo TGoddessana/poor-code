@@ -5,31 +5,31 @@ implementation, or repair the plan (weak validation). Its own loop is capped by
 MAX_ADVERSARIAL_ROUNDS — at the cap it forces advance regardless of the model."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
 from poor_code.domain.harness.ledger import render_build_ledger, task_section, render_acceptance
-from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, validate_output
+from poor_code.domain.harness.node import (
+    AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output)
+from poor_code.domain.harness.nodes.execution import run_shell
 from poor_code.domain.llm_schema import inline_refs
-from poor_code.domain.session.models import Layer, Phase, SessionState, Verdict, VerdictKind
+from poor_code.domain.session.models import (
+    ChecksObserved, Layer, Phase, SessionState, Verdict, VerdictKind)
 
 MAX_ADVERSARIAL_ROUNDS = 2
 _TOOL_NAME = "judge"
 
 
 _SYSTEM = (
-    "You are an adversarial Validator. Inspect the implementer's patch against the "
-    "TASK and its validation command. Decide one of: 'advance' (the change looks "
-    "correct and complete), 'repair_impl' (the implementation has a hole — give a "
-    "specific hint), or 'repair_plan' (the validation command is too weak to catch "
-    "regressions — say why). You cannot run code or change the validation command. "
-    "Also judge SCOPE with judgment, not a literal allowlist: EDITABLE SCOPE lists the "
-    "files the task was expected to touch, but editing a closely-related file the task "
-    "obviously needs is fine — e.g. fixing src/x.py and also editing its test "
-    "tests/test_x.py, or a sibling in the same module. Only flag an edit as repair_impl "
-    "for scope if it touches a CLEARLY UNRELATED file (different feature/module) with no "
-    "bearing on this task; then say which file and why. Call judge once."
+    "You are an adversarial Validator with REAL EXECUTION RESULTS in hand (see OBSERVED). "
+    "The acceptance spec is the whole target; this task is one step toward it. Decide: "
+    "'advance' (this patch is correct and regresses NO already-green acceptance check), "
+    "'repair_impl' (a hole — cite the failing OBSERVED check and give a specific hint), or "
+    "'repair_plan' (the plan/task is mis-scoped — say why). Trust OBSERVED over the patch's "
+    "narrative. Judge SCOPE with sense (a closely-related file is fine; only flag clearly "
+    "unrelated edits). Call judge once."
 )
 
 
@@ -42,12 +42,32 @@ class Validator(AgentNode):
     name = "validator"
     phase = Phase.IMPLEMENTING
 
+    def __init__(self, llm: _LLMClientLike, cwd: Path = Path(".")) -> None:
+        super().__init__(llm)
+        self._cwd = cwd
+        # [(criterion, passed, output_tail)] from the real acceptance run; default so
+        # build_messages is safe if run() never populated it (e.g. direct test of msgs).
+        self._observed: list[tuple[str, bool, str]] = []
+
     async def run(self, ctx: NodeContext) -> NodeResult:
         attempt = self._latest_attempt(ctx.state)
         if attempt is not None and attempt.adversarial_rounds >= MAX_ADVERSARIAL_ROUNDS:
             return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
+        self._observed = await self._run_acceptance(ctx)  # ground truth → build_messages
         args_json = await self._dispatch(ctx)
-        return NodeResult(verdict=self.parse(args_json))
+        verdict = self.parse(args_json)
+        results = tuple((crit, passed) for crit, passed, _ in self._observed)
+        return NodeResult(verdict=verdict, output=ChecksObserved(results=results))
+
+    async def _run_acceptance(self, ctx: NodeContext) -> list[tuple[str, bool, str]]:
+        """Run every acceptance check for real; the validator judges from observed
+        reality, not the implementer's claims. Output is tailed to keep prompts bounded."""
+        out: list[tuple[str, bool, str]] = []
+        checks = ctx.state.acceptance.checks if ctx.state.acceptance else ()
+        for c in checks:
+            code, text = await run_shell(c.command, self._cwd, ctx.cancel)
+            out.append((c.criterion, code == 0, text[:300]))
+        return out
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         task = self._active_task(state)
@@ -56,16 +76,27 @@ class Validator(AgentNode):
         editable = ", ".join(task.edit_scope.editable) or "(unspecified)"
         forbidden = ", ".join(task.edit_scope.forbidden) or "(none)"
         accept = render_acceptance(state)
+        observed = self._render_observed()
         task_md = task_section(state.plan, task.id) if state.plan else task.title
         ledger = render_build_ledger(state)
         return [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": (
                 f"ACCEPTANCE SPEC (the whole target; judge PROGRESS + NO-REGRESSION, not full pass):\n"
-                f"{accept}\n\nCOMPLETED WORK (ledger):\n{ledger}\n\n"
+                f"{accept}\n\nOBSERVED (real execution of the acceptance checks just now):\n"
+                f"{observed}\n\nCOMPLETED WORK (ledger):\n{ledger}\n\n"
                 f"THIS TASK:\n{task_md}\nEDITABLE (guidance): {editable}\n"
                 f"FORBIDDEN: {forbidden}\n\nPATCH:\n{diff or '(empty)'}")},
         ]
+
+    def _render_observed(self) -> str:
+        if not self._observed:
+            return "  (not run)"
+        lines = []
+        for crit, passed, tail in self._observed:
+            status = "PASS" if passed else "FAIL"
+            lines.append(f"  - {crit} -> {status}" + (f"\n    {tail}" if tail else ""))
+        return "\n".join(lines)
 
     def output_tool(self) -> dict[str, Any]:
         return {"type": "function",

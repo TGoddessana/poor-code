@@ -8,7 +8,6 @@ import asyncio
 from pathlib import Path
 
 from poor_code.domain.harness.node import NodeContext, NodeResult
-from poor_code.domain.harness.nodes.validator import MAX_ADVERSARIAL_ROUNDS
 from poor_code.domain.session.models import (
     AttemptStatus,
     Layer,
@@ -66,6 +65,9 @@ class EngGate:
     phase = Phase.IMPLEMENTING
 
     async def run(self, ctx: NodeContext) -> NodeResult:
+        # function-local import: validator imports run_shell from this module, so a
+        # module-level import of MAX_ADVERSARIAL_ROUNDS here would be a circular import.
+        from poor_code.domain.harness.nodes.validator import MAX_ADVERSARIAL_ROUNDS
         task, attempt = _active(ctx.state)
         hint = self._invalid_hint(task, attempt)
         if hint is None:
