@@ -14,6 +14,7 @@ from poor_code.messages import (
     AssistantTextDelta,
     Event,
     NodeEntered,
+    NodeProduced,
     PlanReady,
     QueryRaised,
     ReportReady,
@@ -40,13 +41,33 @@ def _report_lines(report) -> tuple[str, ...]:
 
 
 class TurnSink:
-    def __init__(self, turn_id: str, dispatch: Callable[[Event], None]) -> None:
+    def __init__(self, turn_id: str, dispatch: Callable[[Event], None],
+                 narrator: object | None = None) -> None:
         self._turn_id = turn_id
         self._dispatch = dispatch
+        self._narrator = narrator
 
     # --- node-facing (called mid-run via NodeContext.sink) ---
-    def node_entered(self, node: str, phase: str) -> None:
-        self._dispatch(NodeEntered(turn_id=self._turn_id, node=node, phase=phase))
+    def node_entered(self, node: str, phase: str, *, state: object | None = None,
+                     activity: str = "") -> None:
+        act = activity
+        if not act and self._narrator is not None and state is not None:
+            phase_arg = phase
+            cursor = getattr(state, "cursor", None)
+            if cursor is not None and getattr(cursor, "phase", None) is not None:
+                phase_arg = cursor.phase
+            act = self._narrator.activity(node, phase_arg, state)
+        self._dispatch(NodeEntered(turn_id=self._turn_id, node=node, phase=phase, activity=act or ""))
+
+    def node_produced(self, node: str, phase: str, *, result: object | None = None,
+                      headline: str = "", detail: tuple[str, ...] = ()) -> None:
+        head, det = headline, detail
+        if not head and self._narrator is not None and result is not None:
+            head, det = self._narrator.summary(node, result)
+        if not head:
+            return
+        self._dispatch(NodeProduced(turn_id=self._turn_id, node=node, phase=phase,
+                                    headline=head, detail=tuple(det)))
 
     def node_repaired(self, node: str, detail: str) -> None:
         # Observability hook used by headless (StderrSink). The TUI surfaces repairs
