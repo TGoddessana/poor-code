@@ -13,8 +13,12 @@ from poor_code.messages import (
     AssistantMessageCompleted,
     AssistantTextDelta,
     Event,
+    NodeContextCaptured,
     NodeEntered,
+    NodeFinished,
     NodeProduced,
+    NodeRawOutput,
+    NodeThinkingDelta,
     PlanReady,
     ProjectMapBuildFailed,
     ProjectMapBuildFinished,
@@ -25,6 +29,7 @@ from poor_code.messages import (
     ToolCallFailed,
     ToolCallFinished,
     ToolCallStarted,
+    TurnConcluded,
     TurnEnded,
     TurnFailed,
     TurnStarted,
@@ -62,6 +67,8 @@ class NodeLabelSegment:
     phase: str
     activity: str = ""
     retry: int = 0
+    duration_sec: float | None = None      # set by NodeFinished
+    status: str = "running"                 # running|done|failed|parked
 
 
 @dataclass(frozen=True)
@@ -77,6 +84,25 @@ class NodeResultSegment:
     phase: str
     headline: str
     detail: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class NodeContextSegment:
+    """The context fed to a node (collapsed summary + raw full)."""
+    summary: str
+    full: str
+
+
+@dataclass(frozen=True)
+class NodeThinkingSegment:
+    """Accumulating raw generation stream for the owning node (prose or tool-call JSON)."""
+    text: str
+
+
+@dataclass(frozen=True)
+class NodeRawOutputSegment:
+    """A node's validated raw structured output."""
+    raw: str
 
 
 @dataclass(frozen=True)
@@ -101,6 +127,7 @@ class ReportSegment:
 Segment = (
     TextSegment | ToolCallView | NodeLabelSegment | QuerySegment
     | PlanSegment | ReportSegment | UserAnswerSegment | NodeResultSegment
+    | NodeContextSegment | NodeThinkingSegment | NodeRawOutputSegment
 )
 
 
@@ -162,6 +189,7 @@ class AppState:
     awaiting_input: bool = False
     current_phase: str | None = None
     phases_seen: tuple[str, ...] = ()
+    turn_conclusion: tuple[str, str] | None = None
 
 
 # =========================================================================
@@ -277,7 +305,7 @@ def reduce(state: AppState, action: Action) -> AppState:
             )
             return replace(
                 state, turns=state.turns + (new_turn,), is_processing=True,
-                current_phase=None, phases_seen=(),
+                current_phase=None, phases_seen=(), turn_conclusion=None,
             )
 
         case TurnStarted(cmd_id=cid, turn_id=tid):
@@ -330,6 +358,7 @@ def reduce(state: AppState, action: Action) -> AppState:
                 ),
                 is_processing=False,
                 last_error=err,
+                awaiting_input=False,   # a cancelled/failed turn isn't awaiting an answer
             )
 
         case AssistantTextDelta(turn_id=tid, text=chunk):
@@ -456,6 +485,45 @@ def reduce(state: AppState, action: Action) -> AppState:
         case ReportReady(turn_id=tid, outcome=outcome, summary=summary, lines=lines):
             return _append_segment(
                 state, tid, ReportSegment(outcome=outcome, summary=summary, lines=lines))
+
+        case NodeFinished(turn_id=tid, node=node, duration_sec=d, status=st):
+            i = _find_turn_by_id(state, tid)
+            if i is None:
+                return state
+            segs = state.turns[i].segments
+            for j in range(len(segs) - 1, -1, -1):
+                seg = segs[j]
+                if isinstance(seg, NodeLabelSegment) and seg.node == node:
+                    new_seg = replace(seg, duration_sec=d, status=st)
+                    new_segs = _replace_segment(segs, j, new_seg)
+                    return replace(
+                        state, turns=_update_turn_at(state.turns, i, segments=new_segs))
+            return state
+
+        case NodeContextCaptured(turn_id=tid, summary=summary, full=full):
+            return _append_segment(state, tid, NodeContextSegment(summary=summary, full=full))
+
+        case NodeThinkingDelta(turn_id=tid, text=chunk):
+            if not chunk:
+                return state
+            i = _find_turn_by_id(state, tid)
+            if i is None:
+                return state
+            turn = state.turns[i]
+            if turn.segments and isinstance(turn.segments[-1], NodeThinkingSegment):
+                last = turn.segments[-1]
+                new_segs = _replace_segment(
+                    turn.segments, len(turn.segments) - 1,
+                    NodeThinkingSegment(text=last.text + chunk))
+                return replace(
+                    state, turns=_update_turn_at(state.turns, i, segments=new_segs))
+            return _append_segment(state, tid, NodeThinkingSegment(text=chunk))
+
+        case NodeRawOutput(turn_id=tid, raw=raw):
+            return _append_segment(state, tid, NodeRawOutputSegment(raw=raw))
+
+        case TurnConcluded(reason=reason, detail=detail):
+            return replace(state, turn_conclusion=(reason, detail))
 
         case _:
             return state
