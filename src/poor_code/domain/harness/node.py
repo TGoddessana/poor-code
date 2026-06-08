@@ -287,6 +287,9 @@ class AgentNode:
         failure (no output, or schema-invalid) is fed back as a corrective message
         and re-rolled. After the budget is exhausted the last error propagates."""
         base = self.build_messages(ctx.state)
+        if ctx.sink is not None:
+            phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
+            ctx.sink.node_context(self.name, phase, base)
         model_cls = self.output_model()
         response_format = self._response_format()
         corrections: list[dict] = []
@@ -298,6 +301,8 @@ class AgentNode:
                 raw = strip_code_fence(await self._stream_once(ctx, messages, response_format))
                 if model_cls is not None:
                     validate_output(model_cls, raw, node=self.name)
+                if ctx.sink is not None:
+                    ctx.sink.node_raw_output(self.name, raw)
                 return raw
             except StructuredOutputError as e:
                 last_err = e
@@ -323,13 +328,15 @@ class AgentNode:
                 case TextDelta(text=t):
                     content.append(t)  # streamed to the sink; also the error payload
                     if ctx.sink is not None:
-                        ctx.sink.text_delta(t)
+                        ctx.sink.node_thinking_delta(self.name, t)
                 case ToolCallStarted(call_id=cid):
                     args_by_call[cid] = ""
                     order.append(cid)
                 case ToolCallInputDelta(call_id=cid, json_delta=d):
                     if cid in args_by_call:
                         args_by_call[cid] += d
+                    if ctx.sink is not None:
+                        ctx.sink.node_thinking_delta(self.name, d)
                 case ToolCallEnded() | FinishedReason():
                     pass
         if order:

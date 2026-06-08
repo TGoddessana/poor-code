@@ -31,8 +31,12 @@ class _Probe(AgentNode):
 class _Sink:
     def __init__(self):
         self.texts = []
-    def text_delta(self, t):
+    def node_thinking_delta(self, node, t):
         self.texts.append(t)
+    def node_context(self, node, phase, messages):
+        pass
+    def node_raw_output(self, node, raw):
+        pass
 
 
 @pytest.mark.asyncio
@@ -40,7 +44,8 @@ async def test_dispatch_streams_text_to_sink():
     sink = _Sink()
     ctx = NodeContext(state=SessionState(), cancel=asyncio.Event(), sink=sink)
     await _Probe(_LLM())._dispatch(ctx)
-    assert sink.texts == ["think ", "hard"]
+    # Both prose deltas AND the tool-call input JSON now stream as thinking.
+    assert sink.texts == ["think ", "hard", "{}"]
 
 
 @pytest.mark.asyncio

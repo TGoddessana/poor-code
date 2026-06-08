@@ -56,6 +56,9 @@ class _Sink:
     def __init__(self):
         self.events = []
     def text_delta(self, t): self.events.append(("text", t))
+    def node_thinking_delta(self, node, t): self.events.append(("thinking", t))
+    def node_context(self, node, phase, messages): pass
+    def node_raw_output(self, node, raw): pass
     def tool_started(self, cid, name, args): self.events.append(("start", name))
     def tool_finished(self, cid, result): self.events.append(("done", result))
     def tool_failed(self, cid, error): self.events.append(("fail", error))
