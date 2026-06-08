@@ -201,3 +201,49 @@ class NodeProduced(Event):
     phase: str
     headline: str
     detail: tuple[str, ...] = ()
+
+
+# --- Harness observability (S3 node observability) ---
+
+
+@dataclass(frozen=True)
+class NodeFinished(Event):
+    """A node's run() returned. Stops the live timer; pins the final duration."""
+    turn_id: str
+    node: str
+    phase: str
+    duration_sec: float
+    status: str            # "done" | "failed" | "parked"
+
+
+@dataclass(frozen=True)
+class NodeContextCaptured(Event):
+    """The context (built messages) a node was fed before streaming."""
+    turn_id: str
+    node: str
+    summary: str           # e.g. "system + 3 msgs · ~12.3 KB"
+    full: str              # joined raw messages
+
+
+@dataclass(frozen=True)
+class NodeThinkingDelta(Event):
+    """One raw chunk of a node's in-flight generation: prose OR tool-call JSON."""
+    turn_id: str
+    node: str
+    text: str
+
+
+@dataclass(frozen=True)
+class NodeRawOutput(Event):
+    """A node's validated structured output (args_json), raw."""
+    turn_id: str
+    node: str
+    raw: str
+
+
+@dataclass(frozen=True)
+class TurnConcluded(Event):
+    """Why the turn's drive ended this segment. Emitted by app after the driver returns."""
+    turn_id: str
+    reason: str            # completed | suspended | escalated | parked | cancelled | error
+    detail: str = ""
