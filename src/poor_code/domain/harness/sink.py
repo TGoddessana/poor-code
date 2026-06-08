@@ -13,14 +13,19 @@ from poor_code.domain.session.models import Plan, Query
 from poor_code.messages import (
     AssistantTextDelta,
     Event,
+    NodeContextCaptured,
     NodeEntered,
+    NodeFinished,
     NodeProduced,
+    NodeRawOutput,
+    NodeThinkingDelta,
     PlanReady,
     QueryRaised,
     ReportReady,
     ToolCallFailed,
     ToolCallFinished,
     ToolCallStarted,
+    TurnConcluded,
     TurnEnded,
     TurnFailed,
     TurnStarted,
@@ -42,10 +47,16 @@ def _report_lines(report) -> tuple[str, ...]:
 
 class TurnSink:
     def __init__(self, turn_id: str, dispatch: Callable[[Event], None],
-                 narrator: object | None = None) -> None:
+                 narrator: object | None = None, trace: object | None = None) -> None:
         self._turn_id = turn_id
         self._dispatch = dispatch
         self._narrator = narrator
+        self._trace = trace
+        self._thinking_chars: dict[str, int] = {}
+
+    def _record(self, **fields) -> None:
+        if self._trace is not None:
+            self._trace.write(fields)
 
     # --- node-facing (called mid-run via NodeContext.sink) ---
     def node_entered(self, node: str, phase: str, *, state: object | None = None,
@@ -58,6 +69,7 @@ class TurnSink:
                 phase_arg = cursor.phase
             act = self._narrator.activity(node, phase_arg, state)
         self._dispatch(NodeEntered(turn_id=self._turn_id, node=node, phase=phase, activity=act or ""))
+        self._record(type="node_entered", node=node, phase=phase, activity=act or "")
 
     def node_produced(self, node: str, phase: str, *, result: object | None = None,
                       headline: str = "", detail: tuple[str, ...] = ()) -> None:
@@ -68,12 +80,44 @@ class TurnSink:
             return
         self._dispatch(NodeProduced(turn_id=self._turn_id, node=node, phase=phase,
                                     headline=head, detail=tuple(det)))
+        self._record(type="node_produced", node=node, phase=phase, headline=head,
+                     detail=list(det))
 
     def node_repaired(self, node: str, detail: str) -> None:
-        # Observability hook used by headless (StderrSink). The TUI surfaces repairs
-        # through existing node/phase events, so this is a no-op here — adding a new
-        # message event would require touching the hardwired messages.py reducer.
-        pass
+        # The TUI surfaces repairs through existing node/phase events; this records
+        # the repair to the durable trace for post-mortem.
+        self._record(type="node_repaired", node=node, detail=detail)
+
+    def node_context(self, node: str, phase: str, messages: list) -> None:
+        full = "\n\n".join(
+            f"[{m.get('role', '?')}]\n{m.get('content', '')}" for m in messages)
+        n = len(messages)
+        summary = f"{n} msg{'s' if n != 1 else ''} · ~{len(full) / 1024:.1f} KB"
+        self._dispatch(NodeContextCaptured(
+            turn_id=self._turn_id, node=node, summary=summary, full=full))
+        self._record(type="node_context", node=node, summary=summary, full=full)
+
+    def node_thinking_delta(self, node: str, text: str) -> None:
+        if not text:
+            return
+        self._thinking_chars[node] = self._thinking_chars.get(node, 0) + len(text)
+        self._dispatch(NodeThinkingDelta(turn_id=self._turn_id, node=node, text=text))
+
+    def node_raw_output(self, node: str, raw: str) -> None:
+        self._dispatch(NodeRawOutput(turn_id=self._turn_id, node=node, raw=raw))
+        self._record(type="node_raw_output", node=node, raw=raw)
+
+    def node_finished(self, node: str, phase: str, duration_sec: float, status: str) -> None:
+        self._dispatch(NodeFinished(
+            turn_id=self._turn_id, node=node, phase=phase,
+            duration_sec=duration_sec, status=status))
+        self._record(type="node_finished", node=node, phase=phase,
+                     duration_sec=duration_sec, status=status,
+                     thinking_chars=self._thinking_chars.pop(node, 0))
+
+    def turn_concluded(self, reason: str, detail: str = "") -> None:
+        self._dispatch(TurnConcluded(turn_id=self._turn_id, reason=reason, detail=detail))
+        self._record(type="turn_concluded", reason=reason, detail=detail)
 
     def text_delta(self, text: str) -> None:
         if text:

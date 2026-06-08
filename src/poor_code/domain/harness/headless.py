@@ -42,6 +42,24 @@ class StderrSink:
         # Surface WHY a gate sent work back (e.g. eng_gate's scope violation).
         self._w(f"  ↺ {node} {detail}")
 
+    def node_context(self, node, phase, messages):
+        pass
+
+    def node_thinking_delta(self, node, text):
+        # Harness AgentNodes stream their generation here; keep headless showing it.
+        if text:
+            self._out.write(text)
+            self._out.flush()
+
+    def node_raw_output(self, node, raw):
+        pass
+
+    def node_finished(self, node, phase, duration_sec, status):
+        pass
+
+    def turn_concluded(self, reason, detail=""):
+        pass
+
     def text_delta(self, text: str) -> None:
         if text:
             self._out.write(text)
