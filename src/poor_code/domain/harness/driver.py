@@ -6,6 +6,7 @@ types or topology — that lives in the outputs (apply_to), nodes/gates, and rou
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, datetime
 from typing import Callable
 
@@ -55,16 +56,24 @@ class Driver:
 
             if sink is not None:
                 sink.node_entered(node.name, state.cursor.phase.value, state=state)
+            _t0 = time.monotonic()
+            _status = "done"
             try:
                 result = await node.run(NodeContext(state=state, cancel=cancel, sink=sink))
             except _RECOVERABLE_INFERENCE_ERRORS as exc:
                 # A bad LLM call after the node's own re-roll budget is exhausted, or a
                 # call that blew its time budget. Escalate gracefully instead of dying.
+                _status = "failed"
                 result = NodeResult(verdict=Verdict(
                     kind=VerdictKind.ESCALATE,
                     query=f"{node.name} failed: {type(exc).__name__}: {str(exc)[:300]}"))
                 if sink is not None and hasattr(sink, "node_repaired"):
                     sink.node_repaired(node.name, f"escalate: {type(exc).__name__}")
+            if result.query is not None and _status == "done":
+                _status = "parked"
+            if sink is not None and hasattr(sink, "node_finished"):
+                sink.node_finished(
+                    node.name, state.cursor.phase.value, time.monotonic() - _t0, _status)
             if result.query is not None:                   # suspend: await user
                 state = state.with_pending_query(result.query)
                 self._on_step(state)                       # checkpoint with pending query
