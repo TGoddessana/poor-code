@@ -124,5 +124,5 @@ def main() -> None:
     make_driver = _make_driver_factory(_load_project_map(cwd), session)
     PoorCodeApp(
         agent=agent, make_driver=make_driver, slash=slash,
-        project_map_builder=builder,
+        project_map_builder=builder, session=session,
     ).run()
