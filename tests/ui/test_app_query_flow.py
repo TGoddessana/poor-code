@@ -35,7 +35,7 @@ class _AskOnce:
         return NodeResult(output=Request(raw_text="x", kind=RequestKind.LIGHTWEIGHT))
 
 
-def _make_driver(_llm):
+def _make_driver(_llm, _on_step=None):
     reg = NodeRegistry()
     reg.register(_AskOnce())
     # lightweight → fast_path (unregistered) → park after the answer

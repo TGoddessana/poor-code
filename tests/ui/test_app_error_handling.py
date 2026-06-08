@@ -27,7 +27,7 @@ class _Boom:
         raise RuntimeError("simulated provider 400")
 
 
-def _make_driver(_llm):
+def _make_driver(_llm, _on_step=None):
     reg = NodeRegistry()
     reg.register(_Boom())
     return Driver(reg, harness_route)

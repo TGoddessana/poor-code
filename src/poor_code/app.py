@@ -77,7 +77,7 @@ class PoorCodeApp(App):
     def __init__(
         self,
         agent: Agent,
-        make_driver: Callable[[Any], Any],
+        make_driver: Callable[..., Any],
         slash: SlashDispatcher | None = None,
         project_map_builder: ProjectMapBuilder | None = None,
         session: Any = None,
@@ -87,7 +87,8 @@ class PoorCodeApp(App):
         self._session = session
         self.agent = agent
         self._make_driver = make_driver
-        self._harness_driver = make_driver(agent.llm)
+        self._live_state: SessionState | None = None
+        self._harness_driver = make_driver(agent.llm, self._on_checkpoint)
         self.slash = slash or SlashDispatcher()
         self._cancel = asyncio.Event()
         self._project_map_builder = project_map_builder
@@ -246,8 +247,14 @@ class PoorCodeApp(App):
 
     def set_llm(self, llm: Any) -> None:
         self.agent.llm = llm
-        self._harness_driver = self._make_driver(llm)
+        self._harness_driver = self._make_driver(llm, self._on_checkpoint)
         self._dispatch_provider(llm)
+
+    def _on_checkpoint(self, state: SessionState) -> None:
+        """Driver on_step hook: capture the latest live SessionState so the
+        StateInspector can show in-flight context. Runs on the UI event loop
+        (drive is a coroutine, not a thread) → direct assignment is safe."""
+        self._live_state = state
 
     def action_cancel_or_quit(self) -> None:
         st = self.app_state

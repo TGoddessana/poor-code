@@ -96,11 +96,26 @@ def _load_project_map(cwd: Path) -> ProjectMap:
                           cwd=cwd, files=(), parse_errors=())
 
 
+def make_persist_on_step(store, session):
+    """on_step callback that checkpoints SessionState to sessions/<id>/state.json."""
+    def persist(state) -> None:
+        store.write_session_state(session.active_session().session_id, state)
+    return persist
+
+
 def _make_driver_factory(project_map: ProjectMap, session: SessionService):
-    def make(llm):
+    store = SessionStore(paths.config_dir(Path.cwd()))
+    persist = make_persist_on_step(store, session)
+
+    def make(llm, on_step=None):
         graph = build_default_graph(
             llm=llm, project_map=project_map, agent=_build_agent(session, llm))
-        return Driver(graph.nodes, graph.edges.route)
+
+        def step(state) -> None:
+            persist(state)
+            if on_step is not None:
+                on_step(state)
+        return Driver(graph.nodes, graph.edges.route, on_step=step)
     return make
 
 

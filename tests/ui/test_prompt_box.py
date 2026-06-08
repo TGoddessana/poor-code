@@ -39,7 +39,7 @@ class _Cmd:
     def execute(self, ctx, parsed): self.seen.append(parsed)
 
 
-def _make_driver(_llm):
+def _make_driver(_llm, _on_step=None):
     return Driver(NodeRegistry(), harness_route)
 
 

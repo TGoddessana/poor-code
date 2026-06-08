@@ -45,7 +45,7 @@ class _RouterEng:
             raw_text=ctx.state.request.raw_text, kind=RequestKind.ENGINEERING))
 
 
-def _make_driver(_llm):
+def _make_driver(_llm, _on_step=None):
     reg = NodeRegistry()
     reg.register(_RouterEng())
     return Driver(reg, harness_route)
@@ -81,7 +81,7 @@ async def test_cancel_during_turn_marks_failed():
                 await asyncio.sleep(0.05)
             return NodeResult(output=Request(raw_text="x", kind=RequestKind.ENGINEERING))
 
-    def _hang_driver(_llm):
+    def _hang_driver(_llm, _on_step=None):
         reg = NodeRegistry()
         reg.register(_Hang())
         return Driver(reg, harness_route)

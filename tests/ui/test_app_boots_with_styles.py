@@ -38,7 +38,7 @@ class _RouterEng:
 
 
 def _make_driver_factory():
-    def make(_llm):
+    def make(_llm, _on_step=None):
         reg = NodeRegistry()
         reg.register(_RouterEng())
         return Driver(reg, route)

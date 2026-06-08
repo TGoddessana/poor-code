@@ -34,7 +34,7 @@ class _PlannerStub:
         )))
 
 
-def _make_driver(_llm):
+def _make_driver(_llm, _on_step=None):
     reg = NodeRegistry()
     reg.register(_PlannerStub())
     return Driver(reg, route)
