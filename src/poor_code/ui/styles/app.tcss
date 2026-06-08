@@ -153,7 +153,7 @@ LoginScreen {
 }
 
 .stepper-bar {
-    height: 1;
+    height: auto;
     color: $text-muted;
     text-style: bold;
     padding: 0 1;
@@ -209,6 +209,23 @@ LoginScreen {
     max-height: 8;
 }
 
+#query-options > .option-list--option-highlighted {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+}
+
+#query-options:focus > .option-list--option-highlighted {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+}
+
+.query-hint {
+    color: $text-muted;
+    text-style: italic;
+}
+
 StateInspector {
     align: center middle;
 }
@@ -216,9 +233,22 @@ StateInspector {
 #inspector-box {
     width: 70;
     height: auto;
+    max-height: 90%;
     padding: 1 2;
     border: round $accent;
     background: $surface;
+}
+
+#inspector-scroll {
+    height: auto;
+    max-height: 100%;
+}
+
+#inspector-context {
+    margin-top: 1;
+    padding-top: 1;
+    border-top: solid $primary;
+    color: $text-muted;
 }
 
 .inspector-title {
@@ -228,3 +258,8 @@ StateInspector {
 }
 
 .tool-done-flash { background: $success; }
+
+.node-context { color: $text-muted; }
+.node-thinking { color: $text-muted; }
+.node-rawoutput { color: $text-muted; }
+.turn-conclusion { color: $text-disabled; }
