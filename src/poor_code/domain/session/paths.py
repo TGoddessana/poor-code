@@ -38,3 +38,11 @@ def attempt_dir(root: Path, session_id: str, task_id: str, attempt_id: str) -> P
 
 def project_map_json(root: Path) -> Path:
     return root / "project_map.json"
+
+
+def turn_dir(root: Path, session_id: str, turn_id: str) -> Path:
+    return session_dir(root, session_id) / "turns" / turn_id
+
+
+def turn_trace_jsonl(root: Path, session_id: str, turn_id: str) -> Path:
+    return turn_dir(root, session_id, turn_id) / "trace.jsonl"
