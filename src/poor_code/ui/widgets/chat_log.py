@@ -50,7 +50,10 @@ def _node_label_text(seg, *, marker: str = "▸", suffix_extra: str = "") -> str
     gate = "  ⚠ decision needed" if seg.node.endswith("_gate") and "confirm" in seg.node else ""
     text = seg.activity or seg.node
     retry = f" (×{seg.retry + 1})" if seg.retry else ""
-    return f"{marker} {text}{retry}{suffix_extra}{gate}"
+    m = marker
+    if marker == "▸" and getattr(seg, "status", "running") == "interrupted":
+        m = "⏸"
+    return f"{m} {text}{retry}{suffix_extra}{gate}"
 
 
 def _render_segment(seg) -> str:

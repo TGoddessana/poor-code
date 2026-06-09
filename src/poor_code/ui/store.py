@@ -137,7 +137,7 @@ class TurnView:
     cmd_id: str
     user_text: str
     segments: tuple[Segment, ...] = ()
-    status: Literal["pending", "running", "done", "failed"] = "pending"
+    status: Literal["pending", "running", "done", "failed", "paused"] = "pending"
     error: str | None = None
     started_at: float | None = None        # monotonic, set by TurnStarted
     duration_sec: float | None = None      # set by TurnEnded
@@ -224,6 +224,17 @@ class CwdChanged(UIAction):
 class ProviderChanged(UIAction):
     provider_name: str | None
     model: str | None
+
+
+@dataclass(frozen=True)
+class TurnInterrupted(UIAction):
+    turn_id: str | None
+
+
+@dataclass(frozen=True)
+class SteeringSubmitted(UIAction):
+    turn_id: str | None
+    text: str
 
 
 Action = Event | UIAction
@@ -524,6 +535,35 @@ def reduce(state: AppState, action: Action) -> AppState:
 
         case TurnConcluded(reason=reason, detail=detail):
             return replace(state, turn_conclusion=(reason, detail))
+
+        case TurnInterrupted(turn_id=tid):
+            i = _find_turn_by_id(state, tid) if tid is not None else None
+            if i is None:
+                return replace(state, is_processing=False, awaiting_input=False)
+            segs = state.turns[i].segments
+            new_segs = segs
+            for j in range(len(segs) - 1, -1, -1):
+                seg = segs[j]
+                if isinstance(seg, NodeLabelSegment) and seg.status == "running":
+                    new_segs = _replace_segment(segs, j, replace(seg, status="interrupted"))
+                    break
+            return replace(
+                state,
+                turns=_update_turn_at(state.turns, i, status="paused", segments=new_segs),
+                is_processing=False, awaiting_input=False,
+            )
+
+        case SteeringSubmitted(turn_id=tid, text=text):
+            i = _find_turn_by_id(state, tid) if tid is not None else None
+            if i is None:
+                return state
+            turn = state.turns[i]
+            new_segs = turn.segments + (UserAnswerSegment(text=text),)
+            return replace(
+                state,
+                turns=_update_turn_at(state.turns, i, segments=new_segs, status="running"),
+                is_processing=True, awaiting_input=False,
+            )
 
         case _:
             return state
