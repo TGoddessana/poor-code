@@ -74,6 +74,7 @@ class SessionState:
     report: "Report | None" = None
     policy: Policy = Policy.SUPERVISED
     env_report: "EnvReport | None" = None
+    steering_notes: tuple[str, ...] = ()
 
     def with_request(self, request: Request) -> "SessionState":
         return replace(self, request=request)
@@ -110,6 +111,12 @@ class SessionState:
 
     def with_env_report(self, report: "EnvReport") -> "SessionState":
         return replace(self, env_report=report)
+
+    def with_steering(self, note: str) -> "SessionState":
+        return replace(self, steering_notes=self.steering_notes + (note,))
+
+    def without_pending_query(self) -> "SessionState":
+        return replace(self, pending_query=None)
 
     def _with_task(self, task_id: str, **changes) -> "SessionState":
         assert self.plan is not None, "no plan to update tasks in"

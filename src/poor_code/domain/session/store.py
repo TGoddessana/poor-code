@@ -348,6 +348,7 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
                           else _query_to_dict(st.pending_query)),
         "interview": [_answered_to_dict(a) for a in st.interview],
         "repair_hint": st.repair_hint,
+        "steering_notes": list(st.steering_notes),
         "feedback": [_feedback_entry_to_dict(e) for e in st.feedback.entries],
         "policy": st.policy.value,
         "report": (None if st.report is None else report_to_dict(st.report)),
@@ -393,6 +394,7 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
                            else _dict_to_query(d["pending_query"])),
             interview=tuple(_dict_to_answered(a) for a in d.get("interview", [])),
             repair_hint=d.get("repair_hint"),
+            steering_notes=tuple(d.get("steering_notes", [])),
             feedback=FeedbackMemory(
                 entries=tuple(_dict_to_feedback_entry(e) for e in d.get("feedback", []))
             ),
