@@ -25,7 +25,7 @@ def test_awaiting_placeholder_text():
     from poor_code.ui.widgets.prompt_box import _placeholder_for
     from poor_code.ui.store import AppState
     assert _placeholder_for(AppState(awaiting_input=True)) == "Type your answer, or pick an option above"
-    assert _placeholder_for(AppState(is_processing=True)) == "Ctrl+C to cancel"
+    assert _placeholder_for(AppState(is_processing=True)) == "Esc to interrupt · Ctrl+C twice to quit"
     assert _placeholder_for(AppState()) is None
 
 

@@ -37,8 +37,10 @@ RUNNING_FRAMES = [
 def _placeholder_for(state) -> str | None:
     if getattr(state, "awaiting_input", False):
         return "Type your answer, or pick an option above"
+    if state.turns and state.turns[-1].status == "paused":
+        return "⏸ Paused — type to steer the agent, or Ctrl+C twice to quit"
     if state.is_processing:
-        return "Ctrl+C to cancel"
+        return "Esc to interrupt · Ctrl+C twice to quit"
     return None  # → original placeholder
 
 
