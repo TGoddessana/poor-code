@@ -68,7 +68,7 @@ class NodeLabelSegment:
     activity: str = ""
     retry: int = 0
     duration_sec: float | None = None      # set by NodeFinished
-    status: str = "running"                 # running|done|failed|parked
+    status: str = "running"                 # running|done|failed|parked|interrupted
 
 
 @dataclass(frozen=True)
