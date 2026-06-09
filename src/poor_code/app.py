@@ -171,8 +171,17 @@ class PoorCodeApp(App):
         if self.slash.dispatch(text, ctx=self):
             return
         self._cancel = asyncio.Event()
+        # Capture-then-clear: an interrupt sets _interrupted=True; consume it here so
+        # it can never leak into a later, unrelated turn regardless of which branch runs.
+        was_interrupted = self._interrupted
+        self._interrupted = False
         parked = self._harness_state
-        if parked is not None and parked.pending_query is not None:
+        if was_interrupted and parked is not None:
+            # steering-resume branch — user intervened mid-turn; inject the message
+            # as a directive and resume from the preserved cursor (NOT the router).
+            state = parked.without_pending_query().with_steering(text)
+            self.store.dispatch(SteeringSubmitted(turn_id=self._turn_id, text=text))
+        elif parked is not None and parked.pending_query is not None:
             # answer branch — continue the same long turn
             resp = UserResponse(query_id=parked.pending_query.id, answer=text)
             state = parked.with_user_response(resp)
@@ -259,6 +268,7 @@ class PoorCodeApp(App):
         if parked is None or parked.pending_query is None:
             return
         self._cancel = asyncio.Event()
+        self._interrupted = False
         resp = UserResponse(
             query_id=parked.pending_query.id, answer=answer, chosen_option=chosen_option)
         state = parked.with_user_response(resp)
