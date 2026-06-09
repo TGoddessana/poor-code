@@ -287,6 +287,17 @@ class AgentNode:
         failure (no output, or schema-invalid) is fed back as a corrective message
         and re-rolled. After the budget is exhausted the last error propagates."""
         base = self.build_messages(ctx.state)
+        steer = getattr(ctx.state, "steering_notes", None)
+        steer_msgs: list[dict] = []
+        if steer:
+            joined = "\n".join(f"- {s}" for s in steer)
+            steer_msgs = [{
+                "role": "user",
+                "content": (
+                    "[User steering — honor these directives over earlier plans]\n"
+                    + joined
+                ),
+            }]
         if ctx.sink is not None:
             phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
             ctx.sink.node_context(self.name, phase, base)
@@ -295,7 +306,7 @@ class AgentNode:
         corrections: list[dict] = []
         last_err: StructuredOutputError | None = None
         for _ in range(MAX_DISPATCH_ATTEMPTS):
-            extras = [*(extra_messages or []), *corrections]
+            extras = [*steer_msgs, *(extra_messages or []), *corrections]
             messages = [base[0], *extras, *base[1:]] if extras else base
             try:
                 raw = strip_code_fence(await self._stream_once(ctx, messages, response_format))
