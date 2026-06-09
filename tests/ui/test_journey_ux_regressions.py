@@ -111,17 +111,19 @@ async def test_arrow_then_enter_commits():
 
 
 @pytest.mark.asyncio
-async def test_escape_cancels_a_parked_query():
+async def test_escape_interrupts_a_parked_query():
+    """Esc on a parked query interrupts into a paused state and PRESERVES the
+    graph checkpoint so the user can steer (it no longer cancels/abandons)."""
     async with _app().run_test() as pilot:
         app = await _drive_to_query(pilot)
         assert app.store.state.awaiting_input is True
         await pilot.press("escape")
         await pilot.pause()
         state = app.store.state
-        assert state.awaiting_input is False      # prompt no longer stuck
         assert state.is_processing is False
-        assert state.turns[0].status == "failed"
-        assert app._harness_state is None
+        assert state.turns[0].status == "paused"
+        assert app._interrupted is True
+        assert app._harness_state is not None      # preserved for steering
 
 
 @pytest.mark.asyncio

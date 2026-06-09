@@ -94,13 +94,16 @@ async def test_cancel_during_turn_marks_failed():
         await pilot.press("enter")
         await pilot.pause(delay=0.05)
         assert pilot.app.store.state.is_processing is True
-        pilot.app._cancel.set()  # action_interrupt() stub filled in a later task
+        pilot.app.action_interrupt()  # Esc: immediate interrupt of the running turn
         for _ in range(20):
             await pilot.pause(delay=0.05)
         state = pilot.app.store.state
         assert state.is_processing is False
-        assert state.turns[0].status == "failed"
-        assert state.last_error == "cancelled"
+        # Interrupt is human-in-the-loop pause, not a failure: the turn parks in
+        # "paused" and the graph checkpoint is preserved for follow-up steering.
+        assert state.turns[0].status == "paused"
+        assert pilot.app._interrupted is True
+        assert pilot.app._harness_state is not None
 
 
 @dataclass

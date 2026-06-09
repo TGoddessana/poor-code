@@ -32,7 +32,8 @@ from poor_code.slash.dispatcher import SlashDispatcher
 from poor_code.ui.narrator import StaticNarrator
 from poor_code.ui.screens.chat import ChatScreen
 from poor_code.ui.store import (
-    AnswerSubmitted, AppState, ProviderChanged, PromptSubmitted, Store,
+    AnswerSubmitted, AppState, ProviderChanged, PromptSubmitted,
+    SteeringSubmitted, Store, TurnInterrupted,
 )
 
 
@@ -188,6 +189,7 @@ class PoorCodeApp(App):
                 cursor=Cursor(phase=Phase.ROUTING, current_node="router"),
                 request=Request(raw_text=text, kind=RequestKind.ENGINEERING),
             )
+        self._live_state = state
         self.run_worker(self._drive(state), group="turn", exclusive=True)
 
     async def _drive(self, state: SessionState) -> None:
@@ -198,6 +200,12 @@ class PoorCodeApp(App):
         try:
             final = await self._harness_driver.run(state, self._cancel, sink=sink)
         except asyncio.CancelledError:
+            if self._interrupted:
+                # User interrupt: action_interrupt already preserved _harness_state
+                # and dispatched TurnInterrupted. Conclude the trace and re-raise so
+                # the worker finishes cancelling cleanly.
+                sink.turn_concluded("interrupted", "")
+                raise
             sink.turn_concluded(*classify_conclusion(state, cancelled=True))
             self.store.dispatch(TurnFailed(turn_id=self._turn_id, error="cancelled"))
             self._harness_state = None
@@ -209,6 +217,9 @@ class PoorCodeApp(App):
             self._harness_state = None
             return
         if self._cancel.is_set():
+            if self._interrupted:
+                sink.turn_concluded("interrupted", "")
+                return  # state preserved by action_interrupt; TurnInterrupted dispatched
             sink.turn_concluded("cancelled", "")
             self.store.dispatch(TurnFailed(turn_id=self._turn_id, error="cancelled"))
             self._harness_state = None
@@ -252,6 +263,7 @@ class PoorCodeApp(App):
             query_id=parked.pending_query.id, answer=answer, chosen_option=chosen_option)
         state = parked.with_user_response(resp)
         self.store.dispatch(AnswerSubmitted(turn_id=self._turn_id, answer=answer))
+        self._live_state = state
         self.run_worker(self._drive(state), group="turn", exclusive=True)
 
     def set_llm(self, llm: Any) -> None:
@@ -274,8 +286,19 @@ class PoorCodeApp(App):
         self.notify("Press Ctrl+C again to exit", timeout=2.0)
 
     def action_interrupt(self) -> None:
-        # Filled in by a later task.
-        pass
+        st = self.app_state
+        if not st.is_processing:
+            return  # idle: Esc is a no-op (use Ctrl+C ×2 or Ctrl+Q to quit)
+        # Immediate stop: cancel the running turn worker so an in-flight LLM/tool
+        # call is interrupted now, not at the next node boundary. _cancel.set()
+        # also covers nodes that poll the event.
+        self._cancel.set()
+        self.workers.cancel_group(self, "turn")
+        # Preserve the last node-boundary checkpoint so the next message resumes
+        # from cursor.current_node instead of restarting at the router.
+        self._harness_state = self._live_state
+        self._interrupted = True
+        self.store.dispatch(TurnInterrupted(turn_id=self._turn_id))
 
     def action_open_state(self) -> None:
         from poor_code.ui.screens.state_inspector import StateInspector
