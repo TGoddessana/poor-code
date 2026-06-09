@@ -40,3 +40,17 @@ async def test_fast_path_forwards_content_returns_terminal():
     assert result.output is None and result.query is None
     # the sink received the forwarded events (filtering happens inside TurnSink.forward)
     assert any(isinstance(e, AssistantTextDelta) for e in sink.events)
+
+
+@pytest.mark.asyncio
+async def test_fast_path_appends_steering_to_prompt():
+    agent = _FakeAgent()
+    node = FastPathNode(agent)
+    ctx = NodeContext(
+        state=SessionState(
+            request=Request(raw_text="hi", kind=RequestKind.LIGHTWEIGHT),
+            steering_notes=("be brief",)),
+        cancel=asyncio.Event(), sink=_Sink())
+    await node.run(ctx)
+    assert "hi" in agent.seen_text
+    assert "be brief" in agent.seen_text

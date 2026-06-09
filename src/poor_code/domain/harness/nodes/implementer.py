@@ -14,6 +14,7 @@ from poor_code.domain.harness.ledger import render_build_ledger, task_section, r
 from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLike
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.snapshot import GitSnapshot, default_git_dir
+from poor_code.domain.harness.steering import steering_block
 from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.session.models import Attempt, ChangeRecord, Phase, SessionState
 from poor_code.domain.tool.base import ToolContext, allow_all
@@ -193,7 +194,8 @@ class Implementer:
                 f"TASK: {task.title}\nPURPOSE: {task.purpose}\n"
                 f"DETAILS:\n{task_md}\nEDITABLE PATHS: {scope}\n"
                 f"VALIDATION (make this pass): {task.how_to_validate}"
-                f"{self._render_steps(task)}{refs}{feedback}{hint}")
+                f"{self._render_steps(task)}{refs}{feedback}{hint}"
+                f"{steering_block(state.steering_notes)}")
 
     @staticmethod
     def _render_steps(task) -> str:

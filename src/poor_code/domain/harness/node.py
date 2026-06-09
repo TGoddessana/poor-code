@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator, Protocol, TypeVar, Union, get_args, get_o
 
 from pydantic import BaseModel, ValidationError
 
+from poor_code.domain.harness.steering import steering_message
 from poor_code.domain.session.models import (
     Layer, Phase, Query, SessionState, TriggerKind, Verdict, VerdictKind,
 )
@@ -287,17 +288,8 @@ class AgentNode:
         failure (no output, or schema-invalid) is fed back as a corrective message
         and re-rolled. After the budget is exhausted the last error propagates."""
         base = self.build_messages(ctx.state)
-        steer = getattr(ctx.state, "steering_notes", None)
-        steer_msgs: list[dict] = []
-        if steer:
-            joined = "\n".join(f"- {s}" for s in steer)
-            steer_msgs = [{
-                "role": "user",
-                "content": (
-                    "[User steering — honor these directives over earlier plans]\n"
-                    + joined
-                ),
-            }]
+        _sm = steering_message(getattr(ctx.state, "steering_notes", None) or ())
+        steer_msgs: list[dict] = [_sm] if _sm is not None else []
         if ctx.sink is not None:
             phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
             ctx.sink.node_context(self.name, phase, base)
