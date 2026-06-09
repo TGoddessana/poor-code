@@ -94,7 +94,7 @@ async def test_cancel_during_turn_marks_failed():
         await pilot.press("enter")
         await pilot.pause(delay=0.05)
         assert pilot.app.store.state.is_processing is True
-        pilot.app.action_cancel_or_quit()
+        pilot.app._cancel.set()  # action_interrupt() stub filled in a later task
         for _ in range(20):
             await pilot.pause(delay=0.05)
         state = pilot.app.store.state

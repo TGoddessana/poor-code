@@ -36,6 +36,11 @@ from poor_code.ui.store import (
 )
 
 
+def _is_double_tap(now: float, last: float | None, window: float = 2.0) -> bool:
+    """True when `now` falls within `window` seconds of a prior press `last`."""
+    return last is not None and (now - last) <= window
+
+
 def classify_conclusion(
     final, *, cancelled: bool = False, error: str | None = None,
     escalate_detail: str | None = None,
@@ -64,11 +69,13 @@ class PoorCodeApp(App):
     CSS_PATH = "ui/styles/app.tcss"
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
-        # escape is a reliable cancel/quit key: ctrl+q is frequently swallowed by
-        # the terminal's XON/XOFF flow control before it reaches the app, and ctrl+c
-        # can be remapped — escape always arrives. Cancels an in-flight turn, else quits.
-        ("escape", "cancel_or_quit", "Cancel/Quit"),
-        ("ctrl+c", "cancel_or_quit", "Cancel/Quit"),
+        # Ctrl+C never cancels work — it is a two-step exit confirm (first press
+        # shows a hint, a second press within the window quits). Interrupting a
+        # turn is Esc's job (see action_interrupt).
+        ("ctrl+c", "ctrl_c", "Quit (×2)"),
+        # Esc: immediate interrupt of the in-flight turn for human-in-the-loop
+        # steering; no-op when idle.
+        ("escape", "interrupt", "Interrupt"),
         ("ctrl+i", "open_state", "State"),
     ]
 
@@ -97,6 +104,8 @@ class PoorCodeApp(App):
         self._turn_id: str | None = None
         self._turn_started: float = 0.0
         self._narrator = StaticNarrator()
+        self._last_ctrl_c: float | None = None
+        self._interrupted: bool = False
 
     def on_mount(self) -> None:
         self.store.subscribe(lambda s: setattr(self, "app_state", s))
@@ -256,18 +265,17 @@ class PoorCodeApp(App):
         (drive is a coroutine, not a thread) → direct assignment is safe."""
         self._live_state = state
 
-    def action_cancel_or_quit(self) -> None:
-        st = self.app_state
-        if not st.is_processing:
+    def action_ctrl_c(self) -> None:
+        now = time.monotonic()
+        if _is_double_tap(now, self._last_ctrl_c):
             self.exit()
             return
-        if st.awaiting_input and self._harness_state is not None:
-            # Parked on a question: no worker is running, so setting _cancel would
-            # do nothing. Abandon the turn outright so the user isn't trapped.
-            self.store.dispatch(TurnFailed(turn_id=self._turn_id, error="cancelled"))
-            self._harness_state = None
-            return
-        self._cancel.set()
+        self._last_ctrl_c = now
+        self.notify("Press Ctrl+C again to exit", timeout=2.0)
+
+    def action_interrupt(self) -> None:
+        # Filled in by a later task.
+        pass
 
     def action_open_state(self) -> None:
         from poor_code.ui.screens.state_inspector import StateInspector
