@@ -33,13 +33,15 @@ def _task_report(t) -> TaskReport:
         validation_output=(rr.output[-_VALIDATION_OUTPUT_TAIL:] if rr is not None else ""))
 
 
-def build_report(state: SessionState, outcome: ReportOutcome) -> Report:
+def build_report(state: SessionState, outcome: ReportOutcome, note: str = "") -> Report:
     tasks = state.plan.tasks if state.plan is not None else ()
     task_reports = tuple(_task_report(t) for t in tasks)
     done = sum(1 for t in tasks if t.status is TaskStatus.DONE)
     passed = outcome is ReportOutcome.SUCCEEDED
     tail = "global validation passed" if passed else "ABANDONED"
     summary = f"{done}/{len(tasks)} tasks done; {tail}"
+    if note:
+        summary += f" — {note}"
     return Report(outcome=outcome, tasks=task_reports,
                   global_validation_passed=passed,
                   changeset=build_changeset(state), summary=summary)

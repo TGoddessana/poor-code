@@ -76,6 +76,12 @@ class Driver:
             assert state.cursor is not None, "Driver requires a cursor"
             node = self._registry.get(state.cursor.current_node)
             if node is None:
+                # Unregistered target (e.g. Router → fast_path in a graph built without
+                # an agent). Don't vanish silently into an empty ABANDONED — record why.
+                self.last_escape = Verdict(
+                    kind=VerdictKind.ESCALATE,
+                    query=f"parked: node '{state.cursor.current_node}' is not "
+                          "registered in this graph")
                 return state  # park: next node not implemented
             if cancel.is_set():
                 return state

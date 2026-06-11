@@ -133,7 +133,9 @@ async def run_headless(driver, state: SessionState, cancel: "asyncio.Event",
             continue
         break
     if state.report is None:
-        state = state.with_report(build_report(state, ReportOutcome.ABANDONED))
+        le = getattr(driver, "last_escape", None)
+        note = le.query if (le is not None and le.query) else ""
+        state = state.with_report(build_report(state, ReportOutcome.ABANDONED, note=note))
     return state
 
 

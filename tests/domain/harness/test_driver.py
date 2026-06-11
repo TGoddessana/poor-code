@@ -249,3 +249,13 @@ def test_apply_noop_when_output_none():
     from poor_code.domain.session.models import SessionState
     s = SessionState()
     assert Driver._apply(s, NodeResult(output=None)) is s
+
+
+def test_unregistered_node_park_records_reason():
+    reg = NodeRegistry()  # empty → target node is unregistered
+    driver = Driver(reg, route=lambda *a, **k: None)
+    state = SessionState(cursor=Cursor(phase=Phase.ROUTING, current_node="fast_path"))
+    out = asyncio.run(driver.run(state, asyncio.Event()))
+    assert driver.last_escape is not None
+    assert driver.last_escape.kind is VerdictKind.ESCALATE
+    assert "fast_path" in (driver.last_escape.query or "")
