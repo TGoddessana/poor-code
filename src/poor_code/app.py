@@ -42,6 +42,20 @@ def _is_double_tap(now: float, last: float | None, window: float = 2.0) -> bool:
     return last is not None and (now - last) <= window
 
 
+def _is_smart_driver_query(state: SessionState | None) -> bool:
+    q = None if state is None else state.pending_query
+    return q is not None and q.resolves == "smart_driver_hitl"
+
+
+def _smart_driver_enabled(driver: Any) -> bool:
+    runtime = getattr(driver, "_runtime", None)
+    return bool(
+        runtime is not None
+        and getattr(runtime, "smart_enabled", False)
+        and getattr(runtime, "advisor", None) is not None
+    )
+
+
 def classify_conclusion(
     final, *, cancelled: bool = False, error: str | None = None,
     escalate_detail: str | None = None,
@@ -64,6 +78,29 @@ def classify_conclusion(
         return "parked", "plan ready"
     node = final.cursor.current_node if getattr(final, "cursor", None) else "?"
     return "parked", f"node '{node}' not reached"
+
+
+def _plan_signature(plan) -> tuple[str, ...]:
+    """Stable enough UI signature for suppressing duplicate PlanReady events."""
+    lines: list[str] = [f"plan_md:{getattr(plan, 'plan_md', '')}"]
+    for slot in getattr(plan, "file_plan", ()):
+        lines.append(f"file:{slot.path}:{slot.responsibility}")
+    for dep in getattr(plan, "deps", ()):
+        lines.append(f"dep:{dep.task_id}:{dep.depends_on}")
+    for task in getattr(plan, "tasks", ()):
+        scope = getattr(task, "edit_scope", None)
+        editable = ",".join(getattr(scope, "editable", ()) if scope is not None else ())
+        readonly = ",".join(getattr(scope, "readonly", ()) if scope is not None else ())
+        forbidden = ",".join(getattr(scope, "forbidden", ()) if scope is not None else ())
+        step_sig = ",".join(
+            f"{s.id}:{s.kind}:{s.file}:{s.anchor}:{s.run}:{s.expected}"
+            for s in getattr(task, "steps", ())
+        )
+        lines.append(
+            f"task:{task.id}:{task.title}:{task.purpose}:{task.description}:"
+            f"{editable}:{readonly}:{forbidden}:{task.how_to_validate}:{step_sig}"
+        )
+    return tuple(lines)
 
 
 class PoorCodeApp(App):
@@ -107,6 +144,7 @@ class PoorCodeApp(App):
         self._narrator = StaticNarrator()
         self._last_ctrl_c: float | None = None
         self._interrupted: bool = False
+        self._announced_plan: tuple[str | None, tuple[str, ...]] | None = None
 
     def on_mount(self) -> None:
         self.store.subscribe(lambda s: setattr(self, "app_state", s))
@@ -179,6 +217,16 @@ class PoorCodeApp(App):
         if was_interrupted and parked is not None:
             # steering-resume branch — user intervened mid-turn; inject the message
             # as a directive and resume from the preserved cursor (NOT the router).
+            if _smart_driver_enabled(self._harness_driver):
+                # Preserve the parked query for Smart Driver's briefing so utterances like
+                # "이 질문이 아닌데?" can be understood as objections to that query.
+                state = parked.with_steering(text)
+            else:
+                state = parked.without_pending_query().with_steering(text)
+            self.store.dispatch(SteeringSubmitted(turn_id=self._turn_id, text=text))
+        elif _is_smart_driver_query(parked):
+            # A Smart Driver confirmation answer is itself a HITL utterance: "continue",
+            # "no, change X", or a fresh pivot all need to be classified by the advisor.
             state = parked.without_pending_query().with_steering(text)
             self.store.dispatch(SteeringSubmitted(turn_id=self._turn_id, text=text))
         elif parked is not None and parked.pending_query is not None:
@@ -238,10 +286,12 @@ class PoorCodeApp(App):
         escalate_detail = (escalate.query or escalate.hint) if escalate is not None else None
         sink.turn_concluded(*classify_conclusion(final, escalate_detail=escalate_detail))
         if final.pending_query is not None:
+            if final.pending_query.id == "confirm_plan" and final.plan is not None:
+                self._plan_ready_once(sink, final.plan)
             sink.query_raised(final.pending_query)
             return  # turn stays open; reducer set awaiting_input
         if final.plan is not None:
-            sink.plan_ready(final.plan)
+            self._plan_ready_once(sink, final.plan)
         if final.report is not None:
             sink.report_ready(final.report)
         self.store.dispatch(TurnEnded(
@@ -250,6 +300,13 @@ class PoorCodeApp(App):
             model=model,
         ))
         self._harness_state = None
+
+    def _plan_ready_once(self, sink: TurnSink, plan) -> None:
+        key = (self._turn_id, _plan_signature(plan))
+        if self._announced_plan == key:
+            return
+        sink.plan_ready(plan)
+        self._announced_plan = key
 
     def _make_trace_sink(self, turn_id: str) -> TraceSink | None:
         if self._session is None:
@@ -269,6 +326,12 @@ class PoorCodeApp(App):
             return
         self._cancel = asyncio.Event()
         self._interrupted = False
+        if _is_smart_driver_query(parked):
+            state = parked.without_pending_query().with_steering(answer)
+            self.store.dispatch(SteeringSubmitted(turn_id=self._turn_id, text=answer))
+            self._live_state = state
+            self.run_worker(self._drive(state), group="turn", exclusive=True)
+            return
         resp = UserResponse(
             query_id=parked.pending_query.id, answer=answer, chosen_option=chosen_option)
         state = parked.with_user_response(resp)
@@ -306,7 +369,13 @@ class PoorCodeApp(App):
         self.workers.cancel_group(self, "turn")
         # Preserve the last node-boundary checkpoint so the next message resumes
         # from cursor.current_node instead of restarting at the router.
-        self._harness_state = self._live_state
+        parked_on_query = (
+            st.awaiting_input
+            and self._harness_state is not None
+            and self._harness_state.pending_query is not None
+        )
+        if not parked_on_query:
+            self._harness_state = self._live_state
         self._interrupted = True
         self.store.dispatch(TurnInterrupted(turn_id=self._turn_id))
 

@@ -8,7 +8,7 @@ this node returns — one casual exchange per turn."""
 from __future__ import annotations
 
 from poor_code.domain.harness.node import NodeContext, NodeResult
-from poor_code.domain.harness.steering import steering_block
+from poor_code.domain.harness.steering import driver_feedback_block, steering_block
 from poor_code.domain.session.models import Phase
 from poor_code.messages import SendPrompt
 
@@ -22,7 +22,11 @@ class FastPathNode:
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         assert ctx.state.request is not None, "FastPathNode requires state.request"
-        cmd = SendPrompt(ctx.state.request.raw_text + steering_block(ctx.state.steering_notes))
+        cmd = SendPrompt(
+            ctx.state.request.raw_text
+            + steering_block(ctx.state.steering_notes)
+            + driver_feedback_block(ctx.state, self.name)
+        )
         async for event in self._agent.run(cmd, ctx.cancel):
             if ctx.sink is not None:
                 ctx.sink.forward(event)

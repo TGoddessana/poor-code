@@ -31,3 +31,4 @@ def test_steering_submitted_resumes_running_and_records_text():
     assert out.turns[0].status == "running"
     assert isinstance(out.turns[0].segments[-1], UserAnswerSegment)
     assert out.turns[0].segments[-1].text == "use auth.py"
+    assert out.turns[0].segments[-1].kind == "steering"

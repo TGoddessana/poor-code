@@ -1,6 +1,6 @@
 """Tests for issue-4 internal-visibility features:
- • active-node spinner (NodeLabelView animates while a node is the trailing,
-   still-working segment of a running turn),
+ • active-node spinner (NodeLabelView animates while the trailing node is still
+   working, even after context/thinking/result segments appear),
  • context inspector (render_context surfaces the live SessionState the nodes
    were fed — code context, interview Q&A, requirement).
 """
@@ -47,27 +47,49 @@ async def test_trailing_node_label_is_active_while_running():
 
 
 @pytest.mark.asyncio
-async def test_label_goes_inactive_once_a_result_follows():
+async def test_label_stays_active_while_running_after_a_result_follows():
     seg_label = NodeLabelSegment(node="explorer", phase="locating",
                                  activity="Exploring the codebase")
     app = _Host(_running(seg_label))
     async with app.run_test() as pilot:
         await pilot.pause()
         block = app.query_one(TurnBlock)
-        # a result card now trails the label → label no longer the active node
+        # A body segment now trails the label, but the node itself is still
+        # marked running, so its own timer should keep moving.
         done = _running(seg_label,
                         NodeResultSegment(node="explorer", phase="locating",
                                           headline="Found 3 files"))
         block.refresh_from(done)
         await pilot.pause()
         labels = list(app.query(NodeLabelView))
-        assert labels[0]._active is False
+        assert labels[0]._active is True
+
+
+@pytest.mark.asyncio
+async def test_active_node_label_ticks_its_own_timer_after_body_segments():
+    seg_label = NodeLabelSegment(node="explorer", phase="locating",
+                                 activity="Exploring the codebase")
+    turn = _running(
+        seg_label,
+        NodeResultSegment(node="explorer", phase="locating", headline="Found 3 files"),
+    )
+    app = _Host(turn)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        label = app.query_one(NodeLabelView)
+        first = str(label.query_one(".node-label").content)
+        label._tick()
+        await pilot.pause()
+        second = str(label.query_one(".node-label").content)
+        assert first != second
+        assert "s" in second
 
 
 @pytest.mark.asyncio
 async def test_awaiting_query_does_not_animate_label():
     seg_label = NodeLabelSegment(node="interviewer", phase="interviewing",
-                                 activity="Asking a clarifying question")
+                                 activity="Asking a clarifying question",
+                                 status="parked")
     app = _Host(_running(seg_label))
     async with app.run_test() as pilot:
         await pilot.pause()

@@ -36,6 +36,24 @@ def test_query_raised_extracts_primitives():
                                prompt="which?", options=("a", "b"))]
 
 
+def test_query_raised_includes_context_rationale_and_resolves():
+    out, dispatch = _collect()
+    q = Query(
+        id="q1",
+        kind=QueryKind.CLARIFY,
+        prompt="which behavior should change?",
+        context="The interviewer is narrowing the request.",
+        rationale="Needed before planning.",
+        resolves="requirement.summary",
+    )
+    TurnSink("T", dispatch).query_raised(q)
+    prompt = out[0].prompt
+    assert "Context: The interviewer is narrowing the request." in prompt
+    assert "which behavior should change?" in prompt
+    assert "Why: Needed before planning." in prompt
+    assert "Resolves: requirement.summary" in prompt
+
+
 def test_plan_ready_formats_lines():
     out, dispatch = _collect()
     plan = Plan(tasks=(Task(id="t1", title="Add X", purpose="p",

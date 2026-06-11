@@ -75,6 +75,7 @@ class NodeLabelSegment:
 class UserAnswerSegment:
     """The user's reply to a Query, echoed into the log."""
     text: str
+    kind: Literal["answer", "steering"] = "answer"
 
 
 @dataclass(frozen=True)
@@ -487,7 +488,8 @@ def reduce(state: AppState, action: Action) -> AppState:
         case AnswerSubmitted(turn_id=tid, answer=answer):
             if not state.awaiting_input:
                 return state
-            with_seg = _append_segment(state, tid, UserAnswerSegment(text=answer))
+            with_seg = _append_segment(
+                state, tid, UserAnswerSegment(text=answer, kind="answer"))
             return replace(with_seg, awaiting_input=False)
 
         case PlanReady(turn_id=tid, lines=lines):
@@ -558,7 +560,7 @@ def reduce(state: AppState, action: Action) -> AppState:
             if i is None:
                 return state
             turn = state.turns[i]
-            new_segs = turn.segments + (UserAnswerSegment(text=text),)
+            new_segs = turn.segments + (UserAnswerSegment(text=text, kind="steering"),)
             return replace(
                 state,
                 turns=_update_turn_at(state.turns, i, segments=new_segs, status="running"),

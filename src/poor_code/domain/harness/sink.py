@@ -45,6 +45,18 @@ def _report_lines(report) -> tuple[str, ...]:
     return tuple(f"{t.title} — {t.status.value}" for t in report.tasks)
 
 
+def _query_prompt(query: Query) -> str:
+    lines: list[str] = []
+    if query.context:
+        lines.append(f"Context: {query.context}")
+    lines.append(query.prompt)
+    if query.rationale:
+        lines.append(f"Why: {query.rationale}")
+    if query.resolves:
+        lines.append(f"Resolves: {query.resolves}")
+    return "\n".join(lines)
+
+
 class TurnSink:
     def __init__(self, turn_id: str, dispatch: Callable[[Event], None],
                  narrator: object | None = None, trace: object | None = None) -> None:
@@ -140,7 +152,7 @@ class TurnSink:
     def query_raised(self, query: Query) -> None:
         self._dispatch(QueryRaised(
             turn_id=self._turn_id, query_id=query.id, kind=query.kind.value,
-            prompt=query.prompt, options=tuple(query.options)))
+            prompt=_query_prompt(query), options=tuple(query.options)))
 
     def plan_ready(self, plan: Plan) -> None:
         self._dispatch(PlanReady(turn_id=self._turn_id, lines=_plan_lines(plan)))

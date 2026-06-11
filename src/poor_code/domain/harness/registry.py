@@ -14,3 +14,6 @@ class NodeRegistry:
 
     def get(self, name: str) -> Node | None:
         return self._nodes.get(name)
+
+    def names(self) -> tuple[str, ...]:
+        return tuple(self._nodes)

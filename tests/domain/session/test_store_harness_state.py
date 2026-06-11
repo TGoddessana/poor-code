@@ -74,8 +74,11 @@ def test_round_trip_plan(tmp_path):
     from poor_code.domain.session.models import (
         Dependency,
         EditScope,
+        FileSlot,
         Plan,
         SessionState,
+        Step,
+        StepKind,
         Task,
     )
 
@@ -92,9 +95,12 @@ def test_round_trip_plan(tmp_path):
                     forbidden=("src/poor_code/messages.py",),
                 ),
                 how_to_validate="pytest tests/provider/test_google.py",
+                steps=(Step(id="s1", kind=StepKind.IMPL, file="src/x.py", body="pass"),),
             ),
         ),
         deps=(Dependency(task_id="t1", depends_on="t0"),),
+        file_plan=(FileSlot(path="src/x.py", responsibility="auth"),),
+        plan_md="## t1\nDo the thing",
     )
     store = SessionStore(tmp_path)
     store.write_session_state("sid1", SessionState(plan=plan))
@@ -102,3 +108,50 @@ def test_round_trip_plan(tmp_path):
 
     assert back.plan == plan
     assert back.plan.tasks[0].edit_scope.forbidden == ("src/poor_code/messages.py",)
+    assert back.plan.plan_md == "## t1\nDo the thing"
+    assert back.plan.tasks[0].steps[0].kind is StepKind.IMPL
+
+
+def test_round_trip_driver_control(tmp_path):
+    from poor_code.domain.session.models import (
+        Cursor,
+        DriverControl,
+        DriverDecisionRecord,
+        NodeFeedbackPacket,
+        Phase,
+        SessionState,
+        SubgraphCursor,
+    )
+
+    state = SessionState(
+        driver_control=DriverControl(
+            processed_steering_count=1,
+            feedback_packets=(NodeFeedbackPacket(
+                target_nodes=("implementer",),
+                summary="tests edited",
+                evidence=("diff touched tests/test_auth.py",),
+                instruction="Edit src/auth.py only.",
+                ttl_steps=2,
+                source_steering_index=1,
+            ),),
+            subgraph_cursors=(SubgraphCursor(
+                graph_name="implement_loop",
+                cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="validator",
+                              task_id="t1", attempt_id="a1"),
+            ),),
+            last_decision=DriverDecisionRecord(
+                action="restart_current",
+                target_node="implementer",
+                reason="user corrected implementation",
+            ),
+        )
+    )
+
+    store = SessionStore(tmp_path)
+    store.write_session_state("sid1", state)
+    back = store.read_session_state("sid1")
+
+    assert back.driver_control.processed_steering_count == 1
+    assert back.driver_control.feedback_packets[0].instruction == "Edit src/auth.py only."
+    assert back.subgraph_cursor("implement_loop").current_node == "validator"
+    assert back.driver_control.last_decision.action == "restart_current"

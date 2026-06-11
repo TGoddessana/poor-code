@@ -19,7 +19,7 @@ from poor_code.domain.harness.node import (
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
-from poor_code.domain.project_map.models import ProjectMap
+from poor_code.domain.project_map.models import FileEntry, ProjectMap
 from poor_code.domain.session.models import (
     CodeContext, CodeRef, FileExcerpt, GroundingStatus, Phase, SessionState)
 from poor_code.domain.tool.base import ToolContext, allow_all
@@ -32,6 +32,8 @@ from poor_code.provider.usage import tag
 _TOOL_NAME = "emit_code_context"
 MAX_ITERATIONS = 20
 MAX_EXCERPT_CHARS = 4000
+HUB_IMPORTER_CAP = 8     # a file imported by more than this is a hub, not a receiver
+MAX_RECEIVER_READS = 4   # total files the 1-hop augmentation round may read
 
 _EXPLORE_SYSTEM = (
     "You are the Explorer, the codebase-reconnaissance step of a larger pipeline. "
@@ -53,6 +55,12 @@ _EXPLORE_SYSTEM = (
     "- A non-trivial request needs MANY reads across MULTIPLE files. Keep calling "
     "read/grep until you have traced the feature — entry points, the layers it touches, "
     "and the tests.\n\n"
+    "FOLLOW THE RECEIVER: when a relevant file emits a Message/Event or is a UI "
+    "component, you must find who consumes it. The CODE MAP's 'used by' line "
+    "lists that file's importers (one hop up) — open the importer/parent that "
+    "mounts the widget or handles its event (e.g. an `on_*`/`@on` handler). A "
+    "child widget alone is half the picture; the receiver is where submit/handler "
+    "behaviour lives.\n\n"
     "GREENFIELD: if `list`/`glob` on the project root show no existing code (an empty "
     "or near-empty working dir), this is a build-from-scratch task. STOP exploring "
     "immediately — there is nothing to confirm. Do NOT widen the search, do NOT look "
@@ -103,6 +111,7 @@ class ExploringNode(AgentNode):
         super().__init__(llm)
         self._map = project_map
         self._tools = tools
+        self._file_index = {fe.path: fe for fe in project_map.files}
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         environment = await probe_environment(Path.cwd())
@@ -159,6 +168,7 @@ class ExploringNode(AgentNode):
                     "role": "tool", "tool_call_id": cid,
                     "content": clamp_tool_output(output),
                 })
+        await self._pull_receivers(excerpts, tool_ctx, ctx)
         # hand the whole exploration (minus its own system prompt) to stage ②
         return messages[1:], tuple(excerpts.values())
 
@@ -210,6 +220,43 @@ class ExploringNode(AgentNode):
             text, truncated = text[:MAX_EXCERPT_CHARS], True
         excerpts[path] = FileExcerpt(path=path, text=text, truncated=truncated)
 
+    def _file_entry(self, path: str) -> FileEntry | None:
+        return self._file_index.get(path)
+
+    async def _pull_receivers(
+        self, excerpts: dict[str, FileExcerpt],
+        tool_ctx: ToolContext, ctx: NodeContext,
+    ) -> None:
+        """Deterministic 1-hop coverage: read the importers (receivers) of the
+        files the model read, so a child widget's parent/handler lands in the
+        handoff memo even when the model stopped before opening it. Bounded
+        (hub cut + total cap) to keep the downstream interviewer short-context."""
+        seeds = list(excerpts)   # snapshot before we add anything: 1-hop, never 2-hop
+        queued: list[str] = []
+        for path in seeds:
+            fe = self._file_entry(path)
+            if fe is None or not fe.imported_by:
+                continue
+            if len(fe.imported_by) > HUB_IMPORTER_CAP:
+                continue   # hub (app/models): its importers are not a single receiver
+            for parent in fe.imported_by:
+                if parent != path and parent not in excerpts and parent not in queued:
+                    queued.append(parent)
+        for parent in queued[:MAX_RECEIVER_READS]:
+            if ctx.cancel.is_set():
+                break
+            cid = f"1hop:{parent}"
+            args = json.dumps({"path": parent})
+            if ctx.sink is not None:
+                ctx.sink.tool_started(cid, "read", {"path": parent})
+            output = await self._run_tool("read", args, tool_ctx)
+            self._maybe_record_excerpt("read", args, output, excerpts)
+            if ctx.sink is not None:
+                if output.startswith("ERROR:"):
+                    ctx.sink.tool_failed(cid, output)
+                else:
+                    ctx.sink.tool_finished(cid, output)
+
     # stage ② — extraction (build_messages provides system+user envelope)
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         return [
@@ -258,6 +305,8 @@ class ExploringNode(AgentNode):
         for fe in self._map.files:
             syms = ", ".join(s.name for s in fe.symbols) or "(no symbols)"
             lines.append(f"- {fe.path} [{fe.language}]: {syms}")
+            if fe.imported_by:
+                lines.append(f"    ← used by: {', '.join(fe.imported_by)}")
         return "\n".join(lines)
 
 

@@ -25,7 +25,7 @@ from typing import Any
 from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLike
 from poor_code.domain.harness.nodes.execution import run_shell
 from poor_code.domain.harness.orientation import render_position
-from poor_code.domain.harness.steering import steering_block
+from poor_code.domain.harness.steering import driver_feedback_block, steering_block
 from poor_code.domain.session.models import EnvReport, Phase
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
@@ -119,7 +119,8 @@ class Provisioner:
                 f"{render_position(self.name, state)}\n\n"
                 f"TASK CONTEXT (the fix to be validated later):\n{request}\n\n"
                 "Set up the environment now."
-                f"{steering_block(state.steering_notes)}"},
+                f"{steering_block(state.steering_notes)}"
+                f"{driver_feedback_block(state, self.name)}"},
         ]
         tool_ctx = ToolContext(
             turn_id="provision", cancel=ctx.cancel, cwd=self._cwd, ask=allow_all)

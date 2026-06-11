@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator, Protocol, TypeVar, Union, get_args, get_o
 
 from pydantic import BaseModel, ValidationError
 
-from poor_code.domain.harness.steering import steering_message
+from poor_code.domain.harness.steering import driver_feedback_message, steering_message
 from poor_code.domain.session.models import (
     Layer, Phase, Query, SessionState, TriggerKind, Verdict, VerdictKind,
 )
@@ -169,6 +169,7 @@ class NodeContext:
     state: SessionState
     cancel: asyncio.Event
     sink: Any = None
+    runtime: Any = None
 
 
 @runtime_checkable
@@ -289,7 +290,8 @@ class AgentNode:
         and re-rolled. After the budget is exhausted the last error propagates."""
         base = self.build_messages(ctx.state)
         _sm = steering_message(getattr(ctx.state, "steering_notes", None) or ())
-        steer_msgs: list[dict] = [_sm] if _sm is not None else []
+        _fm = driver_feedback_message(ctx.state, self.name)
+        steer_msgs: list[dict] = [m for m in (_sm, _fm) if m is not None]
         if ctx.sink is not None:
             phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
             ctx.sink.node_context(self.name, phase, base)

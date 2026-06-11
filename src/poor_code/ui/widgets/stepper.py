@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from textual.widgets import Static
 
-from poor_code.ui.store import AppState
+from poor_code.ui.store import AppState, NodeLabelSegment
 
 _RAIL = [
     ("routing", "Route"),
@@ -29,7 +29,22 @@ def render_stepper(state: AppState) -> str:
             parts.append(f"✓ {label}")
         else:
             parts.append(f"· {label}")
+    detail = _current_detail(state)
+    if detail:
+        parts.append(f"│ {detail}")
     return "   ".join(parts)
+
+
+def _current_detail(state: AppState) -> str:
+    if not state.turns:
+        return ""
+    for seg in reversed(state.turns[-1].segments):
+        if isinstance(seg, NodeLabelSegment):
+            label = seg.activity or seg.node
+            if seg.activity and seg.node not in seg.activity:
+                label = f"{label} · {seg.node}"
+            return label
+    return ""
 
 
 class StepperBar(Static):
