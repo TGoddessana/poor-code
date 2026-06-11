@@ -111,6 +111,7 @@ class ExploringNode(AgentNode):
         super().__init__(llm)
         self._map = project_map
         self._tools = tools
+        self._file_index = {fe.path: fe for fe in project_map.files}
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         environment = await probe_environment(Path.cwd())
@@ -220,7 +221,7 @@ class ExploringNode(AgentNode):
         excerpts[path] = FileExcerpt(path=path, text=text, truncated=truncated)
 
     def _file_entry(self, path: str) -> FileEntry | None:
-        return next((fe for fe in self._map.files if fe.path == path), None)
+        return self._file_index.get(path)
 
     async def _pull_receivers(
         self, excerpts: dict[str, FileExcerpt],
@@ -239,7 +240,7 @@ class ExploringNode(AgentNode):
             if len(fe.imported_by) > HUB_IMPORTER_CAP:
                 continue   # hub (app/models): its importers are not a single receiver
             for parent in fe.imported_by:
-                if parent not in excerpts and parent not in queued:
+                if parent != path and parent not in excerpts and parent not in queued:
                     queued.append(parent)
         for parent in queued[:MAX_RECEIVER_READS]:
             if ctx.cancel.is_set():
