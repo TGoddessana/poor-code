@@ -258,6 +258,8 @@ class ExploringNode(AgentNode):
         for fe in self._map.files:
             syms = ", ".join(s.name for s in fe.symbols) or "(no symbols)"
             lines.append(f"- {fe.path} [{fe.language}]: {syms}")
+            if fe.imported_by:
+                lines.append(f"    ← used by: {', '.join(fe.imported_by)}")
         return "\n".join(lines)
 
 
