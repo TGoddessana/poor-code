@@ -63,6 +63,9 @@ class PlanGate(GateNode):
             return "Plan has no tasks."
         ids = {task.id for task in plan.tasks}
         md = plan.plan_md or ""
+        if not md.strip():
+            return ("Plan has no plan_md narrative; every task needs a "
+                    "'## <task id>:' section describing what to build.")
         for task in plan.tasks:
             if not task.edit_scope.editable:
                 return f"Task {task.id} has no editable paths."
