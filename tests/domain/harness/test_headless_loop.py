@@ -83,6 +83,8 @@ async def test_full_auto_caps_runaway_queries_and_abandons():
     final = await run_headless(driver, _state("ask_node"), asyncio.Event(), sink=None)
     assert final.report is not None
     assert final.report.outcome is ReportOutcome.ABANDONED
+    # the abandon reason is surfaced, not silent (last_escape was None on the capped exit)
+    assert "auto-answer cap" in final.report.summary
     # bounded: the node was called at most MAX_AUTO_ANSWERS + 1 times (the +1 is the final
     # round that returns the still-pending query which trips the cap)
     assert node.calls <= MAX_AUTO_ANSWERS + 1
