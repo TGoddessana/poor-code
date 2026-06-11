@@ -100,3 +100,17 @@ def test_example_from_schema_covers_required_and_enum():
     assert data["verdict"] == "advance"       # first enum value
     assert isinstance(data["tasks"], list) and data["tasks"]
     assert data["tasks"][0]["id"] == "..."    # nested required filled
+
+
+from poor_code.domain.harness.node import _retry_nudge, StructuredOutputError
+
+
+def test_retry_nudge_includes_raw_schema_and_example():
+    err = StructuredOutputError("validator", '{"verdict": "BAD"}', "verdict: invalid")
+    schema = {"type": "object",
+              "properties": {"verdict": {"enum": ["advance", "repair_impl"]}},
+              "required": ["verdict"]}
+    msg = _retry_nudge(err, schema=schema, example='{"verdict": "advance"}')
+    assert '{"verdict": "BAD"}' in msg          # (a) the rejected output
+    assert "advance" in msg                       # (b) the schema/enum
+    assert '{"verdict": "advance"}' in msg        # (c) the example

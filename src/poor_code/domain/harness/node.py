@@ -175,15 +175,29 @@ def _example_from_schema(schema: dict[str, Any]) -> str:
     return json.dumps(_stub_for(schema), ensure_ascii=False)
 
 
-def _retry_nudge(err: StructuredOutputError) -> str:
-    """Corrective message fed back to the model to re-roll a failed dispatch.
-    Same principle as feeding tool errors back in the explore loop — not text
-    recovery, but giving the model another, better-informed attempt."""
-    return (
-        f"Your previous reply was not accepted: {err.detail}. Respond again by "
-        "calling the required tool exactly once with arguments that satisfy its "
-        "JSON schema. Output only the tool call — no prose, no code fences."
-    )
+def _retry_nudge(
+    err: StructuredOutputError,
+    *,
+    schema: dict[str, Any] | None = None,
+    example: str | None = None,
+) -> str:
+    """Corrective message fed back to the model to re-roll a failed dispatch. A weak
+    model repeats a schema mistake unless it sees (a) its own rejected output, (b) the
+    exact schema, and (c) a minimal valid example — same principle as the interviewer's
+    prev_raw resend, promoted to the common path so every node benefits."""
+    parts = [f"Your previous reply was not accepted: {err.detail}."]
+    if err.raw:
+        clip = err.raw if len(err.raw) <= 600 else err.raw[:600] + " …[truncated]"
+        parts.append(f"\n\nYour previous output (rejected — do NOT repeat this shape):\n{clip}")
+    if schema is not None:
+        parts.append("\n\nThe tool arguments MUST satisfy this JSON schema:\n"
+                     f"{json.dumps(schema, ensure_ascii=False)}")
+    if example is not None:
+        parts.append(f"\n\nA minimal valid example:\n{example}")
+    parts.append("\n\nRespond again by calling the required tool exactly once with "
+                 "arguments that satisfy the schema. Output only the tool call — no "
+                 "prose, no code fences.")
+    return "".join(parts)
 
 
 @dataclass(frozen=True)
@@ -327,6 +341,8 @@ class AgentNode:
             ctx.sink.node_context(self.name, phase, base)
         model_cls = self.output_model()
         response_format = self._response_format()
+        _schema = self.output_tool().get("function", {}).get("parameters")
+        _example = _example_from_schema(_schema) if _schema else None
         corrections: list[dict] = []
         last_err: StructuredOutputError | None = None
         for _ in range(MAX_DISPATCH_ATTEMPTS):
@@ -341,7 +357,8 @@ class AgentNode:
                 return raw
             except StructuredOutputError as e:
                 last_err = e
-                corrections = [{"role": "user", "content": _retry_nudge(e)}]
+                corrections = [{"role": "user",
+                                "content": _retry_nudge(e, schema=_schema, example=_example)}]
         assert last_err is not None
         raise last_err
 
