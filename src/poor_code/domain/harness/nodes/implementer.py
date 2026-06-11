@@ -26,6 +26,10 @@ from poor_code.provider.events import (
 from poor_code.provider.usage import tag
 
 MAX_ITERATIONS = 50
+# The most recent tool round is the basis for the model's NEXT decision, so it gets a
+# bigger budget; older rounds are demoted to the standard clamp to keep re-sends bounded.
+_LATEST_HEAD = 4000
+_LATEST_TAIL = 4000
 
 _SYSTEM = (
     "You are the Implementer. Make the change described by the TASK by calling "
@@ -111,6 +115,9 @@ class Implementer:
         ]
         tool_ctx = ToolContext(turn_id="implement", cancel=ctx.cancel,
                                cwd=self._cwd, ask=allow_all)
+        full_output: dict[str, str] = {}          # cid -> full tool output (for re-clamping)
+        tool_msg: dict[str, dict[str, Any]] = {}  # cid -> the tool message dict in `messages`
+        prev_round: list[str] = []                # cids appended in the previous round
         for _ in range(MAX_ITERATIONS):
             if ctx.cancel.is_set():
                 raise asyncio.CancelledError(f"{self.name} cancelled")
@@ -124,6 +131,11 @@ class Implementer:
             messages.append(assistant)
             if not calls:
                 return
+            # A new round's results arrive → demote the previous round to the standard
+            # clamp so only the freshest results carry the large budget.
+            for cid in prev_round:
+                tool_msg[cid]["content"] = clamp_tool_output(full_output[cid])
+            round_cids: list[str] = []
             for cid, name, args in calls:
                 if ctx.sink is not None:
                     ctx.sink.tool_started(cid, name, _safe_args(args))
@@ -133,10 +145,17 @@ class Implementer:
                         ctx.sink.tool_failed(cid, output)
                     else:
                         ctx.sink.tool_finished(cid, output)
-                # The sink got the full output (display/log); the model gets a clamped
-                # copy — this list is re-sent every round, so an unbounded dump is O(n^2).
-                messages.append({"role": "tool", "tool_call_id": cid,
-                                 "content": clamp_tool_output(output)})
+                # The sink got the full output; the model gets a clamped copy. The latest
+                # round keeps the large budget (the next decision reads it); the demote
+                # loop above shrinks it once a newer round lands.
+                msg: dict[str, Any] = {"role": "tool", "tool_call_id": cid,
+                                       "content": clamp_tool_output(
+                                           output, head=_LATEST_HEAD, tail=_LATEST_TAIL)}
+                messages.append(msg)
+                full_output[cid] = output
+                tool_msg[cid] = msg
+                round_cids.append(cid)
+            prev_round = round_cids
 
     async def _stream_round(self, messages, sink=None):
         text = ""

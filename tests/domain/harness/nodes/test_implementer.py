@@ -79,7 +79,9 @@ async def test_implementer_clamps_large_tool_output_in_resent_messages(tmp_path)
     assert tool_msgs, "expected the tool result to be in the re-sent messages"
     content = tool_msgs[0]["content"]
     assert "elided" in content                    # clamped for the LLM
-    assert len(content) < 5000
+    # The latest round gets the larger budget (_LATEST_HEAD + _LATEST_TAIL = 8000 chars);
+    # the bound is still far below the raw 50k — context growth is bounded.
+    assert len(content) < 10000
     # the sink (display/log) still received the full output (>> the clamped copy)
     assert any(len(str(r)) > 25000 for r in sink.finished)
 
@@ -201,3 +203,14 @@ def test_prompt_injects_env_report(tmp_path):
     prompt = impl._prompt(SessionState(env_report=er), task)
     assert "python -m pytest -q" in prompt
     assert "already" in prompt.lower()  # deps already installed — don't reinstall/fake
+
+
+from poor_code.domain.harness.tool_output import clamp_tool_output
+from poor_code.domain.harness.nodes.implementer import _LATEST_HEAD, _LATEST_TAIL
+
+
+def test_latest_round_gets_bigger_budget_than_history():
+    big = "X" * 30000
+    latest = clamp_tool_output(big, head=_LATEST_HEAD, tail=_LATEST_TAIL)
+    history = clamp_tool_output(big)
+    assert len(latest) > len(history)   # the latest round preserves more than history
