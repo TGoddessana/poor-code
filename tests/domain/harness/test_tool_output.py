@@ -42,3 +42,12 @@ def test_non_utf8_replacement_chars_treated_as_binary():
 def test_normal_log_with_some_newlines_not_flagged_binary():
     out = "line\n" * 100  # plenty of newlines, all printable
     assert clamp_tool_output(out) == out
+
+
+def test_clamp_keeps_tail_with_custom_budget():
+    body = "HEAD" + ("x" * 20000) + "TAILMARKER"
+    small = clamp_tool_output(body)                 # default 1200+800
+    big = clamp_tool_output(body, head=4000, tail=4000)
+    assert "TAILMARKER" in small and "TAILMARKER" in big
+    assert "HEAD" in small and "HEAD" in big
+    assert len(big) > len(small)                    # bigger budget preserves more

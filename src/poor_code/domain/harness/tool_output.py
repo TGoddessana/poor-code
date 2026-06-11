@@ -26,12 +26,14 @@ def _looks_binary(s: str) -> bool:
     return noise / len(sample) > 0.10
 
 
-def clamp_tool_output(output: str) -> str:
+def clamp_tool_output(output: str, *, head: int = _HEAD, tail: int = _TAIL) -> str:
     """Return a re-send-safe version of a tool result: full text when small, a
-    head+tail slice when large, head-only when it looks binary."""
+    head+tail slice when large, head-only when it looks binary. head/tail override
+    the default budget (callers in validation paths give the tail a bigger share so
+    pytest tracebacks survive)."""
     if _looks_binary(output):
-        return f"{output[:_HEAD]}\n[binary/non-text output elided: {len(output)} chars]"
-    if len(output) <= MAX_TOOL_RESULT_CHARS:
+        return f"{output[:head]}\n[binary/non-text output elided: {len(output)} chars]"
+    if len(output) <= head + tail:
         return output
-    elided = len(output) - _HEAD - _TAIL
-    return f"{output[:_HEAD]}\n…[{elided} chars elided]…\n{output[-_TAIL:]}"
+    elided = len(output) - head - tail
+    return f"{output[:head]}\n…[{elided} chars elided]…\n{output[-tail:]}"
