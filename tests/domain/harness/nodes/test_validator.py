@@ -2,7 +2,7 @@ import asyncio
 import json
 import pytest
 
-from poor_code.domain.harness.node import NodeContext
+from poor_code.domain.harness.node import NodeContext, StructuredOutputError
 from poor_code.domain.harness.nodes.validator import Validator, MAX_ADVERSARIAL_ROUNDS
 from poor_code.domain.session.models import (
     SessionState, Plan, Task, EditScope, Cursor, Phase, TaskStatus,
@@ -95,13 +95,13 @@ async def test_validator_forces_advance_at_cap_without_calling_llm():
 
 def test_typo_verdict_is_rejected_not_silently_advanced():
     v = Validator(llm=None)  # parse() only; no LLM needed
-    with pytest.raises(Exception):  # StructuredOutputError
+    with pytest.raises(StructuredOutputError):
         v.parse('{"verdict": "REPAIR_IMPL", "hint": "x"}')
 
 
 def test_missing_verdict_is_rejected():
     v = Validator(llm=None)
-    with pytest.raises(Exception):  # StructuredOutputError
+    with pytest.raises(StructuredOutputError):
         v.parse('{"hint": "x"}')
 
 
