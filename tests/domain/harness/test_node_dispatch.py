@@ -78,3 +78,25 @@ async def test_agent_node_tags_client_with_its_name():
     node = _FenceNode(llm)
     await node.run(NodeContext(state=object(), cancel=asyncio.Event()))
     assert llm.seen_label == "fencenode"
+
+
+import json
+from poor_code.domain.harness.node import _example_from_schema
+
+
+def test_example_from_schema_covers_required_and_enum():
+    schema = {
+        "type": "object",
+        "properties": {
+            "verdict": {"enum": ["advance", "repair_impl", "repair_plan"]},
+            "hint": {"type": "string"},
+            "tasks": {"type": "array", "items": {"type": "object",
+                       "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+        },
+        "required": ["verdict", "tasks"],
+    }
+    example = _example_from_schema(schema)
+    data = json.loads(example)               # valid JSON
+    assert data["verdict"] == "advance"       # first enum value
+    assert isinstance(data["tasks"], list) and data["tasks"]
+    assert data["tasks"][0]["id"] == "..."    # nested required filled

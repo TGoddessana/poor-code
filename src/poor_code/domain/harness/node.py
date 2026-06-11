@@ -145,6 +145,36 @@ def validate_output(model_cls: type[_M], raw: str, *, node: str) -> _M:
 MAX_DISPATCH_ATTEMPTS = 3
 
 
+def _stub_for(schema: dict[str, Any]) -> Any:
+    """A type-appropriate placeholder for a JSON-schema node (a weak model follows an
+    example far better than a bare schema)."""
+    if "enum" in schema and schema["enum"]:
+        return schema["enum"][0]
+    t = schema.get("type")
+    if t == "object" or "properties" in schema:
+        props = schema.get("properties", {})
+        required = schema.get("required") or list(props)
+        return {k: _stub_for(props[k]) for k in required if k in props}
+    if t == "array":
+        items = schema.get("items")
+        return [_stub_for(items)] if isinstance(items, dict) and items else []
+    if t == "string":
+        return "..."
+    if t in ("integer", "number"):
+        return 0
+    if t == "boolean":
+        return False
+    for key in ("anyOf", "oneOf"):
+        for sub in schema.get(key, []):
+            if isinstance(sub, dict) and sub.get("type") != "null":
+                return _stub_for(sub)
+    return None
+
+
+def _example_from_schema(schema: dict[str, Any]) -> str:
+    return json.dumps(_stub_for(schema), ensure_ascii=False)
+
+
 def _retry_nudge(err: StructuredOutputError) -> str:
     """Corrective message fed back to the model to re-roll a failed dispatch.
     Same principle as feeding tool errors back in the explore loop — not text
