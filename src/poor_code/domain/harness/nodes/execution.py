@@ -8,6 +8,7 @@ import asyncio
 from pathlib import Path
 
 from poor_code.domain.harness.node import NodeContext, NodeResult
+from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.session.models import (
     AttemptStatus,
     Layer,
@@ -193,7 +194,7 @@ class ValidationRunner:
             code, out = await run_shell(c.command, self._cwd, ctx.cancel)
             results.append((c.criterion, code == 0))
             if code != 0:
-                outputs.append(f"[{c.criterion}] exit {code}: {out[:200]}")
+                outputs.append(f"[{c.criterion}] exit {code}: {clamp_tool_output(out)}")
         all_criteria = {c.criterion for c in checks}
         now_green = {crit for crit, ok in results if ok}
         # No-regression floor: nothing once green (here or in a sibling task) may go red.
@@ -239,9 +240,10 @@ class CompletionGate:
             return NodeResult(verdict=Verdict(
                 kind=VerdictKind.ESCALATE,
                 query=(f"Task {task.id} still failing after {MAX_ATTEMPTS} attempts: "
-                       f"{'' if rr is None else rr.output[:200]}")))
+                       f"{'' if rr is None else clamp_tool_output(rr.output, head=200, tail=600)}")))
         hint = "Validation failed; fix the implementation."
         if rr is not None and rr.output:
-            hint = f"Validation failed (exit {rr.exit_code}). Fix it. Output:\n{rr.output[:500]}"
+            hint = (f"Validation failed (exit {rr.exit_code}). Fix it. Output:\n"
+                    f"{clamp_tool_output(rr.output, head=400, tail=1100)}")
         return NodeResult(verdict=Verdict(
             kind=VerdictKind.REPAIR, layer=Layer.IMPLEMENTATION, hint=hint))

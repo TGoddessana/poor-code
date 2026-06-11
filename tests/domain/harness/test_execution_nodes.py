@@ -446,3 +446,12 @@ async def test_eng_gate_repairs_below_cap_then_escalates_at_cap():
     # at cap → escalate (terminates the eng_gate↔implementer loop)
     res = await EngGate().run(NodeContext(state=_state(MAX_ADVERSARIAL_ROUNDS), cancel=_a.Event()))
     assert res.verdict.kind is VerdictKind.ESCALATE
+
+
+from poor_code.domain.harness.tool_output import clamp_tool_output
+
+
+def test_clamp_used_for_validation_preserves_tail():
+    big = ("collected 3 items\n" + "PASS\n" * 5000 + "E   AssertionError: boom")
+    clamped = clamp_tool_output(big)
+    assert "AssertionError: boom" in clamped
