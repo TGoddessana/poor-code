@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from poor_code.domain.harness.node import AgentNode, validate_output
 from poor_code.domain.llm_schema import inline_refs
@@ -28,9 +28,9 @@ _SYSTEM = (
 
 
 class _FeedbackOut(BaseModel):
-    failure_type: str = ""
-    symptom: str = ""
-    prevention_hint: str = ""
+    failure_type: str = Field(min_length=1)
+    symptom: str = Field(min_length=1)
+    prevention_hint: str = Field(min_length=1)
 
 
 class FailureAnalyst(AgentNode):
