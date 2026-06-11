@@ -4,8 +4,8 @@ import pytest
 from datetime import UTC, datetime
 from pathlib import Path
 
-from poor_code.domain.harness.node import NodeContext, StructuredOutputError
-from poor_code.domain.harness.nodes.interviewer import Interviewer, MAX_ROUNDS
+from poor_code.domain.harness.node import NodeContext, StructuredOutputError, validate_output
+from poor_code.domain.harness.nodes.interviewer import Interviewer, MAX_ROUNDS, _RequirementOut
 from poor_code.domain.session.models import (
     SessionState, Request, RequestKind, CodeContext, CodeRef, GroundingStatus,
     Query, QueryKind, UserResponse, AnsweredQuery, Requirement,
@@ -155,3 +155,8 @@ async def test_interviewer_context_includes_signature_and_transcript():
     assert "def login(user, pw) -> Session" in user   # signature rendered
     assert "new or extend?" in user                    # transcript rendered
     assert "new" in user
+
+
+def test_requirement_summary_must_be_nonempty():
+    with pytest.raises(StructuredOutputError):
+        validate_output(_RequirementOut, '{"summary": ""}', node="interviewer")

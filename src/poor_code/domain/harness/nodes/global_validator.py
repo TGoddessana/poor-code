@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _LLMClientLike
 from poor_code.domain.harness.nodes.execution import run_shell
@@ -35,7 +35,7 @@ _SYSTEM = (
 
 
 class _AnalyzeOut(BaseModel):
-    hint: str = ""
+    hint: str = Field(min_length=1)
     culprit_task_id: str = ""
 
 
