@@ -40,6 +40,11 @@ _RECOVERABLE_INFERENCE_ERRORS = (StructuredOutputError, LLMCallTimeout)
 
 RouteFn = Callable[[str, NodeResult, SessionState], RouteResult]
 
+# Generous non-termination backstop. Per-layer caps bound each loop, but their PRODUCT
+# (replan × tasks × attempts × adversarial rounds …) can still spin; 500 transitions in
+# a single run() is clearly abnormal — abort with a graceful ESCALATE rather than hang.
+GLOBAL_STEP_BUDGET = 500
+
 
 @dataclass
 class DriverRuntime:
@@ -72,6 +77,7 @@ class Driver:
         self, state: SessionState, cancel: asyncio.Event, *, sink: object | None = None
     ) -> SessionState:
         self.last_escape = None
+        steps = 0
         while True:
             assert state.cursor is not None, "Driver requires a cursor"
             node = self._registry.get(state.cursor.current_node)
@@ -148,6 +154,14 @@ class Driver:
             if nxt is None:
                 return state                              # terminal STOP
             state = self._advance(state, node, nxt, result)  # ③ move cursor + log
+            steps += 1
+            if steps >= GLOBAL_STEP_BUDGET:
+                self.last_escape = Verdict(
+                    kind=VerdictKind.ESCALATE,
+                    query=f"Driver exceeded {GLOBAL_STEP_BUDGET} steps in one run; "
+                          "aborting to avoid a runaway loop.")
+                self._on_step(state)
+                return state
             self._on_step(state)                          # ④ checkpoint
 
     @staticmethod
