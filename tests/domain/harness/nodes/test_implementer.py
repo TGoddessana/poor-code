@@ -86,6 +86,44 @@ async def test_implementer_clamps_large_tool_output_in_resent_messages(tmp_path)
     assert any(len(str(r)) > 25000 for r in sink.finished)
 
 
+class _TwoBashThenStopLLM:
+    """Round 1: bash b1 (big). Round 2: bash b2 (big). Round 3: capture messages, stop.
+    Three rounds are needed to exercise demote: it only fires when a round LATER than
+    the one being demoted arrives (a 2-round double early-returns before demote runs)."""
+    def __init__(self, command):
+        self.calls = 0
+        self._command = command
+        self.round3_messages = None
+    async def stream(self, messages, tools, response_format=None):
+        self.calls += 1
+        if self.calls in (1, 2):
+            cid = f"b{self.calls}"
+            yield ToolCallStarted(call_id=cid, name="bash")
+            yield ToolCallInputDelta(
+                call_id=cid, json_delta=json.dumps({"command": self._command}))
+            yield ToolCallEnded(call_id=cid)
+            yield FinishedReason(reason="tool_calls")
+        else:
+            self.round3_messages = messages
+            yield TextDelta(text="done")
+            yield FinishedReason(reason="stop")
+
+
+@pytest.mark.asyncio
+async def test_demote_shrinks_earlier_round_when_a_newer_round_arrives(tmp_path):
+    # b1 is round 1; once round 2 (b2) arrives it must be demoted to the standard clamp,
+    # while b2 (now the latest) keeps the large budget. Guards the in-place mutation.
+    llm = _TwoBashThenStopLLM("head -c 50000 /dev/zero | tr '\\0' A")
+    await Implementer(llm, cwd=tmp_path, tools=_tools()).run(
+        NodeContext(state=_state(), cancel=asyncio.Event()))
+    tool_msgs = {m["tool_call_id"]: m for m in llm.round3_messages if m.get("role") == "tool"}
+    assert "b1" in tool_msgs and "b2" in tool_msgs
+    b1, b2 = len(tool_msgs["b1"]["content"]), len(tool_msgs["b2"]["content"])
+    assert "elided" in tool_msgs["b1"]["content"] and "elided" in tool_msgs["b2"]["content"]
+    assert b1 < 3000          # demoted to standard budget (1200+800)
+    assert b2 > 7000          # latest keeps the large budget (4000+4000)
+
+
 def _state(attempts=()):
     return SessionState(
         plan=Plan(tasks=(Task(id="t1", title="x", purpose="p",
