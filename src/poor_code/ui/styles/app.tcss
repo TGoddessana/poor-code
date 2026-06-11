@@ -227,7 +227,7 @@ LoginScreen {
 .query-prompt {
     text-style: bold;
     color: $text;
-    text-align: center;
+    text-align: left;
     padding: 1 0 0 0;
     width: 100%;
 }
@@ -260,7 +260,7 @@ LoginScreen {
 .query-hint {
     color: $text-muted;
     text-style: italic;
-    text-align: center;
+    text-align: left;
     padding: 0 0 1 0;
     width: 100%;
 }

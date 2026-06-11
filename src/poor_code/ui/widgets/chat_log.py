@@ -101,7 +101,7 @@ class StaticSegment(Widget):
             cls += " node-result"
         elif isinstance(self._seg, NodeLabelSegment):
             cls += " node-label"
-        yield Static(_render_segment(self._seg), classes=cls)
+        yield Static(_render_segment(self._seg), classes=cls, markup=False)
 
     def refresh_from(self, seg) -> None:
         if seg == self._seg:
@@ -132,7 +132,7 @@ class NodeLabelView(Widget):
         self._t0: float | None = None
 
     def compose(self) -> ComposeResult:
-        yield Static(self._text(), classes="static-segment-body node-label")
+        yield Static(self._text(), classes="static-segment-body node-label", markup=False)
 
     def _text(self) -> str:
         if self._active:
@@ -202,13 +202,14 @@ class ToolCallEntry(Widget):
         yield Static(
             f"  {marker} {self._tc.tool_name} {preview}",
             classes=f"tool-summary tool-{self._tc.status}",
+            markup=False,
         )
         detail_parts = [f"    args: {json.dumps(self._tc.args, ensure_ascii=False)}"]
         if self._tc.status == "done" and self._tc.result is not None:
             detail_parts.append(f"    result: {self._format_value(self._tc.result)}")
         if self._tc.status == "failed" and self._tc.error:
             detail_parts.append(f"    error: {self._tc.error}")
-        yield Static("\n".join(detail_parts), classes="tool-detail")
+        yield Static("\n".join(detail_parts), classes="tool-detail", markup=False)
 
     def on_mount(self) -> None:
         if self._tc.status == "running":
@@ -471,6 +472,12 @@ class TurnBlock(Widget):
         if not conc or turn is not last_turn:
             return ""
         reason, detail = conc
+        # "suspended" is internal lifecycle vocabulary. While a question is
+        # awaiting, the live QueryWidget card already signals the wait (and
+        # repeats the prompt), so surfacing "suspended: awaiting input: …" is
+        # redundant developer telemetry — drop it from the user-facing log.
+        if reason == "suspended":
+            return ""
         return f"⏹ {reason}: {detail}" if detail else f"⏹ {reason}"
 
     def _current_model(self) -> str:
@@ -480,10 +487,15 @@ class TurnBlock(Widget):
         return state.model or ""
 
     def _query_interactive(self, seg) -> bool:
+        # A question is a live component (the bordered QueryWidget card) whenever
+        # it is awaiting an answer — regardless of whether the model supplied
+        # structured `options`. A free-text clarify (no options) still renders as
+        # the same card (prompt + "type your answer" hint), so questions never
+        # degrade into a chat-like `❓ {prompt}` Static line.
         from poor_code.ui.store import QuerySegment
         state = getattr(self.app, "app_state", None)
         return bool(
-            isinstance(seg, QuerySegment) and seg.options
+            isinstance(seg, QuerySegment)
             and state is not None and state.awaiting_input
         )
 

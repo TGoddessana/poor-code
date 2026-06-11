@@ -61,27 +61,46 @@ class QueryWidget(Static):
             classes="query-prompt",
             markup=True,
         )
-        ol = _PickList(*[Option(o) for o in self._seg.options], id="query-options")
-        yield ol
-        yield Static(
-            "[dim]↑↓ move · Enter to select · Esc to challenge[/dim]",
-            classes="query-hint",
-            markup=True,
-        )
+        if self._seg.options:
+            yield _PickList(*[Option(o) for o in self._seg.options], id="query-options")
+            yield Static(
+                "[dim]↑↓ move · Enter to select · Esc to challenge[/dim]",
+                classes="query-hint",
+                markup=True,
+            )
+        else:
+            # Free-text clarify: no picker. The answer is typed into the prompt
+            # box, so the card just states how to respond.
+            yield Static(
+                "[dim]답을 입력창에 입력해 답하세요 · Esc to challenge[/dim]",
+                classes="query-hint",
+                markup=True,
+            )
 
     def on_mount(self) -> None:
-        ol = self.query_one("#query-options", OptionList)
         if self._seg.options:
+            ol = self.query_one("#query-options", OptionList)
             ol.highlighted = 0
-        # Focus the picker so the user's keyboard is owned by the question, not
-        # the prompt box. We deliberately do NOT also focus #prompt-input: the
-        # user asked that the picker keep focus while a query is awaiting, and
-        # the prompt box must not visually blink or steal the next keypress.
-        # Defer until after layout — when mounted dynamically into the scrolling
-        # chat log, focusing inside on_mount can land before layout and silently
-        # fail to take. In unit harnesses without a prompt box, the picker is
-        # still focusable so the test path keeps working.
-        self.call_after_refresh(ol.focus)
+            # Focus the picker so the user's keyboard is owned by the question, not
+            # the prompt box. We deliberately do NOT also focus #prompt-input: the
+            # user asked that the picker keep focus while a query is awaiting, and
+            # the prompt box must not visually blink or steal the next keypress.
+            # Defer until after layout — when mounted dynamically into the scrolling
+            # chat log, focusing inside on_mount can land before layout and silently
+            # fail to take. In unit harnesses without a prompt box, the picker is
+            # still focusable so the test path keeps working.
+            self.call_after_refresh(ol.focus)
+            return
+        # No options → free-text answer. Hand the keyboard to the prompt box so
+        # the user can type immediately (guarded: unit harnesses have no prompt).
+        app = getattr(self, "app", None)
+        if app is None:
+            return
+        try:
+            prompt = app.screen.query_one("#prompt-input", Input)
+        except Exception:
+            return
+        self.call_after_refresh(prompt.focus)
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         idx = event.option_index
