@@ -128,3 +128,11 @@ def test_synth_hint_omits_trailing_colon_when_tail_empty():
     verdict = v.parse('{"verdict": "repair_impl", "hint": ""}')
     assert "build succeeds" in verdict.hint
     assert "build succeeds:" not in verdict.hint  # no dangling colon
+
+
+# ── B3: tail-biased clamp keeps failure tail ──────────────────────────────────
+
+def test_observed_clamp_keeps_failure_tail():
+    from poor_code.domain.harness.tool_output import clamp_tool_output
+    big = "starting tests\n" + "ok\n" * 5000 + "E   AssertionError: tail-error"
+    assert "tail-error" in clamp_tool_output(big, head=300, tail=1200)

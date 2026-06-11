@@ -55,3 +55,11 @@ def test_blank_lesson_is_rejected():
     fa = FailureAnalyst(llm=None)
     with pytest.raises(StructuredOutputError):
         fa.parse('{"failure_type": "", "symptom": "", "prevention_hint": ""}')
+
+
+# ── B3: tail-biased clamp keeps failure tail ──────────────────────────────────
+
+def test_failure_output_clamp_keeps_tail():
+    from poor_code.domain.harness.tool_output import clamp_tool_output
+    big = "boot\n" + "noise\n" * 5000 + "Traceback ... ValueError: deep-error"
+    assert "deep-error" in clamp_tool_output(big)

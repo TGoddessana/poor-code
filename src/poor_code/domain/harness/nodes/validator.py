@@ -14,6 +14,7 @@ from poor_code.domain.harness.ledger import render_build_ledger, task_section, r
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output)
 from poor_code.domain.harness.nodes.execution import run_shell
+from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
     ChecksObserved, Layer, Phase, SessionState, Verdict, VerdictKind)
@@ -66,7 +67,7 @@ class Validator(AgentNode):
         checks = ctx.state.acceptance.checks if ctx.state.acceptance else ()
         for c in checks:
             code, text = await run_shell(c.command, self._cwd, ctx.cancel)
-            out.append((c.criterion, code == 0, text[:300]))
+            out.append((c.criterion, code == 0, clamp_tool_output(text, head=300, tail=1200)))
         return out
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:

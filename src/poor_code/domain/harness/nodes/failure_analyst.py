@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from poor_code.domain.harness.node import AgentNode, validate_output
+from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import FeedbackEntry, Phase, SessionState
 
@@ -51,7 +52,7 @@ class FailureAnalyst(AgentNode):
             {"role": "user", "content": (
                 f"TASK: {task.title if task else '?'}\n\n{env_block}"
                 f"PATCH:\n{diff or '(empty)'}\n\n"
-                f"FAILURE OUTPUT:\n{out[:2000] or '(none)'}")},
+                f"FAILURE OUTPUT:\n{clamp_tool_output(out) if out else '(none)'}")},
         ]
 
     def output_tool(self) -> dict[str, Any]:
