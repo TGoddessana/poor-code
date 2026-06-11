@@ -10,6 +10,8 @@ from typing import Any
 from poor_code.domain.session import paths
 from poor_code.domain.session.models import (
     AnsweredQuery,
+    AcceptanceCheck,
+    AcceptanceSpec,
     ChangeSet,
     CodeContext,
     CodeRef,
@@ -24,12 +26,20 @@ from poor_code.domain.session.models import (
     FeedbackEntry,
     FeedbackMemory,
     FileExcerpt,
+    FileSlot,
     GroundingStatus,
     Dependency,
+    DriverControl,
+    DriverDecisionRecord,
     EditScope,
+    EnvReport,
     Phase,
     Plan,
     Policy,
+    NodeFeedbackPacket,
+    Step,
+    StepKind,
+    SubgraphCursor,
     WorkItemPolicies,
     Query,
     QueryKind,
@@ -121,6 +131,24 @@ def _dict_to_query(d: dict[str, Any]) -> Query:
                  resolves=d.get("resolves"), rationale=d.get("rationale"))
 
 
+def _cursor_to_dict(c: Cursor) -> dict[str, Any]:
+    return {
+        "phase": c.phase.value,
+        "current_node": c.current_node,
+        "task_id": c.task_id,
+        "attempt_id": c.attempt_id,
+    }
+
+
+def _dict_to_cursor(d: dict[str, Any]) -> Cursor:
+    return Cursor(
+        phase=Phase(d["phase"]),
+        current_node=d["current_node"],
+        task_id=d.get("task_id"),
+        attempt_id=d.get("attempt_id"),
+    )
+
+
 def _requirement_to_dict(r: Requirement) -> dict[str, Any]:
     return {"summary": r.summary, "acceptance": list(r.acceptance),
             "out_of_scope": list(r.out_of_scope), "assumptions": list(r.assumptions),
@@ -171,6 +199,86 @@ def _dict_to_feedback_entry(d: dict[str, Any]) -> FeedbackEntry:
                          prevention_hint=d["prevention_hint"], task_ref=d.get("task_ref"))
 
 
+def _feedback_packet_to_dict(p: NodeFeedbackPacket) -> dict[str, Any]:
+    return {
+        "target_nodes": list(p.target_nodes),
+        "summary": p.summary,
+        "evidence": list(p.evidence),
+        "instruction": p.instruction,
+        "ttl_steps": p.ttl_steps,
+        "source_steering_index": p.source_steering_index,
+    }
+
+
+def _dict_to_feedback_packet(d: dict[str, Any]) -> NodeFeedbackPacket:
+    return NodeFeedbackPacket(
+        target_nodes=tuple(d.get("target_nodes", ())),
+        summary=d.get("summary", ""),
+        evidence=tuple(d.get("evidence", ())),
+        instruction=d.get("instruction", ""),
+        ttl_steps=d.get("ttl_steps", 1),
+        source_steering_index=d.get("source_steering_index", 0),
+    )
+
+
+def _decision_record_to_dict(r: DriverDecisionRecord) -> dict[str, Any]:
+    return {
+        "action": r.action,
+        "target_node": r.target_node,
+        "layer": r.layer,
+        "reason": r.reason,
+        "message": r.message,
+        "instruction": r.instruction,
+    }
+
+
+def _dict_to_decision_record(d: dict[str, Any]) -> DriverDecisionRecord:
+    return DriverDecisionRecord(
+        action=d.get("action", ""),
+        target_node=d.get("target_node"),
+        layer=d.get("layer"),
+        reason=d.get("reason", ""),
+        message=d.get("message", ""),
+        instruction=d.get("instruction", ""),
+    )
+
+
+def _driver_control_to_dict(c: DriverControl) -> dict[str, Any]:
+    return {
+        "processed_steering_count": c.processed_steering_count,
+        "feedback_packets": [_feedback_packet_to_dict(p) for p in c.feedback_packets],
+        "subgraph_cursors": [
+            {"graph_name": item.graph_name, "cursor": _cursor_to_dict(item.cursor)}
+            for item in c.subgraph_cursors
+        ],
+        "last_decision": (
+            None if c.last_decision is None else _decision_record_to_dict(c.last_decision)
+        ),
+    }
+
+
+def _dict_to_driver_control(d: dict[str, Any] | None) -> DriverControl:
+    if not d:
+        return DriverControl()
+    return DriverControl(
+        processed_steering_count=d.get("processed_steering_count", 0),
+        feedback_packets=tuple(
+            _dict_to_feedback_packet(p) for p in d.get("feedback_packets", ())
+        ),
+        subgraph_cursors=tuple(
+            SubgraphCursor(
+                graph_name=item["graph_name"],
+                cursor=_dict_to_cursor(item["cursor"]),
+            )
+            for item in d.get("subgraph_cursors", ())
+        ),
+        last_decision=(
+            None if d.get("last_decision") is None
+            else _dict_to_decision_record(d["last_decision"])
+        ),
+    )
+
+
 def _verdict_to_dict(v: Verdict) -> dict[str, Any]:
     return {"kind": v.kind.value,
             "layer": None if v.layer is None else v.layer.value,
@@ -207,12 +315,16 @@ def _dict_to_changeset(d: dict[str, Any]) -> ChangeSet:
 
 def _validation_result_to_dict(r: ValidationResult) -> dict[str, Any]:
     return {"command": r.command, "exit_code": r.exit_code,
-            "passed": r.passed, "output": r.output}
+            "passed": r.passed, "output": r.output,
+            "check_results": [[criterion, ok] for criterion, ok in r.check_results]}
 
 
 def _dict_to_validation_result(d: dict[str, Any]) -> ValidationResult:
     return ValidationResult(command=d["command"], exit_code=d["exit_code"],
-                            passed=d["passed"], output=d.get("output", ""))
+                            passed=d["passed"], output=d.get("output", ""),
+                            check_results=tuple(
+                                (row[0], row[1]) for row in d.get("check_results", ())
+                            ))
 
 
 def _attempt_to_dict(a: Attempt) -> dict[str, Any]:
@@ -225,6 +337,7 @@ def _attempt_to_dict(a: Attempt) -> dict[str, Any]:
         "gate_verdict": None if a.gate_verdict is None else _verdict_to_dict(a.gate_verdict),
         "adversarial_rounds": a.adversarial_rounds,
         "status": a.status.value,
+        "check_results": [[criterion, ok] for criterion, ok in a.check_results],
     }
 
 
@@ -238,6 +351,31 @@ def _dict_to_attempt(d: dict[str, Any]) -> Attempt:
         gate_verdict=None if d.get("gate_verdict") is None else _dict_to_verdict(d["gate_verdict"]),
         adversarial_rounds=d.get("adversarial_rounds", 0),
         status=AttemptStatus(d.get("status", AttemptStatus.ACTIVE.value)),
+        check_results=tuple((row[0], row[1]) for row in d.get("check_results", ())),
+    )
+
+
+def _step_to_dict(s: Step) -> dict[str, Any]:
+    return {
+        "id": s.id,
+        "kind": s.kind.value,
+        "file": s.file,
+        "anchor": s.anchor,
+        "body": s.body,
+        "run": s.run,
+        "expected": s.expected,
+    }
+
+
+def _dict_to_step(d: dict[str, Any]) -> Step:
+    return Step(
+        id=d["id"],
+        kind=StepKind(d["kind"]),
+        file=d.get("file", ""),
+        anchor=d.get("anchor", ""),
+        body=d.get("body", ""),
+        run=d.get("run", ""),
+        expected=d.get("expected", ""),
     )
 
 
@@ -252,6 +390,7 @@ def _plan_task_to_dict(t: Task) -> dict[str, Any]:
         "status": t.status.value,
         "context": None if t.context is None else _task_context_to_dict(t.context),
         "attempts": [_attempt_to_dict(a) for a in t.attempts],
+        "steps": [_step_to_dict(s) for s in t.steps],
     }
 
 
@@ -267,7 +406,16 @@ def _dict_to_plan_task(d: dict[str, Any]) -> Task:
         status=TaskStatus(d.get("status", TaskStatus.PENDING.value)),
         context=None if ctx is None else _dict_to_task_context(ctx),
         attempts=tuple(_dict_to_attempt(a) for a in d.get("attempts", ())),
+        steps=tuple(_dict_to_step(s) for s in d.get("steps", ())),
     )
+
+
+def _file_slot_to_dict(f: FileSlot) -> dict[str, Any]:
+    return {"path": f.path, "responsibility": f.responsibility}
+
+
+def _dict_to_file_slot(d: dict[str, Any]) -> FileSlot:
+    return FileSlot(path=d["path"], responsibility=d.get("responsibility", ""))
 
 
 def _plan_to_dict(p: Plan) -> dict[str, Any]:
@@ -277,6 +425,8 @@ def _plan_to_dict(p: Plan) -> dict[str, Any]:
             {"task_id": d.task_id, "depends_on": d.depends_on}
             for d in p.deps
         ],
+        "file_plan": [_file_slot_to_dict(f) for f in p.file_plan],
+        "plan_md": p.plan_md,
     }
 
 
@@ -287,6 +437,48 @@ def _dict_to_plan(d: dict[str, Any]) -> Plan:
             Dependency(task_id=x["task_id"], depends_on=x["depends_on"])
             for x in d.get("deps", ())
         ),
+        file_plan=tuple(_dict_to_file_slot(f) for f in d.get("file_plan", ())),
+        plan_md=d.get("plan_md", ""),
+    )
+
+
+def _acceptance_check_to_dict(c: AcceptanceCheck) -> dict[str, Any]:
+    return {"criterion": c.criterion, "command": c.command, "rationale": c.rationale}
+
+
+def _dict_to_acceptance_check(d: dict[str, Any]) -> AcceptanceCheck:
+    return AcceptanceCheck(
+        criterion=d["criterion"],
+        command=d["command"],
+        rationale=d.get("rationale", ""),
+    )
+
+
+def _acceptance_to_dict(spec: AcceptanceSpec) -> dict[str, Any]:
+    return {"checks": [_acceptance_check_to_dict(c) for c in spec.checks]}
+
+
+def _dict_to_acceptance(d: dict[str, Any]) -> AcceptanceSpec:
+    return AcceptanceSpec(
+        checks=tuple(_dict_to_acceptance_check(c) for c in d.get("checks", ()))
+    )
+
+
+def _env_report_to_dict(r: EnvReport) -> dict[str, Any]:
+    return {
+        "ready": r.ready,
+        "test_command": r.test_command,
+        "install_steps": list(r.install_steps),
+        "notes": r.notes,
+    }
+
+
+def _dict_to_env_report(d: dict[str, Any]) -> EnvReport:
+    return EnvReport(
+        ready=d.get("ready", False),
+        test_command=d.get("test_command", ""),
+        install_steps=tuple(d.get("install_steps", ())),
+        notes=d.get("notes", ""),
     )
 
 
@@ -311,12 +503,7 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
         "status": st.status.value,
         "active_task_id": st.active_task_id,
         "cursor": (
-            None if st.cursor is None else {
-                "phase": st.cursor.phase.value,
-                "current_node": st.cursor.current_node,
-                "task_id": st.cursor.task_id,
-                "attempt_id": st.cursor.attempt_id,
-            }
+            None if st.cursor is None else _cursor_to_dict(st.cursor)
         ),
         "request": (
             None if st.request is None else
@@ -344,6 +531,9 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
         "requirement": (None if st.requirement is None
                         else _requirement_to_dict(st.requirement)),
         "plan": (None if st.plan is None else _plan_to_dict(st.plan)),
+        "acceptance": (
+            None if st.acceptance is None else _acceptance_to_dict(st.acceptance)
+        ),
         "pending_query": (None if st.pending_query is None
                           else _query_to_dict(st.pending_query)),
         "interview": [_answered_to_dict(a) for a in st.interview],
@@ -351,6 +541,8 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
         "steering_notes": list(st.steering_notes),
         "feedback": [_feedback_entry_to_dict(e) for e in st.feedback.entries],
         "policy": st.policy.value,
+        "env_report": None if st.env_report is None else _env_report_to_dict(st.env_report),
+        "driver_control": _driver_control_to_dict(st.driver_control),
         "report": (None if st.report is None else report_to_dict(st.report)),
     }
 
@@ -365,9 +557,7 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
         return SessionState(
             status=SessionStatus(d["status"]),
             active_task_id=d.get("active_task_id"),
-            cursor=(None if cur is None else Cursor(
-                phase=Phase(cur["phase"]), current_node=cur["current_node"],
-                task_id=cur.get("task_id"), attempt_id=cur.get("attempt_id"))),
+            cursor=(None if cur is None else _dict_to_cursor(cur)),
             request=(None if req is None else Request(
                 raw_text=req["raw_text"], kind=RequestKind(req["kind"]))),
             understanding=(None if cc is None else CodeContext(
@@ -390,6 +580,8 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
             requirement=(None if d.get("requirement") is None
                          else _dict_to_requirement(d["requirement"])),
             plan=(None if d.get("plan") is None else _dict_to_plan(d["plan"])),
+            acceptance=(None if d.get("acceptance") is None
+                        else _dict_to_acceptance(d["acceptance"])),
             pending_query=(None if d.get("pending_query") is None
                            else _dict_to_query(d["pending_query"])),
             interview=tuple(_dict_to_answered(a) for a in d.get("interview", [])),
@@ -399,6 +591,9 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
                 entries=tuple(_dict_to_feedback_entry(e) for e in d.get("feedback", []))
             ),
             policy=Policy(d.get("policy", Policy.SUPERVISED.value)),
+            env_report=(None if d.get("env_report") is None
+                        else _dict_to_env_report(d["env_report"])),
+            driver_control=_dict_to_driver_control(d.get("driver_control")),
             report=(None if d.get("report") is None else report_from_dict(d["report"])),
         )
     except (KeyError, ValueError) as e:

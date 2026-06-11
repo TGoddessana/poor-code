@@ -15,6 +15,7 @@ def test_answer_submitted_echoes_user_answer_segment():
     segs = s2.turns[0].segments
     assert segs and isinstance(segs[-1], UserAnswerSegment)
     assert segs[-1].text == "the bottom bar"
+    assert segs[-1].kind == "answer"
     assert s2.awaiting_input is False
 
 

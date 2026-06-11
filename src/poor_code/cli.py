@@ -11,7 +11,8 @@ from pathlib import Path
 from poor_code.app import PoorCodeApp
 from poor_code.domain.agent import Agent
 from poor_code.domain.harness import build_default_graph
-from poor_code.domain.harness.driver import Driver
+from poor_code.domain.harness.driver import Driver, DriverRuntime
+from poor_code.domain.harness.smart_driver import build_smart_driver_advisor
 from poor_code.domain.project_map import ProjectMap, ProjectMapStore
 from poor_code.domain.session import SessionService
 from poor_code.domain.session.store import SessionStore
@@ -115,7 +116,14 @@ def _make_driver_factory(project_map: ProjectMap, session: SessionService):
             persist(state)
             if on_step is not None:
                 on_step(state)
-        return Driver(graph.nodes, graph.edges.route, on_step=step)
+        advisor = build_smart_driver_advisor(llm, Path.cwd())
+        runtime = DriverRuntime(
+            on_step=step,
+            advisor=advisor,
+            smart_enabled=advisor is not None,
+            cwd=Path.cwd(),
+        )
+        return Driver(graph.nodes, graph.edges.route, runtime=runtime)
     return make
 
 

@@ -93,6 +93,22 @@ PromptBox Input {
     padding-left: 2;
 }
 
+.debug-entry {
+    border-left: solid $primary;
+    color: $text-muted;
+    padding-left: 1;
+}
+
+.debug-summary {
+    color: $text-muted;
+}
+
+.debug-body {
+    color: $text-muted;
+    margin: 0 0 0 4;
+    padding-left: 2;
+}
+
 .turn-error {
     color: $error;
 }
@@ -190,23 +206,43 @@ LoginScreen {
     margin-bottom: 1;
 }
 
+.static-segment-body.user-steering {
+    color: $warning;
+    border-left: thick $warning;
+    background: $boost;
+    margin-left: 2;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
 .query-widget {
+    border: round $warning;
     border-left: thick $warning;
     background: $boost;
     padding: 0 1;
     margin-bottom: 1;
+    height: auto;
 }
 
 .query-prompt {
     text-style: bold;
     color: $text;
+    text-align: center;
+    padding: 1 0 0 0;
+    width: 100%;
 }
 
 #query-options {
-    background: transparent;
-    border: none;
+    background: $surface;
+    border: round $warning;
     height: auto;
-    max-height: 8;
+    max-height: 10;
+    margin: 1 0;
+    padding: 0 1;
+}
+
+#query-options > .option-list--option {
+    padding: 0 2;
 }
 
 #query-options > .option-list--option-highlighted {
@@ -224,6 +260,9 @@ LoginScreen {
 .query-hint {
     color: $text-muted;
     text-style: italic;
+    text-align: center;
+    padding: 0 0 1 0;
+    width: 100%;
 }
 
 StateInspector {

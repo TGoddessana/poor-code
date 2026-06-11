@@ -8,7 +8,7 @@ from poor_code.messages import (
     TurnStarted,
 )
 from poor_code.ui.store import AppState, PromptSubmitted, reduce
-from poor_code.ui.widgets.chat_log import ChatLog, NodeCard
+from poor_code.ui.widgets.chat_log import ChatLog, DebugBlock, NodeCard
 
 
 class _Harness(App):
@@ -33,9 +33,16 @@ async def test_node_card_shows_thinking_and_conclusion():
         await pilot.pause()
         cards = list(app.query(NodeCard))
         assert cards, "expected at least one NodeCard"
-        # the thinking stream rendered inside a card body
+        # raw context/thinking is present as collapsed debug payloads by default
         text = " ".join(str(w.render()) for w in app.query(Static))
-        assert '{"q":"why"}' in text
+        assert "debug: context" in text
+        assert "debug: thinking" in text
+        debug = list(app.query(DebugBlock))[0]
+        assert debug
+        await pilot.click(debug, offset=(2, 0))
+        await pilot.pause()
+        assert debug.has_class("expanded")
+        assert cards[0].has_class("expanded")
         # conclusion line is present
         conclusion = app.query_one(".turn-conclusion", Static)
         assert "suspended" in str(conclusion.render())

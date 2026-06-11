@@ -462,9 +462,7 @@ def test_format_turn_footer_running_uses_elapsed_and_fallback_model():
         turn_id="t1", cmd_id="c1", user_text="hi",
         status="running", started_at=now - 3.0, model=None,
     )
-    text = _format_turn_footer(t, fallback_model="gpt-4o")
-    assert text.startswith("  gpt-4o · ")
-    assert "3." in text or "2." in text
+    assert _format_turn_footer(t, fallback_model="gpt-4o") == "  gpt-4o"
 
 
 def test_format_turn_footer_pending_returns_empty():
@@ -501,9 +499,9 @@ class _Harness(App):
 
 
 @pytest.mark.asyncio
-async def test_turn_block_ticks_footer_while_running():
-    """While status='running', the footer should update every ~100ms with
-    a fresh elapsed value."""
+async def test_turn_block_footer_does_not_tick_while_running():
+    """While status='running', elapsed time belongs to the active node header,
+    not the whole-turn footer."""
     started = __import__("time").monotonic()
     turn = TurnView(
         turn_id="t1", cmd_id="c1", user_text="hi",
@@ -517,8 +515,7 @@ async def test_turn_block_ticks_footer_while_running():
         first = str(footer.content)
         await pilot.pause(0.25)
         second = str(footer.content)
-        assert first != second
-        assert "gpt-4o" in second
+        assert first == second == "  gpt-4o"
 
 
 async def test_state_change_does_not_auto_scroll_to_end():

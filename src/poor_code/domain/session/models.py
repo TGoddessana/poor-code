@@ -57,6 +57,45 @@ class Policy(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class NodeFeedbackPacket:
+    """Smart Driver feedback targeted at one or more nodes.
+
+    This is stronger than global steering: it carries the Driver's synthesized
+    evidence and concrete instruction for the next matching node invocation.
+    """
+    target_nodes: tuple[str, ...] = ()
+    summary: str = ""
+    evidence: tuple[str, ...] = ()
+    instruction: str = ""
+    ttl_steps: int = 1
+    source_steering_index: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class DriverDecisionRecord:
+    action: str = ""
+    target_node: str | None = None
+    layer: str | None = None
+    reason: str = ""
+    message: str = ""
+    instruction: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SubgraphCursor:
+    graph_name: str
+    cursor: "Cursor"
+
+
+@dataclass(frozen=True, slots=True)
+class DriverControl:
+    processed_steering_count: int = 0
+    feedback_packets: tuple[NodeFeedbackPacket, ...] = ()
+    subgraph_cursors: tuple[SubgraphCursor, ...] = ()
+    last_decision: DriverDecisionRecord | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SessionState:
     status: SessionStatus = SessionStatus.READY
     active_task_id: str | None = None
@@ -75,6 +114,7 @@ class SessionState:
     policy: Policy = Policy.SUPERVISED
     env_report: "EnvReport | None" = None
     steering_notes: tuple[str, ...] = ()
+    driver_control: DriverControl = field(default_factory=DriverControl)
 
     def with_request(self, request: Request) -> "SessionState":
         return replace(self, request=request)
@@ -117,6 +157,66 @@ class SessionState:
 
     def without_pending_query(self) -> "SessionState":
         return replace(self, pending_query=None)
+
+    def with_driver_control(self, control: DriverControl) -> "SessionState":
+        return replace(self, driver_control=control)
+
+    def with_processed_steering_count(self, count: int) -> "SessionState":
+        return replace(
+            self,
+            driver_control=replace(self.driver_control, processed_steering_count=count),
+        )
+
+    def with_driver_decision(self, decision: DriverDecisionRecord | None) -> "SessionState":
+        return replace(self, driver_control=replace(self.driver_control, last_decision=decision))
+
+    def with_feedback_packets(
+        self, packets: tuple[NodeFeedbackPacket, ...]
+    ) -> "SessionState":
+        return replace(
+            self,
+            driver_control=replace(self.driver_control, feedback_packets=packets),
+        )
+
+    def adding_feedback_packets(
+        self, packets: tuple[NodeFeedbackPacket, ...]
+    ) -> "SessionState":
+        if not packets:
+            return self
+        return self.with_feedback_packets(self.driver_control.feedback_packets + packets)
+
+    def consuming_feedback_for(self, node: str) -> "SessionState":
+        kept: list[NodeFeedbackPacket] = []
+        changed = False
+        for packet in self.driver_control.feedback_packets:
+            if node in packet.target_nodes or "*" in packet.target_nodes:
+                changed = True
+                ttl = packet.ttl_steps - 1
+                if ttl > 0:
+                    kept.append(replace(packet, ttl_steps=ttl))
+            else:
+                kept.append(packet)
+        return self.with_feedback_packets(tuple(kept)) if changed else self
+
+    def subgraph_cursor(self, graph_name: str) -> "Cursor | None":
+        for item in self.driver_control.subgraph_cursors:
+            if item.graph_name == graph_name:
+                return item.cursor
+        return None
+
+    def with_subgraph_cursor(
+        self, graph_name: str, cursor: "Cursor | None"
+    ) -> "SessionState":
+        items = tuple(
+            item for item in self.driver_control.subgraph_cursors
+            if item.graph_name != graph_name
+        )
+        if cursor is not None:
+            items = items + (SubgraphCursor(graph_name=graph_name, cursor=cursor),)
+        return replace(
+            self,
+            driver_control=replace(self.driver_control, subgraph_cursors=items),
+        )
 
     def _with_task(self, task_id: str, **changes) -> "SessionState":
         assert self.plan is not None, "no plan to update tasks in"

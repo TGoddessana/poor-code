@@ -74,11 +74,11 @@ class Graph:
 class _Merge:
     """CompiledGraph 의 출력. 바깥 Driver 의 `state = output.apply_to(state)` 한 줄이
     merge 를 수행한다 (apply_to 규약을 그대로 따른다)."""
-    __slots__ = ("_merge", "_child")
-    def __init__(self, merge, child):
-        self._merge, self._child = merge, child
+    __slots__ = ("_merge", "_child", "_graph_name")
+    def __init__(self, merge, child, graph_name):
+        self._merge, self._child, self._graph_name = merge, child, graph_name
     def apply_to(self, parent):
-        return self._merge(parent, self._child)
+        return self._merge(parent, self._child).with_subgraph_cursor(self._graph_name, None)
 
 
 class CompiledGraph:
@@ -95,9 +95,38 @@ class CompiledGraph:
         self.phase = phase   # Driver reads node.phase when advancing the cursor
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        from poor_code.domain.harness.driver import Driver   # lazy: avoid import cycle
-        driver = Driver(self._graph.nodes, self._graph.edges.route)
-        child = await driver.run(self._fork(ctx.state), ctx.cancel, sink=ctx.sink)
+        from dataclasses import replace
+        from poor_code.domain.harness.driver import Driver, DriverRuntime   # lazy: avoid import cycle
+
+        child_start = self._fork(ctx.state)
+        saved_cursor = ctx.state.subgraph_cursor(self.name)
+        if saved_cursor is not None:
+            child_start = replace(child_start, cursor=saved_cursor)
+
+        runtime = getattr(ctx, "runtime", None)
+        if runtime is not None:
+            parent_on_step = runtime.on_step
+
+            def child_step(child_state: SessionState) -> None:
+                parent_state = (
+                    self._merge(ctx.state, child_state)
+                    .with_subgraph_cursor(self.name, child_state.cursor)
+                )
+                parent_on_step(parent_state)
+
+            child_runtime = DriverRuntime(
+                on_step=child_step,
+                advisor=runtime.advisor,
+                smart_enabled=runtime.smart_enabled,
+                cwd=runtime.cwd,
+            )
+        else:
+            child_runtime = None
+
+        driver = Driver(
+            self._graph.nodes, self._graph.edges.route,
+            runtime=child_runtime, graph_name=self.name)
+        child = await driver.run(child_start, ctx.cancel, sink=ctx.sink)
         if driver.last_escape is not None:
             return NodeResult(verdict=driver.last_escape)   # bubble unresolved verdict
         if child.pending_query is not None:
@@ -107,4 +136,4 @@ class CompiledGraph:
             # the user's answer in parent state, so the re-run is consistent.
             return NodeResult(query=child.pending_query)
         branch = self._exit_branch(child) if self._exit_branch is not None else None
-        return NodeResult(output=_Merge(self._merge, child), branch=branch)
+        return NodeResult(output=_Merge(self._merge, child, self.name), branch=branch)

@@ -2,7 +2,7 @@ import asyncio
 import pytest
 from poor_code.domain.harness.driver import Driver
 from poor_code.domain.harness.node import NodeResult
-from poor_code.domain.session.models import Cursor, Phase, SessionState
+from poor_code.domain.session.models import Cursor, Layer, Phase, SessionState, Verdict, VerdictKind
 
 
 class _RecordingSink:
@@ -27,6 +27,18 @@ class _OneShotNode:
         return NodeResult(output=_Out())
 
 
+class _VerdictOnlyNode:
+    name = "plan_reviewer"
+    phase = Phase.PLANNING
+
+    async def run(self, ctx):
+        return NodeResult(verdict=Verdict(
+            kind=VerdictKind.REPAIR,
+            layer=Layer.PLAN,
+            hint="split task t2",
+        ))
+
+
 class _Registry:
     def __init__(self, node):
         self._node = node
@@ -46,3 +58,12 @@ async def test_driver_emits_entered_with_state_and_produced_with_result():
     await driver.run(state, asyncio.Event(), sink=sink)
     assert sink.entered and sink.entered[0][0] == "explorer" and sink.entered[0][2] is True
     assert sink.produced and sink.produced[0] == ("explorer", True)
+
+
+@pytest.mark.asyncio
+async def test_driver_emits_produced_for_verdict_only_result():
+    sink = _RecordingSink()
+    state = SessionState(cursor=Cursor(phase=Phase.PLANNING, current_node="plan_reviewer"))
+    driver = Driver(_Registry(_VerdictOnlyNode()), route=lambda *a: None)
+    await driver.run(state, asyncio.Event(), sink=sink)
+    assert sink.produced and sink.produced[0] == ("plan_reviewer", True)

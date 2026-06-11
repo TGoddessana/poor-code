@@ -26,3 +26,4 @@ def test_answer_submitted_clears_awaiting():
     assert state.awaiting_input is False
     assert isinstance(state.turns[0].segments[-1], UserAnswerSegment)
     assert state.turns[0].segments[-1].text == "because"
+    assert state.turns[0].segments[-1].kind == "answer"

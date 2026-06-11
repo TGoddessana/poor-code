@@ -2,7 +2,6 @@ import json
 import time
 from dataclasses import dataclass, field
 
-from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.widget import Widget
@@ -50,10 +49,13 @@ def _node_label_text(seg, *, marker: str = "▸", suffix_extra: str = "") -> str
     gate = "  ⚠ decision needed" if seg.node.endswith("_gate") and "confirm" in seg.node else ""
     text = seg.activity or seg.node
     retry = f" (×{seg.retry + 1})" if seg.retry else ""
+    duration = ""
+    if not suffix_extra and getattr(seg, "duration_sec", None) is not None:
+        duration = f"  {seg.duration_sec:.1f}s"
     m = marker
     if marker == "▸" and getattr(seg, "status", "running") == "interrupted":
         m = "⏸"
-    return f"{m} {text}{retry}{suffix_extra}{gate}"
+    return f"{m} {text}{retry}{suffix_extra}{duration}{gate}"
 
 
 def _render_segment(seg) -> str:
@@ -65,7 +67,8 @@ def _render_segment(seg) -> str:
             head += "\n" + "\n".join(f"     {d}" for d in seg.detail)
         return head
     if isinstance(seg, UserAnswerSegment):
-        return f"↳ {seg.text}"
+        label = "Steering" if getattr(seg, "kind", "answer") == "steering" else "Answer"
+        return f"↳ {label}: {seg.text}"
     if isinstance(seg, QuerySegment):
         lines = [f"❓ {seg.prompt}"]
         for i, opt in enumerate(seg.options, start=1):
@@ -93,7 +96,7 @@ class StaticSegment(Widget):
     def compose(self) -> ComposeResult:
         cls = "static-segment-body"
         if isinstance(self._seg, UserAnswerSegment):
-            cls += " user-answer"
+            cls += " user-steering" if self._seg.kind == "steering" else " user-answer"
         elif isinstance(self._seg, NodeResultSegment):
             cls += " node-result"
         elif isinstance(self._seg, NodeLabelSegment):
@@ -214,8 +217,10 @@ class ToolCallEntry(Widget):
     def on_unmount(self) -> None:
         self._stop_spinner()
 
-    def on_click(self) -> None:
+    def _on_click(self, event) -> None:
+        event.prevent_default()
         self.toggle_class("expanded")
+        event.stop()
 
     def on_key(self, event) -> None:
         if event.key == "enter" or event.key == "space":
@@ -282,6 +287,42 @@ class ToolCallEntry(Widget):
         return json.dumps(value, ensure_ascii=False)
 
 
+class DebugBlock(Widget):
+    """Collapsed debug payload for node context, thinking, and raw structured output."""
+
+    DEFAULT_CSS = """
+    DebugBlock { height: auto; }
+    DebugBlock > .debug-body { display: none; }
+    DebugBlock.expanded > .debug-body { display: block; }
+    """
+
+    def __init__(self, title: str, body: str) -> None:
+        super().__init__(classes="debug-entry")
+        self._title = title
+        self._body = body
+
+    def compose(self) -> ComposeResult:
+        yield Static(f"  ▸ debug: {self._title}", classes="debug-summary")
+        yield Static(self._body, classes="debug-body", markup=False)
+
+    def _on_click(self, event) -> None:
+        event.prevent_default()
+        self.toggle_class("expanded")
+        event.stop()
+
+    def refresh_from(self, title: str, body: str) -> None:
+        if title == self._title and body == self._body:
+            return
+        self._title = title
+        self._body = body
+        summaries = list(self.query(".debug-summary"))
+        bodies = list(self.query(".debug-body"))
+        if summaries:
+            summaries[0].update(f"  ▸ debug: {self._title}")
+        if bodies:
+            bodies[0].update(self._body)
+
+
 class NodeCard(Widget):
     """A collapsible card for one graph node: header (label + timer/status) + body
     (context, thinking stream, tool calls, raw output). The current node auto-expands.
@@ -330,8 +371,17 @@ class NodeCard(Widget):
         if expand:
             self.add_class("expanded")  # force-expand the current node; leave others as the user left them
 
-    def on_click(self) -> None:
+    def on_click(self, event) -> None:
+        origins = (getattr(event, "control", None), getattr(event, "widget", None))
+        for origin in origins:
+            widget = origin
+            while widget is not None and widget is not self:
+                if hasattr(widget, "has_class") and widget.has_class("node-card-body"):
+                    event.stop()
+                    return
+                widget = getattr(widget, "parent", None)
         self.toggle_class("expanded")
+        event.stop()
 
     # NOTE: no on_key toggle. NodeCard is not focusable, so an on_key handler would
     # only ever fire by bubbling up from a focused descendant (e.g. the query
@@ -342,7 +392,7 @@ class NodeCard(Widget):
 
 def _format_turn_footer(turn, fallback_model: str) -> str:
     """One-line dim footer under an assistant turn. Shows `<model> · <duration>s`.
-    During `running`, duration is live-elapsed from `turn.started_at`.
+    During `running`, elapsed time is owned by the active node header.
     During `done`/`failed`, duration is the authoritative `turn.duration_sec`.
     `fallback_model` is used while the turn is running (turn.model not yet set
     by TurnEnded)."""
@@ -350,10 +400,7 @@ def _format_turn_footer(turn, fallback_model: str) -> str:
         return ""
     model = turn.model or fallback_model or ""
     if turn.status == "running":
-        if turn.started_at is None:
-            return ""
-        elapsed = time.monotonic() - turn.started_at
-        return f"  {model} · {elapsed:.1f}s"
+        return f"  {model}" if model else ""
     if turn.duration_sec is None:
         return ""
     return f"  {model} · {turn.duration_sec:.1f}s"
@@ -372,7 +419,6 @@ class TurnBlock(Widget):
     def __init__(self, turn) -> None:
         super().__init__(classes="turn-block")
         self._turn = turn
-        self._tick_timer = None
 
     def compose(self) -> ComposeResult:
         turn = self._turn
@@ -407,13 +453,13 @@ class TurnBlock(Widget):
     def _card_flags(self, turn, groups, i) -> tuple[bool, bool]:
         """(expand, label_active) for the card at group index i.
         expand: the current node auto-expands to show its thinking.
-        label_active: the spinner animates ONLY while the label is the literal
-        trailing segment (nothing produced/queried after it yet)."""
+        label_active: the spinner animates while the trailing node is still
+        running, even after context/thinking/tool/output segments appear."""
         expand = i == self._active_group_index(turn, groups)
         label_active = (
             turn.status == "running"
-            and i == len(groups) - 1
-            and not groups[i].body
+            and i == self._active_group_index(turn, groups)
+            and getattr(groups[i].label, "status", "running") == "running"
         )
         return expand, label_active
 
@@ -426,32 +472,6 @@ class TurnBlock(Widget):
             return ""
         reason, detail = conc
         return f"⏹ {reason}: {detail}" if detail else f"⏹ {reason}"
-
-    def on_mount(self) -> None:
-        if self._turn.status == "running":
-            self._start_tick()
-
-    def on_unmount(self) -> None:
-        self._stop_tick()
-
-    def _start_tick(self) -> None:
-        if self._tick_timer is None:
-            self._tick_timer = self.set_interval(0.1, self._tick_footer)
-            self._tick_footer()
-
-    def _stop_tick(self) -> None:
-        if self._tick_timer is not None:
-            self._tick_timer.stop()
-            self._tick_timer = None
-
-    def _tick_footer(self) -> None:
-        footers = list(self.query("#turn-footer"))
-        if footers:
-            text = _format_turn_footer(
-                self._turn, fallback_model=self._current_model()
-            )
-            footers[0].update(text)
-            footers[0].display = bool(text)
 
     def _current_model(self) -> str:
         state = getattr(self.app, "app_state", None)
@@ -477,11 +497,11 @@ class TurnBlock(Widget):
         if self._query_interactive(seg):
             return QueryWidget(seg)
         if isinstance(seg, NodeContextSegment):
-            return Static(Text(f"⤷ context  ({seg.summary})\n{seg.full}"), classes="node-context")
+            return DebugBlock(f"context · {seg.summary}", seg.full)
         if isinstance(seg, NodeThinkingSegment):
-            return Static(Text(f"⤷ thinking\n{seg.text}"), classes="node-thinking")
+            return DebugBlock(f"thinking · {len(seg.text)} chars", seg.text)
         if isinstance(seg, NodeRawOutputSegment):
-            return Static(Text(f"⤷ output\n{seg.raw}"), classes="node-rawoutput")
+            return DebugBlock(f"structured output · {len(seg.raw)} chars", seg.raw)
         if isinstance(seg, NodeLabelSegment):
             return NodeLabelView(seg)
         return StaticSegment(seg)
@@ -507,14 +527,14 @@ class TurnBlock(Widget):
         if isinstance(seg, ToolCallView) and isinstance(w, ToolCallEntry):
             w.refresh_from(seg)
             return True
-        if isinstance(seg, NodeContextSegment) and isinstance(w, Static) and "node-context" in w.classes:
-            w.update(Text(f"⤷ context  ({seg.summary})\n{seg.full}"))
+        if isinstance(seg, NodeContextSegment) and isinstance(w, DebugBlock):
+            w.refresh_from(f"context · {seg.summary}", seg.full)
             return True
-        if isinstance(seg, NodeThinkingSegment) and isinstance(w, Static) and "node-thinking" in w.classes:
-            w.update(Text(f"⤷ thinking\n{seg.text}"))
+        if isinstance(seg, NodeThinkingSegment) and isinstance(w, DebugBlock):
+            w.refresh_from(f"thinking · {len(seg.text)} chars", seg.text)
             return True
-        if isinstance(seg, NodeRawOutputSegment) and isinstance(w, Static) and "node-rawoutput" in w.classes:
-            w.update(Text(f"⤷ output\n{seg.raw}"))
+        if isinstance(seg, NodeRawOutputSegment) and isinstance(w, DebugBlock):
+            w.refresh_from(f"structured output · {len(seg.raw)} chars", seg.raw)
             return True
         if isinstance(seg, QuerySegment) and self._query_interactive(seg) and isinstance(w, QueryWidget):
             return True  # keep the live picker (focus/selection) while still awaiting
@@ -599,11 +619,6 @@ class TurnBlock(Widget):
             text = _format_turn_footer(turn, fallback_model=self._current_model())
             footers[0].update(text)
             footers[0].display = bool(text)
-
-        if turn.status == "running" and self._tick_timer is None:
-            self._start_tick()
-        elif turn.status != "running" and self._tick_timer is not None:
-            self._stop_tick()
 
     def _reuse_item(self, w, item) -> bool:
         if item[0] == "seg":

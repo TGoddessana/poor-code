@@ -82,23 +82,29 @@ async def test_stepper_is_visible_once_a_phase_is_active():
 
 
 @pytest.mark.asyncio
-async def test_option_picker_takes_focus_and_arrows_move():
+async def test_query_keeps_picker_focus_until_answered():
+    """While a question is awaiting, the picker OWNS the focus — the prompt box
+    must not blink or steal keystrokes. Free-text fallback still works (typing
+    is appended to the prompt box's value in the background) but focus never
+    leaves the picker until Enter/Esc/option-click resolves the question."""
     async with _app().run_test() as pilot:
         app = await _drive_to_query(pilot)
+        prompt = app.screen.query_one(Input)
         picker = app.screen.query_one(QueryWidget).query_one(OptionList)
-        # call_after_refresh focus must have landed on the picker.
         assert app.focused is picker
+        assert app.focused is not prompt
         assert picker.highlighted == 0
-        await pilot.press("down")
-        await pilot.pause()
-        assert picker.highlighted == 1
 
 
 @pytest.mark.asyncio
-async def test_arrow_then_enter_commits():
+async def test_click_option_then_enter_commits():
     async with _app().run_test() as pilot:
         app = await _drive_to_query(pilot)
-        await pilot.press("down")          # → "new line"
+        picker = app.screen.query_one(QueryWidget).query_one(OptionList)
+        # Click a specific option (the 2nd: "new line") and then Enter.
+        # We pick by index rather than by pixel offset so the test is robust to
+        # the option list's visual padding/border.
+        picker.highlighted = 1
         await pilot.press("enter")
         for _ in range(20):
             await pilot.pause()
@@ -111,19 +117,61 @@ async def test_arrow_then_enter_commits():
 
 
 @pytest.mark.asyncio
-async def test_escape_interrupts_a_parked_query():
-    """Esc on a parked query interrupts into a paused state and PRESERVES the
-    graph checkpoint so the user can steer (it no longer cancels/abandons)."""
+async def test_typing_while_query_awaits_keeps_picker_focus_and_swallows_keys():
+    """Picker keeps focus throughout (so the prompt box never visually takes
+    over or receives stray keystrokes). Typing is consumed by the picker — it
+    is NOT forwarded to the prompt box while a question is awaiting, because
+    the user explicitly asked that the prompt box not be reachable until Esc.
+    """
+    async with _app().run_test() as pilot:
+        app = await _drive_to_query(pilot)
+        prompt = app.screen.query_one(Input)
+        picker = app.screen.query_one(QueryWidget).query_one(OptionList)
+        assert app.focused is picker
+
+        await pilot.press("c", "u", "s", "t", "o", "m")
+        # focus never leaves the picker while the query is awaiting
+        assert app.focused is picker
+        # prompt box value is untouched — picker swallows letters to keep the
+        # user's answer mode unambiguous (Esc is the only way out)
+        assert prompt.value == ""
+
+
+@pytest.mark.asyncio
+async def test_escape_on_parked_query_makes_next_input_steering():
+    """Esc on a parked query is an intentional HITL intervention.
+
+    The next text should not be recorded as this query's answer; it should resume
+    the same cursor with steering so the graph can re-ask/re-route.
+    """
     async with _app().run_test() as pilot:
         app = await _drive_to_query(pilot)
         assert app.store.state.awaiting_input is True
         await pilot.press("escape")
         await pilot.pause()
         state = app.store.state
-        assert state.is_processing is False
+        assert state.awaiting_input is False
         assert state.turns[0].status == "paused"
+        # picker dismisses → keyboard should return to the prompt box
+        assert isinstance(app.focused, Input), f"expected prompt focused, got {app.focused!r}"
         assert app._interrupted is True
-        assert app._harness_state is not None      # preserved for steering
+        assert app._harness_state is not None
+        assert app._harness_state.pending_query is not None
+
+        await pilot.press("m", "a", "n", "u", "a", "l")
+        await pilot.press("enter")
+        for _ in range(20):
+            await pilot.pause()
+
+        from poor_code.ui.store import UserAnswerSegment
+        answers = [s for s in app.store.state.turns[0].segments
+                   if isinstance(s, UserAnswerSegment)]
+        assert answers and answers[-1].text == "manual"
+        assert answers[-1].kind == "steering"
+        assert app._harness_state is not None
+        assert app._harness_state.interview == ()
+        assert app._harness_state.steering_notes == ("manual",)
+        assert app.store.state.awaiting_input is True
 
 
 @pytest.mark.asyncio
