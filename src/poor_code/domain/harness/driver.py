@@ -40,6 +40,11 @@ _RECOVERABLE_INFERENCE_ERRORS = (StructuredOutputError, LLMCallTimeout)
 
 RouteFn = Callable[[str, NodeResult, SessionState], RouteResult]
 
+# Generous non-termination backstop. Per-layer caps bound each loop, but their PRODUCT
+# (replan × tasks × attempts × adversarial rounds …) can still spin; 500 transitions in
+# a single run() is clearly abnormal — abort with a graceful ESCALATE rather than hang.
+GLOBAL_STEP_BUDGET = 500
+
 
 @dataclass
 class DriverRuntime:
@@ -72,10 +77,17 @@ class Driver:
         self, state: SessionState, cancel: asyncio.Event, *, sink: object | None = None
     ) -> SessionState:
         self.last_escape = None
+        steps = 0
         while True:
             assert state.cursor is not None, "Driver requires a cursor"
             node = self._registry.get(state.cursor.current_node)
             if node is None:
+                # Unregistered target (e.g. Router → fast_path in a graph built without
+                # an agent). Don't vanish silently into an empty ABANDONED — record why.
+                self.last_escape = Verdict(
+                    kind=VerdictKind.ESCALATE,
+                    query=f"parked: node '{state.cursor.current_node}' is not "
+                          "registered in this graph")
                 return state  # park: next node not implemented
             if cancel.is_set():
                 return state
@@ -142,6 +154,14 @@ class Driver:
             if nxt is None:
                 return state                              # terminal STOP
             state = self._advance(state, node, nxt, result)  # ③ move cursor + log
+            steps += 1
+            if steps >= GLOBAL_STEP_BUDGET:
+                self.last_escape = Verdict(
+                    kind=VerdictKind.ESCALATE,
+                    query=f"Driver exceeded {GLOBAL_STEP_BUDGET} steps in one run; "
+                          "aborting to avoid a runaway loop.")
+                self._on_step(state)
+                return state
             self._on_step(state)                          # ④ checkpoint
 
     @staticmethod
@@ -213,6 +233,16 @@ class Driver:
 
         if action in {"redirect", "redirect_and_inject", "pivot_request"}:
             target = decision.target_node or ("router" if action == "pivot_request" else None)
+            # A target that is not a top-level routable node (e.g. 'implementer', which
+            # lives inside the implement_loop subgraph) would silently no-op in _redirect.
+            # Fall back to a layer REPAIR bounce so the user's "redo X" is not dropped.
+            if target and self._registry.get(target) is None:
+                layer = _NODE_LAYER_FALLBACK.get(target)
+                if layer is not None:
+                    repaired, flow = self._bubble_repair(
+                        state, node_name, layer.value, decision.reason)
+                    self._on_step(repaired)
+                    return repaired, flow
             redirected = self._redirect(state, node_name, target, decision.reason)
             if redirected is state:
                 return state, "proceed"
@@ -310,6 +340,17 @@ def _reason_for(prev_node: str, result: NodeResult) -> str:
     if isinstance(result.output, Request):
         return result.output.kind.value
     return f"from {prev_node}"
+
+
+_NODE_LAYER_FALLBACK = {
+    "implementer": Layer.IMPLEMENTATION,
+    "composer": Layer.IMPLEMENTATION,
+    "validator": Layer.IMPLEMENTATION,
+    "planner": Layer.PLAN,
+    "plan_reviewer": Layer.PLAN,
+    "explorer": Layer.UNDERSTANDING,
+    "acceptance_oracle": Layer.ACCEPTANCE,
+}
 
 
 def _layer_for(name: str | None) -> Layer | None:

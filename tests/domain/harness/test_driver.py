@@ -1,6 +1,6 @@
 import asyncio
 import pytest
-from poor_code.domain.harness.driver import Driver
+from poor_code.domain.harness.driver import Driver, GLOBAL_STEP_BUDGET
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.harness.node import NodeResult, NodeContext
 from poor_code.domain.harness.route import route
@@ -249,3 +249,30 @@ def test_apply_noop_when_output_none():
     from poor_code.domain.session.models import SessionState
     s = SessionState()
     assert Driver._apply(s, NodeResult(output=None)) is s
+
+
+def test_unregistered_node_park_records_reason():
+    reg = NodeRegistry()  # empty → target node is unregistered
+    driver = Driver(reg, route=lambda *a, **k: None)
+    state = SessionState(cursor=Cursor(phase=Phase.ROUTING, current_node="fast_path"))
+    out = asyncio.run(driver.run(state, asyncio.Event()))
+    assert driver.last_escape is not None
+    assert driver.last_escape.kind is VerdictKind.ESCALATE
+    assert "fast_path" in (driver.last_escape.query or "")
+
+
+class _SpinNode:
+    name = "spin"
+    phase = Phase.ROUTING
+    async def run(self, ctx):
+        return NodeResult()  # no output/verdict → keeps forwarding
+
+
+def test_global_step_budget_aborts_runaway():
+    reg = NodeRegistry(); reg.register(_SpinNode())
+    driver = Driver(reg, route=lambda node, result, state: "spin")  # always loops back
+    state = SessionState(cursor=Cursor(phase=Phase.ROUTING, current_node="spin"))
+    out = asyncio.run(driver.run(state, asyncio.Event()))
+    assert driver.last_escape is not None
+    assert driver.last_escape.kind is VerdictKind.ESCALATE
+    assert str(GLOBAL_STEP_BUDGET) in (driver.last_escape.query or "")

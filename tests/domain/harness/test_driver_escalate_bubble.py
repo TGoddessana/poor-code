@@ -1,11 +1,11 @@
 import asyncio
 import pytest
-from poor_code.domain.harness.driver import Driver
+from poor_code.domain.harness.driver import Driver, _NODE_LAYER_FALLBACK
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.harness.graph import EdgeTable
 from poor_code.domain.harness.node import NodeResult
 from poor_code.domain.session.models import (
-    SessionState, Cursor, Phase, Verdict, VerdictKind,
+    SessionState, Cursor, Phase, Verdict, VerdictKind, Layer,
 )
 
 
@@ -25,3 +25,9 @@ async def test_driver_records_escalate_for_bubbling_but_still_parks_at_user():
     # top-level: advanced to the 'user' park, AND recorded the escalate for a wrapping graph
     assert final.cursor.current_node == "user"
     assert driver.last_escape is not None and driver.last_escape.kind is VerdictKind.ESCALATE
+
+
+def test_node_layer_fallback_maps_inner_nodes():
+    assert _NODE_LAYER_FALLBACK["implementer"] is Layer.IMPLEMENTATION
+    assert _NODE_LAYER_FALLBACK["planner"] is Layer.PLAN
+    assert _NODE_LAYER_FALLBACK["explorer"] is Layer.UNDERSTANDING

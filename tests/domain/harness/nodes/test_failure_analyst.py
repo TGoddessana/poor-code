@@ -2,7 +2,7 @@ import asyncio
 import json
 import pytest
 
-from poor_code.domain.harness.node import NodeContext
+from poor_code.domain.harness.node import NodeContext, StructuredOutputError
 from poor_code.domain.harness.nodes.failure_analyst import FailureAnalyst
 from poor_code.domain.session.models import (
     SessionState, Plan, Task, EditScope, Cursor, Phase, TaskStatus,
@@ -43,3 +43,23 @@ async def test_failure_analyst_emits_feedback_entry():
     assert isinstance(fe, FeedbackEntry)
     assert fe.failure_type == "logic_error"
     assert fe.task_ref == "t1"        # node stamps the active task id
+
+
+def test_empty_feedback_is_rejected():
+    fa = FailureAnalyst(llm=None)
+    with pytest.raises(StructuredOutputError):
+        fa.parse("{}")
+
+
+def test_blank_lesson_is_rejected():
+    fa = FailureAnalyst(llm=None)
+    with pytest.raises(StructuredOutputError):
+        fa.parse('{"failure_type": "", "symptom": "", "prevention_hint": ""}')
+
+
+# ── B3: tail-biased clamp keeps failure tail ──────────────────────────────────
+
+def test_failure_output_clamp_keeps_tail():
+    from poor_code.domain.harness.tool_output import clamp_tool_output
+    big = "boot\n" + "noise\n" * 5000 + "Traceback ... ValueError: deep-error"
+    assert "deep-error" in clamp_tool_output(big)

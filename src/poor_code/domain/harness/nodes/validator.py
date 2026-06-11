@@ -6,7 +6,7 @@ MAX_ADVERSARIAL_ROUNDS — at the cap it forces advance regardless of the model.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -14,6 +14,7 @@ from poor_code.domain.harness.ledger import render_build_ledger, task_section, r
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output)
 from poor_code.domain.harness.nodes.execution import run_shell
+from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
     ChecksObserved, Layer, Phase, SessionState, Verdict, VerdictKind)
@@ -34,7 +35,7 @@ _SYSTEM = (
 
 
 class _JudgeOut(BaseModel):
-    verdict: str = "advance"   # advance | repair_impl | repair_plan
+    verdict: Literal["advance", "repair_impl", "repair_plan"]
     hint: str = ""
 
 
@@ -66,7 +67,7 @@ class Validator(AgentNode):
         checks = ctx.state.acceptance.checks if ctx.state.acceptance else ()
         for c in checks:
             code, text = await run_shell(c.command, self._cwd, ctx.cancel)
-            out.append((c.criterion, code == 0, text[:300]))
+            out.append((c.criterion, code == 0, clamp_tool_output(text, head=300, tail=1200)))
         return out
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
@@ -110,10 +111,21 @@ class Validator(AgentNode):
     def parse(self, args_json: str) -> Verdict:
         out = validate_output(_JudgeOut, args_json, node=self.name)
         if out.verdict == "repair_impl":
-            return Verdict(kind=VerdictKind.REPAIR, layer=Layer.IMPLEMENTATION, hint=out.hint)
+            return Verdict(kind=VerdictKind.REPAIR, layer=Layer.IMPLEMENTATION,
+                           hint=out.hint or self._synth_hint())
         if out.verdict == "repair_plan":
-            return Verdict(kind=VerdictKind.REPAIR, layer=Layer.PLAN, hint=out.hint)
+            return Verdict(kind=VerdictKind.REPAIR, layer=Layer.PLAN,
+                           hint=out.hint or self._synth_hint())
         return Verdict(kind=VerdictKind.ADVANCE)
+
+    def _synth_hint(self) -> str:
+        """A repair verdict with no hint wastes a retry. Synthesize one
+        deterministically from the failing OBSERVED checks (their tails carry the
+        real error) so the implementer gets something actionable."""
+        fails = [f"{crit}: {tail}".strip() if tail else crit
+                 for crit, passed, tail in self._observed if not passed]
+        return ("Failing checks:\n" + "\n".join(fails)) if fails else \
+            "Validation failed; fix the implementation."
 
     @staticmethod
     def _active_task(state: SessionState):

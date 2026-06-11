@@ -2,7 +2,7 @@ import asyncio
 import json
 import pytest
 
-from poor_code.domain.harness.node import NodeContext
+from poor_code.domain.harness.node import NodeContext, StructuredOutputError
 from poor_code.domain.harness.nodes.validator import Validator, MAX_ADVERSARIAL_ROUNDS
 from poor_code.domain.session.models import (
     SessionState, Plan, Task, EditScope, Cursor, Phase, TaskStatus,
@@ -89,3 +89,50 @@ async def test_validator_forces_advance_at_cap_without_calling_llm():
     res = await Validator(_Boom()).run(
         NodeContext(state=_state(rounds=MAX_ADVERSARIAL_ROUNDS), cancel=asyncio.Event()))
     assert res.verdict.kind is VerdictKind.ADVANCE
+
+
+# ── A1: Literal verdict, drop silent default ──────────────────────────────────
+
+def test_typo_verdict_is_rejected_not_silently_advanced():
+    v = Validator(llm=None)  # parse() only; no LLM needed
+    with pytest.raises(StructuredOutputError):
+        v.parse('{"verdict": "REPAIR_IMPL", "hint": "x"}')
+
+
+def test_missing_verdict_is_rejected():
+    v = Validator(llm=None)
+    with pytest.raises(StructuredOutputError):
+        v.parse('{"hint": "x"}')
+
+
+# ── A2: synthesize repair hint from OBSERVED when model omits it ──────────────
+
+def test_empty_repair_hint_is_synthesized_from_observed():
+    v = Validator(llm=None)
+    v._observed = [("pytest passes", False, "E   AssertionError: 1 != 2")]
+    verdict = v.parse('{"verdict": "repair_impl", "hint": ""}')
+    assert verdict.hint  # must not be empty
+    assert "AssertionError" in verdict.hint  # carries the observed failure tail
+
+
+def test_empty_repair_plan_hint_is_also_synthesized():
+    v = Validator(llm=None)
+    v._observed = [("pytest passes", False, "E   AssertionError: boom")]
+    verdict = v.parse('{"verdict": "repair_plan", "hint": ""}')
+    assert "AssertionError" in verdict.hint  # repair_plan branch synthesizes too
+
+
+def test_synth_hint_omits_trailing_colon_when_tail_empty():
+    v = Validator(llm=None)
+    v._observed = [("build succeeds", False, "")]
+    verdict = v.parse('{"verdict": "repair_impl", "hint": ""}')
+    assert "build succeeds" in verdict.hint
+    assert "build succeeds:" not in verdict.hint  # no dangling colon
+
+
+# ── B3: tail-biased clamp keeps failure tail ──────────────────────────────────
+
+def test_observed_clamp_keeps_failure_tail():
+    from poor_code.domain.harness.tool_output import clamp_tool_output
+    big = "starting tests\n" + "ok\n" * 5000 + "E   AssertionError: tail-error"
+    assert "tail-error" in clamp_tool_output(big, head=300, tail=1200)

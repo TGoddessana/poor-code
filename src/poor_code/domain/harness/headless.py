@@ -133,7 +133,16 @@ async def run_headless(driver, state: SessionState, cancel: "asyncio.Event",
             continue
         break
     if state.report is None:
-        state = state.with_report(build_report(state, ReportOutcome.ABANDONED))
+        le = getattr(driver, "last_escape", None)
+        if le is not None and le.query:
+            note = le.query
+        elif state.pending_query is not None:
+            # Broke out of the loop still holding a query → the auto-answer cap was hit
+            # (last_escape was reset to None on that final re-entry). Surface that.
+            note = f"auto-answer cap ({MAX_AUTO_ANSWERS}) exhausted; still awaiting input"
+        else:
+            note = ""
+        state = state.with_report(build_report(state, ReportOutcome.ABANDONED, note=note))
     return state
 
 

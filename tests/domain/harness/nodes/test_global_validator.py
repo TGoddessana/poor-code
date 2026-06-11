@@ -2,9 +2,9 @@ import asyncio
 import json
 import pytest
 
-from poor_code.domain.harness.node import NodeContext
+from poor_code.domain.harness.node import NodeContext, StructuredOutputError, validate_output
 from poor_code.domain.harness.nodes.global_validator import (
-    GlobalValidator, build_changeset, MAX_FIXUPS)
+    GlobalValidator, build_changeset, MAX_FIXUPS, _AnalyzeOut)
 from poor_code.domain.session.models import (
     AcceptanceCheck, AcceptanceSpec, SessionState, Plan, Task, EditScope, Cursor, Phase,
     TaskStatus, Attempt, AttemptStatus, ChangeRecord, Transition, TriggerKind, VerdictKind,
@@ -84,3 +84,23 @@ async def test_global_validator_escalates_at_fixup_cap(tmp_path):
     res = await GlobalValidator(_NoLLM(), cwd=tmp_path).run(
         NodeContext(state=st, cancel=asyncio.Event()))
     assert res.verdict.kind is VerdictKind.ESCALATE
+
+
+def test_global_validator_requires_nonempty_hint():
+    with pytest.raises(StructuredOutputError):
+        validate_output(_AnalyzeOut, '{"culprit_task_id": "t1"}', node="global_validator")
+
+
+# ── B4: per-task diffs so no later task is dropped by an aggregate cut ────────
+
+def test_build_messages_keeps_every_task_diff():
+    from pathlib import Path
+    from poor_code.domain.session.models import ChangeSet
+    gv = GlobalValidator(llm=None, cwd=Path("."))
+    gv._failures = [("acceptance:x", 1, "boom")]
+    gv._changeset = ChangeSet(
+        aggregate_diff="huge",
+        per_task=(("t1", "A" * 5000), ("t2", "ZLAST-TASK-MARKER")))
+    msg = gv.build_messages(state=None)[-1]["content"]
+    assert "ZLAST-TASK-MARKER" in msg   # last task survives (not dropped by a 4000-char aggregate cut)
+    assert "t1" in msg and "t2" in msg

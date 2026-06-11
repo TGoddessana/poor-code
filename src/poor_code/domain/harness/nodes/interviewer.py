@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, StructuredOutputError, _LLMClientLike,
@@ -60,7 +60,7 @@ class _QueryOut(BaseModel):
 
 
 class _RequirementOut(BaseModel):
-    summary: str
+    summary: str = Field(min_length=1)
     acceptance: list[str] = []
     out_of_scope: list[str] = []
     assumptions: list[str] = []

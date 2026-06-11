@@ -72,7 +72,8 @@ def _task(**overrides) -> Task:
 
 @pytest.mark.asyncio
 async def test_plan_gate_advances_valid_plan():
-    res = await PlanGate().run(_ctx(SessionState(plan=Plan(tasks=(_task(),)))))
+    res = await PlanGate().run(_ctx(SessionState(plan=Plan(
+        tasks=(_task(),), plan_md="## t1: do A\n"))))
     assert res.verdict.kind is VerdictKind.ADVANCE
 
 
@@ -85,16 +86,18 @@ async def test_plan_gate_repairs_empty_plan():
 
 @pytest.mark.asyncio
 async def test_plan_gate_repairs_missing_edit_scope_or_validation():
-    res = await PlanGate().run(_ctx(SessionState(plan=Plan(tasks=(
-        _task(edit_scope=EditScope(), how_to_validate=""),
-    )))))
+    res = await PlanGate().run(_ctx(SessionState(plan=Plan(
+        tasks=(_task(edit_scope=EditScope(), how_to_validate=""),),
+        plan_md="## t1: do A\n",
+    ))))
     assert res.verdict.kind is VerdictKind.REPAIR
     assert "editable" in res.verdict.hint
 
 
 @pytest.mark.asyncio
 async def test_plan_gate_repairs_bad_dependency_reference():
-    plan = Plan(tasks=(_task(),), deps=(Dependency(task_id="t1", depends_on="missing"),))
+    plan = Plan(tasks=(_task(),), deps=(Dependency(task_id="t1", depends_on="missing"),),
+                plan_md="## t1: do A\n")
     res = await PlanGate().run(_ctx(SessionState(plan=plan)))
     assert res.verdict.kind is VerdictKind.REPAIR
     assert "dependency" in res.verdict.hint
@@ -107,7 +110,7 @@ async def test_plan_gate_repairs_dependency_cycle():
     plan = Plan(tasks=(t1, t2), deps=(
         Dependency(task_id="t1", depends_on="t2"),
         Dependency(task_id="t2", depends_on="t1"),
-    ))
+    ), plan_md="## t1: do A\n## t2: do B\n")
     res = await PlanGate().run(_ctx(SessionState(plan=plan)))
     assert res.verdict.kind is VerdictKind.REPAIR
     assert "cycle" in res.verdict.hint
@@ -123,9 +126,10 @@ async def test_plan_gate_escalates_after_repair_budget_exhausted():
 
 @pytest.mark.asyncio
 async def test_plan_gate_rejects_too_many_editable_files():
-    res = await PlanGate().run(_ctx(SessionState(plan=Plan(tasks=(
-        _task(edit_scope=EditScope(editable=("a.py", "b.py", "c.py", "d.py"))),
-    )))))
+    res = await PlanGate().run(_ctx(SessionState(plan=Plan(
+        tasks=(_task(edit_scope=EditScope(editable=("a.py", "b.py", "c.py", "d.py"))),),
+        plan_md="## t1: do A\n",
+    ))))
     assert res.verdict.kind is VerdictKind.REPAIR
     assert "split" in res.verdict.hint.lower()
 
@@ -221,3 +225,15 @@ def test_plan_gate_rejects_prefix_collision_only_section():
         Task(id="t10", title="h", purpose="", edit_scope=EditScope(editable=("a.py",))),))
     hint = PlanGate._invalid_hint(plan)
     assert hint is not None and "t1 " in (hint + " ")   # t1 flagged (not satisfied by '## t10')
+
+
+def _task_for_plan_md(tid="t1"):
+    return Task(id=tid, title="do it", purpose="make a thing",
+                edit_scope=EditScope(editable=("src/a.py",)))
+
+
+def test_plan_with_empty_plan_md_is_rejected():
+    plan = Plan(tasks=(_task_for_plan_md(),), deps=(), plan_md="")
+    hint = PlanGate._invalid_hint(plan)
+    assert hint is not None
+    assert "plan_md" in hint
