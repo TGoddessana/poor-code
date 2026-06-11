@@ -89,3 +89,17 @@ async def test_validator_forces_advance_at_cap_without_calling_llm():
     res = await Validator(_Boom()).run(
         NodeContext(state=_state(rounds=MAX_ADVERSARIAL_ROUNDS), cancel=asyncio.Event()))
     assert res.verdict.kind is VerdictKind.ADVANCE
+
+
+# ── A1: Literal verdict, drop silent default ──────────────────────────────────
+
+def test_typo_verdict_is_rejected_not_silently_advanced():
+    v = Validator(llm=None)  # parse() only; no LLM needed
+    with pytest.raises(Exception):  # StructuredOutputError
+        v.parse('{"verdict": "REPAIR_IMPL", "hint": "x"}')
+
+
+def test_missing_verdict_is_rejected():
+    v = Validator(llm=None)
+    with pytest.raises(Exception):  # StructuredOutputError
+        v.parse('{"hint": "x"}')

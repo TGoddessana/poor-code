@@ -6,7 +6,7 @@ MAX_ADVERSARIAL_ROUNDS — at the cap it forces advance regardless of the model.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -34,7 +34,7 @@ _SYSTEM = (
 
 
 class _JudgeOut(BaseModel):
-    verdict: str = "advance"   # advance | repair_impl | repair_plan
+    verdict: Literal["advance", "repair_impl", "repair_plan"]
     hint: str = ""
 
 
