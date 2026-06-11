@@ -219,6 +219,16 @@ class Driver:
 
         if action in {"redirect", "redirect_and_inject", "pivot_request"}:
             target = decision.target_node or ("router" if action == "pivot_request" else None)
+            # A target that is not a top-level routable node (e.g. 'implementer', which
+            # lives inside the implement_loop subgraph) would silently no-op in _redirect.
+            # Fall back to a layer REPAIR bounce so the user's "redo X" is not dropped.
+            if target and self._registry.get(target) is None:
+                layer = _NODE_LAYER_FALLBACK.get(target)
+                if layer is not None:
+                    repaired, flow = self._bubble_repair(
+                        state, node_name, layer.value, decision.reason)
+                    self._on_step(repaired)
+                    return repaired, flow
             redirected = self._redirect(state, node_name, target, decision.reason)
             if redirected is state:
                 return state, "proceed"
@@ -316,6 +326,17 @@ def _reason_for(prev_node: str, result: NodeResult) -> str:
     if isinstance(result.output, Request):
         return result.output.kind.value
     return f"from {prev_node}"
+
+
+_NODE_LAYER_FALLBACK = {
+    "implementer": Layer.IMPLEMENTATION,
+    "composer": Layer.IMPLEMENTATION,
+    "validator": Layer.IMPLEMENTATION,
+    "planner": Layer.PLAN,
+    "plan_reviewer": Layer.PLAN,
+    "explorer": Layer.UNDERSTANDING,
+    "acceptance_oracle": Layer.ACCEPTANCE,
+}
 
 
 def _layer_for(name: str | None) -> Layer | None:
