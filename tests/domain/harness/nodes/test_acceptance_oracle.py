@@ -6,9 +6,10 @@ import pytest
 from poor_code.domain.harness.node import NodeContext
 from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
 from poor_code.domain.session.models import (
-    AcceptanceSpec, CodeContext, GroundingStatus, Request, RequestKind,
-    Requirement, SessionState,
+    AcceptanceSpec, CodeContext, CodeRef, FileExcerpt, GroundingStatus, Request,
+    RequestKind, Requirement, SessionState,
 )
+from poor_code.domain.harness import api_probe as _api_probe_mod
 from poor_code.provider.events import (
     FinishedReason, ToolCallEnded, ToolCallInputDelta, ToolCallStarted,
 )
@@ -90,6 +91,70 @@ async def test_oracle_system_states_task_independent_anti_gaming_rules():
     assert "substring" in system          # exact-equality, not substring match
     assert "lookup" in system             # defend against lookup-table / hard-coded outputs
     assert "boundary" in system           # exercise extreme / edge inputs
+
+
+@pytest.mark.asyncio
+async def test_oracle_prompt_carries_excerpts_candidates_and_real_api(monkeypatch):
+    """The oracle must see GROUND TRUTH (the explorer's real file bodies, candidate
+    refs, and probed APIs) — not just a prose summary. This is the fix for the
+    unwinnable-check bug: with `TextArea`'s real attrs in hand, the oracle would not
+    invent `.value`. Regression-pins that excerpts/candidates/REAL APIs reach the prompt."""
+    async def fake_probe(excerpts, terms, cwd, cancel):
+        return "textual.widgets.TextArea public attrs: text, insert, focus"
+    monkeypatch.setattr(_api_probe_mod, "probe_apis", fake_probe)
+    # patch the symbol imported into the oracle module namespace too
+    import poor_code.domain.harness.nodes.acceptance_oracle as oracle_mod
+    monkeypatch.setattr(oracle_mod, "probe_apis", fake_probe)
+
+    state = SessionState(
+        requirement=Requirement(summary="switch prompt-input to a TextArea",
+                                acceptance=("multiline input works",)),
+        understanding=CodeContext(
+            grounding=GroundingStatus.NOT_FOUND,
+            summary="PromptBox currently composes an Input.",
+            candidates=(CodeRef(file="src/ui/prompt_box.py", symbol="PromptBox.compose"),),
+            excerpts=(FileExcerpt(
+                path="src/ui/prompt_box.py",
+                text="from textual.widgets import Input\nclass PromptBox: ..."),),
+        ),
+    )
+    llm = FakeLLM({"checks": []})
+    await AcceptanceOracle(llm).run(NodeContext(state, cancel=asyncio.Event()))
+    prompt = llm.seen_messages[-1]["content"]
+    assert "src/ui/prompt_box.py" in prompt              # candidate ref
+    assert "from textual.widgets import Input" in prompt  # verbatim excerpt body
+    assert "REAL APIs" in prompt and "text, insert, focus" in prompt  # probed API
+
+
+@pytest.mark.asyncio
+async def test_oracle_prompt_carries_open_questions_and_incomplete_exploration():
+    # P2 anti-evaporation: the interviewer's open_questions and the explorer's
+    # not_found search_notes must reach the oracle, so it does not design a check that
+    # pretends an unverified behaviour is settled.
+    state = SessionState(
+        requirement=Requirement(summary="multiline prompt",
+                                acceptance=("works",),
+                                open_questions=("is Enter submit or newline?",)),
+        understanding=CodeContext(
+            grounding=GroundingStatus.NOT_FOUND,
+            search_notes="prompt_box.py _on_submit body was truncated; submit path unseen",
+        ),
+    )
+    llm = FakeLLM({"checks": []})
+    await AcceptanceOracle(llm).run(NodeContext(state, cancel=asyncio.Event()))
+    prompt = llm.seen_messages[-1]["content"]
+    assert "is Enter submit or newline?" in prompt          # open question surfaced
+    assert "submit path unseen" in prompt                   # incomplete-exploration note
+    assert "INCOMPLETE EXPLORATION" in prompt
+
+
+@pytest.mark.asyncio
+async def test_oracle_system_requires_grounding_api_against_real_attrs():
+    llm = FakeLLM({"checks": []})
+    await AcceptanceOracle(llm).run(NodeContext(_state(), cancel=asyncio.Event()))
+    system = llm.seen_messages[0]["content"].lower()
+    assert "real apis" in system or "do not guess" in system
+    assert "never pass" in system  # the unwinnable-check warning
 
 
 @pytest.mark.asyncio

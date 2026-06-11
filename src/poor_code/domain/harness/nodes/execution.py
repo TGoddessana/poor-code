@@ -143,6 +143,24 @@ def _prev_green_criteria(state, task) -> set[str]:
     return green
 
 
+def _green_from_other_tasks(state, task) -> set[str]:
+    """Acceptance criteria already GREEN from OTHER tasks' attempts — the build's
+    progress baseline coming into THIS task. A task may only complete when it either
+    reaches FULL green or STRICTLY adds to this baseline; treading water (leaving the
+    green set unchanged) is not 'done'. Without this, the no-regression floor passes a
+    task at 0/N green whenever there is nothing yet to regress (the false-completion
+    bug: completion_gate stamped 'done' on 0/4 and 1/4 acceptance results)."""
+    if state.plan is None:
+        return set()
+    green: set[str] = set()
+    for t in state.plan.tasks:
+        if t.id == task.id:
+            continue
+        for a in t.attempts:
+            green |= {crit for crit, ok in a.check_results if ok}
+    return green
+
+
 class ValidationRunner:
     """Binding pass/fail ★. Runs the GLOBAL acceptance spec (Task.how_to_validate is
     usually empty now): PASS when no PREVIOUSLY-GREEN acceptance check has regressed,
@@ -168,6 +186,7 @@ class ValidationRunner:
             return NodeResult(output=result, branch="pass" if passed else "fail")
 
         prev_green = _prev_green_criteria(ctx.state, task)
+        other_green = _green_from_other_tasks(ctx.state, task)
         results: list[tuple[str, bool]] = []
         outputs: list[str] = []
         for c in checks:
@@ -175,12 +194,23 @@ class ValidationRunner:
             results.append((c.criterion, code == 0))
             if code != 0:
                 outputs.append(f"[{c.criterion}] exit {code}: {out[:200]}")
+        all_criteria = {c.criterion for c in checks}
         now_green = {crit for crit, ok in results if ok}
-        regressed = sorted(prev_green - now_green)
-        passed = not regressed
-        summary = ("regressed: " + ", ".join(regressed)) if regressed else (
-            "all known-green checks still pass; "
-            f"{len(now_green)}/{len(checks)} acceptance checks green")
+        # No-regression floor: nothing once green (here or in a sibling task) may go red.
+        regressed = sorted((prev_green | other_green) - now_green)
+        # Forward-progress floor: 'done' requires FULL green OR at least one acceptance
+        # check this task newly turned green. A task that adds nothing is not complete —
+        # this is what stops completion_gate from stamping 'done' on a 0/N result.
+        made_progress = now_green == all_criteria or bool(now_green - other_green)
+        passed = (not regressed) and made_progress
+        if regressed:
+            summary = "regressed: " + ", ".join(regressed)
+        elif not made_progress:
+            summary = (f"no acceptance progress: {len(now_green)}/{len(checks)} green, "
+                       "none newly satisfied by this task")
+        else:
+            summary = ("all known-green checks still pass; "
+                       f"{len(now_green)}/{len(checks)} acceptance checks green")
         result = ValidationResult(
             command="; ".join(c.command for c in checks),
             exit_code=0 if passed else 1,

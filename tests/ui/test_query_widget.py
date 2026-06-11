@@ -1,5 +1,6 @@
 import pytest
 from textual.app import App, ComposeResult
+from textual.widgets import Input, Static
 from poor_code.ui.store import QuerySegment
 from poor_code.ui.widgets.query_widget import QueryWidget
 
@@ -34,3 +35,53 @@ async def test_first_option_is_default_selection():
     async with app.run_test() as pilot:
         await pilot.press("enter")
         assert app.answered == ("A", "A")
+
+
+# --- regression: a destructive rewrite once dropped the prompt text and the
+# focus hand-off, so the question body vanished and the picker stayed glued to
+# the keyboard after answering. These pin both contracts. ---
+
+
+@pytest.mark.asyncio
+async def test_option_query_renders_prompt_text():
+    """The question body must be visible — not just the option picker."""
+    seg = QuerySegment(prompt="which path?", options=("A", "B"), kind="choose")
+    app = _Harness(seg)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        prompt = app.query_one(".query-prompt", Static)
+        assert "which path?" in str(prompt.render())
+
+
+@pytest.mark.asyncio
+async def test_clarify_query_renders_prompt_text():
+    """Free-text (no options) clarify questions must still show the question."""
+    seg = QuerySegment(prompt="why exactly?", options=(), kind="clarify")
+    app = _Harness(seg)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        prompt = app.query_one(".query-prompt", Static)
+        assert "why exactly?" in str(prompt.render())
+
+
+@pytest.mark.asyncio
+async def test_focus_returns_to_prompt_input_on_unmount():
+    """When the picker is dismissed it must hand the keyboard back to the
+    prompt box, so the next keypress (steering / next answer) lands there."""
+    seg = QuerySegment(prompt="which?", options=("A", "B"), kind="choose")
+
+    class _FocusHarness(App):
+        def answer_query(self, answer, chosen_option=None):
+            pass
+
+        def compose(self) -> ComposeResult:
+            yield QueryWidget(seg)
+            yield Input(id="prompt-input")
+
+    app = _FocusHarness()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        widget = app.query_one(QueryWidget)
+        await widget.remove()
+        await pilot.pause()
+        assert app.focused is app.query_one("#prompt-input", Input)

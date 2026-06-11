@@ -93,15 +93,27 @@ async def test_prompt_carries_plan_requirement_and_environment():
 
 
 @pytest.mark.asyncio
-async def test_convergence_cap_advances_after_two_repairs():
-    # Two prior plan_reviewer -> planner bounces already in history.
+async def test_convergence_cap_escalates_after_two_repairs():
+    # At the cap the reviewer no longer ADVANCES a plan it still calls unsound (the
+    # "consensus false progress" bug); it ESCALATES to the human (SUPERVISED-only path).
     bounce = Transition(from_node="plan_reviewer", to_node="planner",
                         trigger=TriggerKind.GATE, reason="x", ts_iso="2026-06-04T00:00:00Z")
     history = (bounce, bounce)
     llm = FakeLLM({"ok": False, "violation": "still too many tasks"})
     res = await PlanReviewer(llm).run(
         NodeContext(_state(_plan(), history=history), cancel=asyncio.Event()))
-    assert res.verdict.kind is VerdictKind.ADVANCE
+    assert res.verdict.kind is VerdictKind.ESCALATE
+    assert res.verdict.query is not None and "unsound" in res.verdict.query.lower()
+
+
+def test_reviewer_does_not_reject_for_empty_validate():
+    # Regression: pathology #4 (BROKEN VALIDATION) used to reject tasks with an empty
+    # how_to_validate, but the planner intentionally writes none (the acceptance_oracle
+    # owns validation). The contradiction looped planner↔reviewer. The rule is gone.
+    from poor_code.domain.harness.nodes.plan_reviewer import _SYSTEM
+    low = _SYSTEM.lower()
+    assert "broken validation" not in low
+    assert "do not reject" in low and "validate field" in low
 
 
 def test_repair_counter_counts_only_plan_reviewer_bounces():

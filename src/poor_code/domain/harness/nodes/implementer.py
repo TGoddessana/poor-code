@@ -10,13 +10,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+from poor_code.domain.harness.api_probe import focus_terms, probe_apis
 from poor_code.domain.harness.ledger import render_build_ledger, task_section, render_acceptance
 from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLike
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.snapshot import GitSnapshot, default_git_dir
 from poor_code.domain.harness.steering import driver_feedback_block, steering_block
 from poor_code.domain.harness.tool_output import clamp_tool_output
-from poor_code.domain.session.models import Attempt, ChangeRecord, Phase, SessionState
+from poor_code.domain.session.models import (
+    Attempt, ChangeRecord, GroundingStatus, Phase, SessionState)
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
@@ -61,12 +63,28 @@ class Implementer:
         self._tools = tools
         self._snapshot = GitSnapshot(git_dir=default_git_dir(cwd), work_tree=cwd)
         self._baselines: dict[str, str] = {}  # task_id → tree hash (per-run cache)
+        # Real public APIs of the imported libraries, probed once and reused across the
+        # many implementer attempts — so the model writes `TextArea.text`, not a recalled
+        # `.value`. None = not yet probed; "" = probed, nothing groundable.
+        self._api_digest: str | None = None
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         state = ctx.state
         assert state.plan is not None and state.cursor is not None
         task = next((t for t in state.plan.tasks if t.id == state.cursor.task_id), None)
         assert task is not None, f"cursor task_id {state.cursor.task_id!r} not in plan"
+
+        if self._api_digest is None:
+            cc = state.understanding
+            if cc is not None and cc.excerpts:
+                req = state.requirement
+                terms = focus_terms(
+                    task.title, task.purpose,
+                    *(req.summary, *req.acceptance) if req is not None else ())
+                self._api_digest = await probe_apis(
+                    cc.excerpts, terms, self._cwd, ctx.cancel)
+            else:
+                self._api_digest = ""
 
         await self._snapshot.init()
         if task.id not in self._baselines:
@@ -161,6 +179,24 @@ class Implementer:
         if state.feedback.entries:
             feedback = "\nPAST FAILURES TO AVOID:\n" + "\n".join(
                 f"  - {e.failure_type}: {e.prevention_hint}" for e in state.feedback.entries)
+        api = ""
+        if self._api_digest:
+            api = ("\nREAL APIs (use these exact attributes/methods; do NOT guess from "
+                   f"memory):\n{self._api_digest}")
+        # Unresolved questions + the explorer's "couldn't fully see this" note. Carried
+        # forward so a gap the interviewer/explorer flagged drives a READ (via bash) here
+        # instead of evaporating into a blind guess.
+        unknowns = ""
+        oq = state.requirement.open_questions if state.requirement is not None else ()
+        cc = state.understanding
+        notes = (cc.search_notes.strip()
+                 if cc is not None and cc.grounding is GroundingStatus.NOT_FOUND else "")
+        if oq or notes:
+            parts = [f"  - open question: {q}" for q in oq]
+            if notes:
+                parts.append(f"  - exploration was incomplete: {notes}")
+            unknowns = ("\nUNVERIFIED — confirm by READING the file (bash: sed/cat) before "
+                        "coding against an assumption:\n" + "\n".join(parts))
         hint = f"\nREPAIR HINT: {state.repair_hint}" if state.repair_hint else ""
         env = ""
         if state.env_report is not None and (
@@ -194,7 +230,7 @@ class Implementer:
                 f"TASK: {task.title}\nPURPOSE: {task.purpose}\n"
                 f"DETAILS:\n{task_md}\nEDITABLE PATHS: {scope}\n"
                 f"VALIDATION (make this pass): {task.how_to_validate}"
-                f"{self._render_steps(task)}{refs}{feedback}{hint}"
+                f"{self._render_steps(task)}{refs}{api}{unknowns}{feedback}{hint}"
                 f"{steering_block(state.steering_notes)}"
                 f"{driver_feedback_block(state, self.name)}")
 

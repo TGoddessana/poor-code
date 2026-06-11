@@ -225,6 +225,68 @@ async def test_validation_runner_fails_on_regression(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_validation_runner_fails_when_zero_checks_green(monkeypatch, tmp_path):
+    """Regression for the false-completion bug: with nothing yet green, the old
+    no-regression-only rule passed at 0/N (there was nothing to regress), so
+    completion_gate stamped 'done' on a wholly-broken task. Now 0/N green = fail."""
+    async def fake_run_shell(command, cwd, cancel, *a, **k):
+        return 1, "boom"  # every acceptance check fails → 0 green
+    monkeypatch.setattr(
+        "poor_code.domain.harness.nodes.execution.run_shell", fake_run_shell)
+    state = _accept_runner_state()  # no prior green anywhere
+    r = await ValidationRunner(cwd=tmp_path).run(_ctx(state))
+    assert r.output.passed is False
+    assert r.branch == "fail"
+    assert "no acceptance progress" in r.output.output
+
+
+@pytest.mark.asyncio
+async def test_validation_runner_fails_when_task_adds_no_new_green(monkeypatch, tmp_path):
+    """A task that leaves the green set exactly where a sibling task already had it
+    made no progress → not 'done' (even though nothing regressed)."""
+    async def fake_run_shell(command, cwd, cancel, *a, **k):
+        return (0, "ok") if command == "cmd-a" else (1, "boom")  # only A green
+    monkeypatch.setattr(
+        "poor_code.domain.harness.nodes.execution.run_shell", fake_run_shell)
+    # t_prev already made A green; the active task t1 also only has A green → no gain.
+    plan = Plan(tasks=(
+        Task(id="t_prev", title="prev", purpose="p",
+             attempts=(Attempt(id="p1", check_results=(("A", True),)),)),
+        Task(id="t1", title="A", purpose="p", attempts=(Attempt(id="a2"),))))
+    cur = Cursor(phase=Phase.IMPLEMENTING, current_node="validation_runner",
+                 task_id="t1", attempt_id="a2")
+    spec = AcceptanceSpec(checks=(
+        AcceptanceCheck(criterion="A", command="cmd-a"),
+        AcceptanceCheck(criterion="B", command="cmd-b")))
+    state = SessionState(plan=plan, cursor=cur, acceptance=spec)
+    r = await ValidationRunner(cwd=tmp_path).run(_ctx(state))
+    assert r.output.passed is False and r.branch == "fail"
+
+
+@pytest.mark.asyncio
+async def test_validation_runner_passes_when_task_adds_new_green(monkeypatch, tmp_path):
+    """A task that newly turns a check green (no regression) is 'done', even though
+    the full spec is not yet green — the rest is other tasks' / global_validator's job."""
+    async def fake_run_shell(command, cwd, cancel, *a, **k):
+        return (0, "ok") if command in ("cmd-a", "cmd-b") else (1, "x")  # A and B green
+    monkeypatch.setattr(
+        "poor_code.domain.harness.nodes.execution.run_shell", fake_run_shell)
+    plan = Plan(tasks=(
+        Task(id="t_prev", title="prev", purpose="p",
+             attempts=(Attempt(id="p1", check_results=(("A", True),)),)),
+        Task(id="t1", title="B", purpose="p", attempts=(Attempt(id="a2"),))))
+    cur = Cursor(phase=Phase.IMPLEMENTING, current_node="validation_runner",
+                 task_id="t1", attempt_id="a2")
+    spec = AcceptanceSpec(checks=(
+        AcceptanceCheck(criterion="A", command="cmd-a"),
+        AcceptanceCheck(criterion="B", command="cmd-b"),
+        AcceptanceCheck(criterion="C", command="cmd-c")))
+    state = SessionState(plan=plan, cursor=cur, acceptance=spec)
+    r = await ValidationRunner(cwd=tmp_path).run(_ctx(state))
+    assert r.output.passed is True and r.branch == "pass"
+
+
+@pytest.mark.asyncio
 async def test_validation_runner_falls_back_to_how_to_validate_without_acceptance(
         monkeypatch, tmp_path):
     seen = {}

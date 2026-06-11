@@ -235,11 +235,12 @@ async def test_interview_done_flows_through_planner_then_task_selector_advances_
         if state.pending_query is None:
             break
         q = state.pending_query
-        # The two SUPERVISED confirm gates (spec + plan) suspend with an APPROVE query;
-        # approve them so the chain proceeds. Only the interviewer's real questions count.
+        # The two SUPERVISED confirm gates (spec + plan) suspend with an APPROVE query that
+        # offers a discrete approve option; SELECT it (approval is by option identity now,
+        # not free-text keyword). Only the interviewer's real questions count.
         if q.kind is QueryKind.APPROVE:
-            state = state.with_user_response(
-                UserResponse(query_id=q.id, answer="approve"))
+            state = state.with_user_response(UserResponse(
+                query_id=q.id, answer=q.options[0], chosen_option=q.options[0]))
             continue
         questions_asked += 1
         state = state.with_user_response(

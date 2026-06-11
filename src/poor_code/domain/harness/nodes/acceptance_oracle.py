@@ -3,16 +3,21 @@ authoritative 'done'). Reads only the binding Requirement (+ CodeContext as
 reference); never the plan. Emits a runnable AcceptanceSpec via one tool call."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
-from poor_code.domain.harness.node import AgentNode, _LLMClientLike, validate_output
+from poor_code.domain.harness.api_probe import focus_terms, probe_apis
+from poor_code.domain.harness.node import (
+    AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output)
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
     AcceptanceCheck, AcceptanceSpec, GroundingStatus, Phase, SessionState,
     effective_requirement,
 )
+
+_MAX_EXCERPT_IN_PROMPT = 1800   # per-file body slice handed to the oracle as ground truth
 
 _TOOL_NAME = "emit_acceptance"
 
@@ -43,6 +48,12 @@ _SYSTEM = (
     "the example answers cannot pass.\n"
     "7. Include AT LEAST ONE boundary / extreme input (empty, zero, negative, very large, or "
     "malformed) where a naive or hard-coded implementation would diverge from a correct one.\n"
+    "8. GROUND every API you assert against the CODE CONTEXT below. When a check inspects a "
+    "library object, use the attributes/methods listed under 'REAL APIs' — do NOT guess from "
+    "memory. A check that calls an attribute the object does not have (e.g. `.value` on a type "
+    "whose real attribute is `.text`) raises at runtime and can NEVER pass, no matter how "
+    "correct the implementation is. If the target type changes (e.g. Input→TextArea), assert "
+    "against the NEW type's real API, not the old one's.\n"
     "Call emit_acceptance once."
 )
 
@@ -61,8 +72,22 @@ class AcceptanceOracle(AgentNode):
     name = "acceptance_oracle"
     phase = Phase.PLANNING
 
-    def __init__(self, llm: _LLMClientLike) -> None:
+    def __init__(self, llm: _LLMClientLike, cwd: Path = Path(".")) -> None:
         super().__init__(llm)
+        self._cwd = cwd
+        # Real public APIs of the libraries the explored code imports — probed in run()
+        # so build_messages (sync) can hand the oracle ground truth instead of leaving
+        # it to RECALL `TextArea.text` vs `.value` from training. "" when nothing to probe.
+        self._api_digest = ""
+
+    async def run(self, ctx: NodeContext) -> NodeResult:
+        cc = ctx.state.understanding
+        if cc is not None and cc.excerpts:
+            req = effective_requirement(ctx.state)
+            terms = focus_terms(req.summary, *req.acceptance, *req.assumptions)
+            self._api_digest = await probe_apis(cc.excerpts, terms, self._cwd, ctx.cancel)
+        args_json = await self._dispatch(ctx)
+        return NodeResult(output=self.parse(args_json))
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         req = effective_requirement(state)
@@ -84,7 +109,9 @@ class AcceptanceOracle(AgentNode):
                 f"summary: {req.summary}\n"
                 f"acceptance:\n{self._bullets(req.acceptance)}\n"
                 f"out_of_scope:\n{self._bullets(req.out_of_scope)}\n"
-                f"assumptions:\n{self._bullets(req.assumptions)}\n\n"
+                f"assumptions:\n{self._bullets(req.assumptions)}\n"
+                f"open_questions (unresolved — do NOT design a check that pretends these are "
+                f"settled):\n{self._bullets(req.open_questions)}\n\n"
                 f"CODE CONTEXT:\n{self._context_digest(state)}")},
         ]
 
@@ -109,8 +136,7 @@ class AcceptanceOracle(AgentNode):
             return "  (none)"
         return "\n".join(f"  - {item}" for item in items)
 
-    @staticmethod
-    def _context_digest(state: SessionState) -> str:
+    def _context_digest(self, state: SessionState) -> str:
         cc = state.understanding
         if cc is None:
             return "(none)"
@@ -119,4 +145,24 @@ class AcceptanceOracle(AgentNode):
             lines.append("MODE: greenfield (create-from-scratch; no existing code to ground).")
         if cc.summary:
             lines.append(f"summary: {cc.summary}")
+        # The explorer's self-diagnosis when it could NOT fully locate the code (truncated
+        # bodies, unseen handlers). Surfaced so the oracle does not design a check that
+        # asserts behaviour nobody actually confirmed exists.
+        if cc.grounding is GroundingStatus.NOT_FOUND and cc.search_notes.strip():
+            lines.append(f"INCOMPLETE EXPLORATION (unverified — treat with caution): "
+                         f"{cc.search_notes.strip()}")
+        if cc.candidates:
+            refs = ", ".join(
+                f"{r.file}:{r.symbol}" if r.symbol else r.file for r in cc.candidates)
+            lines.append(f"relevant code: {refs}")
+        # Real API ground truth (probed in run()) — so checks assert against attributes the
+        # objects actually have, not ones the model recalled. This is the single most direct
+        # defence against the unwinnable-check bug (`.value` on a type whose attr is `.text`).
+        if self._api_digest:
+            lines.append(f"REAL APIs (use these exact attributes, do NOT guess):\n{self._api_digest}")
+        # Verbatim source the explorer read — ground truth, not a model-retyped paraphrase.
+        for ex in cc.excerpts:
+            body = ex.text[:_MAX_EXCERPT_IN_PROMPT]
+            trunc = " …(truncated)" if (ex.truncated or len(ex.text) > _MAX_EXCERPT_IN_PROMPT) else ""
+            lines.append(f"--- {ex.path}{trunc} ---\n{body}")
         return "\n".join(lines) if lines else "(none)"

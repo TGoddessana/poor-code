@@ -29,10 +29,12 @@ from poor_code.domain.session.models import (
     effective_requirement,
 )
 
-# Stripped, case-folded answers that count as "approve, proceed".
-_APPROVALS = frozenset({
-    "", "approve", "approved", "ok", "okay", "yes", "y", "lgtm", "proceed",
-})
+# The discrete "approve" action the widget offers as a selectable option. Approval is
+# detected by IDENTITY against this exact string (the option the gate itself emitted),
+# NOT by matching free text against a keyword list — so it works in any language and a
+# user typing "좋아" can never be mis-read. A gate decision is approve / change-request:
+# selecting this option = approve; ANY typed text = a change request (the steering hint).
+APPROVE_OPTION = "승인하고 진행 (approve & proceed)"
 
 
 class _ConfirmGate:
@@ -44,49 +46,66 @@ class _ConfirmGate:
     async def run(self, ctx: NodeContext) -> NodeResult:
         if ctx.state.policy is Policy.FULL_AUTO:
             return NodeResult()                        # pass-through (advance)
-        answer = self._fresh_answer(ctx.state)
-        if answer is None:
+        aq = self._fresh_answer(ctx.state)
+        if aq is None:
             # Not answered yet, OR the only answer is stale (already consumed by a
-            # prior reject bounce) — suspend for a fresh decision.
+            # prior reject bounce) — suspend for a fresh decision. The discrete approve
+            # action is offered as a selectable widget option (identity-checked on
+            # resume); typing anything instead is treated as a change request.
             return NodeResult(query=Query(
                 id=self.query_id, kind=QueryKind.APPROVE,
                 prompt=self._render(ctx.state),
-                rationale="Approve to proceed, or reply with changes to revise."))
-        if self._is_approval(answer):
+                options=(APPROVE_OPTION,),
+                rationale=("Select 'approve & proceed' to continue, or type the changes "
+                           "you want to revise it.")))
+        if self._is_approval(aq):
             return NodeResult()                        # advance
+        hint = self._reject_hint(aq)
         if self._repair_count(ctx.state) >= self.repair_cap:
-            # Cap reached: stop bouncing — advance anyway, warning the user.
+            # Cap reached: stop bouncing — advance anyway, warning the user. (This gate IS
+            # the human; escalating a human's own gate back to them is pointless.)
             sink = getattr(ctx, "sink", None)
             if sink is not None and hasattr(sink, "node_repaired"):
                 sink.node_repaired(
                     self.name,
                     f"repair cap ({self.repair_cap}) reached — proceeding despite "
-                    f"unresolved comment: {answer}")
+                    f"unresolved comment: {hint}")
             return NodeResult()
         return NodeResult(verdict=Verdict(
-            kind=VerdictKind.REPAIR, layer=self.layer, hint=answer))
+            kind=VerdictKind.REPAIR, layer=self.layer, hint=hint))
 
     # --- answer access (mirrors interviewer's AnsweredQuery.response.answer/.chosen_option) ---
     def _answers(self, state) -> list:
         """All recorded answers for THIS gate's query_id, in order."""
         return [aq for aq in state.interview if aq.query.id == self.query_id]
 
-    def _fresh_answer(self, state) -> str | None:
-        """The user's latest answer to THIS gate IFF it is fresh (not yet consumed by a
-        prior reject bounce). None when unanswered or when the latest answer is stale."""
+    def _fresh_answer(self, state):
+        """The user's latest AnsweredQuery for THIS gate IFF it is fresh (not yet consumed
+        by a prior reject bounce). None when unanswered or when the latest answer is stale."""
         answers = self._answers(state)
         if len(answers) <= self._repair_count(state):
             return None
-        return self._answer_text(answers[-1])
+        return answers[-1]
 
     @staticmethod
-    def _answer_text(aq) -> str:
+    def _is_approval(aq) -> bool:
+        """Approval is the discrete option the gate offered, matched by identity — not a
+        keyword. Selecting it sets chosen_option to APPROVE_OPTION. A bare/empty submission
+        with no chosen option also approves; ANY typed text is a change request."""
+        resp = aq.response
+        if (resp.chosen_option or "").strip() == APPROVE_OPTION:
+            return True
+        return not (resp.chosen_option or "").strip() and not (resp.answer or "").strip()
+
+    @staticmethod
+    def _reject_hint(aq) -> str:
+        """The change request to feed the repaired layer: the typed text, or a chosen
+        non-approve option."""
         resp = aq.response
         chosen = (resp.chosen_option or "").strip()
-        return chosen if chosen else (resp.answer or "")
-
-    def _is_approval(self, answer: str) -> bool:
-        return answer.strip().casefold() in _APPROVALS
+        if chosen and chosen != APPROVE_OPTION:
+            return chosen
+        return (resp.answer or "").strip()
 
     def _repair_count(self, state) -> int:
         """How many times THIS gate has already bounced to repair — i.e. rejects already

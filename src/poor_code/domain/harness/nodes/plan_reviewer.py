@@ -37,15 +37,15 @@ _SYSTEM = (
     "ask for (e.g. a package.json in a Python project).\n"
     "3. DESTRUCTIVE ORDERING — a task writes before the code it depends on exists, "
     "or puts a test ahead of its implementation so it risks clobbering files.\n"
-    "4. BROKEN VALIDATION — a how_to_validate that is runnable yet structurally "
-    "CANNOT pass (e.g. `python3 -m __main__` whose __spec__ is None, or asserting "
-    "a computed number nobody observed).\n"
-    "5. PHANTOM FILE — a task targets a file absent from file_plan or from the "
+    "4. PHANTOM FILE — a task targets a file absent from file_plan or from the "
     "chosen stack/environment.\n"
-    "6. TYPE-INCONSISTENCY — a step references a symbol named differently from where "
+    "5. TYPE-INCONSISTENCY — a step references a symbol named differently from where "
     "another step defines it (e.g. clear_layers() defined but clearLayers() called), "
     "or uses a function no step defines.\n"
-    "7. COVERAGE GAP — an Acceptance check has no task whose steps would satisfy it.\n"
+    "6. COVERAGE GAP — an Acceptance check has no task whose steps would satisfy it.\n"
+    "Validation is NOT your concern: the global acceptance_oracle owns the runnable "
+    "'done' check and the planner intentionally writes NO per-task validation commands. "
+    "Do NOT reject a task for an empty/absent validate field.\n"
     "If NONE hold, set ok=true. Be decisive: a single deliverable should be ONE "
     "task with one sane probe. Call emit_plan_review once."
 )
@@ -77,11 +77,15 @@ class PlanReviewer(AgentNode):
         if out.ok:
             return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
         hint = out.violation or "Plan decomposition is unsound; replan."
+        # At the cap, ESCALATE rather than ADVANCE-with-unmet-objection: shipping a plan
+        # the reviewer still calls unsound is the "consensus false progress" failure mode.
+        # plan_reviewer runs only under SUPERVISED (FULL_AUTO skips it), so this asks the
+        # human to adjudicate the decomposition — it never blocks the headless/bench path.
         if _plan_review_repair_count(ctx.state) >= _CONVERGENCE_CAP:
             return NodeResult(verdict=Verdict(
-                kind=VerdictKind.ADVANCE,
-                hint=(f"accepted gate-valid plan after {_CONVERGENCE_CAP} "
-                      f"replans; last (unmet) objection: {hint[:200]}")))
+                kind=VerdictKind.ESCALATE,
+                query=(f"Plan decomposition is still unsound after {_CONVERGENCE_CAP} "
+                       f"replans. Unresolved objection: {hint[:300]}")))
         return NodeResult(verdict=Verdict(
             kind=VerdictKind.REPAIR, layer=Layer.PLAN, hint=hint))
 
@@ -98,7 +102,6 @@ class PlanReviewer(AgentNode):
         ) or "  (none)"
         tasks = "\n\n".join(
             f"  {t.id} [{', '.join(t.edit_scope.editable)}] {t.title}\n"
-            f"      validate: {t.how_to_validate}\n"
             + "\n".join(
                 f"      {s.id} {s.kind.value} {s.file}: {s.body[:200]}"
                 for s in t.steps

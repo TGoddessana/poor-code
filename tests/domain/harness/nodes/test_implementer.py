@@ -140,6 +140,57 @@ def test_prompt_renders_ordered_steps(tmp_path):
     assert "run: pytest -q" in prompt and "expected: PASS" in prompt
 
 
+def test_prompt_injects_real_api_digest(tmp_path):
+    # Once probed (cached on the node), the real public API is handed to the model so it
+    # writes against actual attributes (`TextArea.text`) instead of a recalled `.value`.
+    task = Task(id="t1", title="x", purpose="p",
+                edit_scope=EditScope(editable=("x.py",)), how_to_validate="pytest -q")
+    impl = Implementer(_WriteThenStopLLM(), cwd=tmp_path, tools=_tools())
+    impl._api_digest = "textual.widgets.TextArea public attrs: text, insert, focus"
+    prompt = impl._prompt(SessionState(), task)
+    assert "REAL APIs" in prompt
+    assert "text, insert, focus" in prompt
+
+
+def test_prompt_omits_api_block_when_no_digest(tmp_path):
+    task = Task(id="t1", title="x", purpose="p",
+                edit_scope=EditScope(editable=("x.py",)), how_to_validate="pytest -q")
+    impl = Implementer(_WriteThenStopLLM(), cwd=tmp_path, tools=_tools())
+    # _api_digest defaults to None (not yet probed) and may be "" (nothing groundable)
+    assert impl._prompt(SessionState(), task).count("REAL APIs") == 0
+    impl._api_digest = ""
+    assert impl._prompt(SessionState(), task).count("REAL APIs") == 0
+
+
+def test_prompt_surfaces_open_questions_and_incomplete_exploration(tmp_path):
+    # P2: an unresolved question or a not_found exploration note must drive a READ here,
+    # not evaporate. Routed into the implementer prompt as UNVERIFIED items.
+    from poor_code.domain.session.models import (
+        CodeContext, GroundingStatus, Requirement)
+    task = Task(id="t1", title="x", purpose="p",
+                edit_scope=EditScope(editable=("x.py",)), how_to_validate="pytest -q")
+    impl = Implementer(_WriteThenStopLLM(), cwd=tmp_path, tools=_tools())
+    state = SessionState(
+        requirement=Requirement(summary="s", open_questions=("which key submits?",)),
+        understanding=CodeContext(grounding=GroundingStatus.NOT_FOUND,
+                                  search_notes="submit handler body truncated"))
+    prompt = impl._prompt(state, task)
+    assert "UNVERIFIED" in prompt
+    assert "which key submits?" in prompt
+    assert "submit handler body truncated" in prompt
+
+
+def test_prompt_no_unverified_block_when_grounded(tmp_path):
+    # A GROUNDED/greenfield exploration with no open questions adds no noise.
+    from poor_code.domain.session.models import CodeContext, GroundingStatus
+    task = Task(id="t1", title="x", purpose="p",
+                edit_scope=EditScope(editable=("x.py",)), how_to_validate="pytest -q")
+    impl = Implementer(_WriteThenStopLLM(), cwd=tmp_path, tools=_tools())
+    state = SessionState(understanding=CodeContext(
+        grounding=GroundingStatus.GREENFIELD, search_notes="n/a"))
+    assert "UNVERIFIED" not in impl._prompt(state, task)
+
+
 def test_prompt_injects_env_report(tmp_path):
     from poor_code.domain.session.models import EnvReport
     er = EnvReport(ready=True, test_command="python -m pytest -q",

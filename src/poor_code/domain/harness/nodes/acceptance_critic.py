@@ -43,14 +43,21 @@ _SYSTEM = (
     "Set adequate=false ONLY when a check VIOLATES the bar — i.e. you can name a concrete "
     "wrong implementation that passes BECAUSE of a substring match, because only "
     "example/named inputs are tested, or because no boundary input is covered. Put that "
-    "concrete counterexample, and which bar item it breaks, in counterexample. "
-    "Call emit_critique once."
+    "concrete counterexample, and which bar item it breaks, in counterexample.\n"
+    "Set blocking=true when the check is STRUCTURALLY BROKEN — a CORRECT implementation "
+    "CANNOT pass it, or the check itself errors regardless of the implementation (e.g. it "
+    "calls `.value` on a type whose real attribute is `.text`, asserts a hard-coded number "
+    "nobody derived, or uses a message/API the object does not have). A broken check is "
+    "unwinnable: the harness must NOT build against it. This is different from 'gameable' — "
+    "leave blocking=false when the check merely COULD be passed by an elaborate hard-coded "
+    "impl. Call emit_critique once."
 )
 
 
 class _CritiqueOut(BaseModel):
     adequate: bool
     counterexample: str | None = None
+    blocking: bool = False   # check is structurally unwinnable (a correct impl cannot pass)
 
 
 class AcceptanceCritic(AgentNode):
@@ -65,11 +72,25 @@ class AcceptanceCritic(AgentNode):
         if out.adequate:
             return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
         hint = out.counterexample or "Acceptance checks are inadequate; redesign."
-        # Convergence backstop: the gate has already confirmed the spec is well-formed
-        # (runnable, non-prose, cwd-safe). Once we've redesigned CONVERGENCE_CAP times
-        # and the critic still objects, accept it and proceed rather than loop to the
-        # hard budget and abandon — "can you break a finite check set?" is unbounded.
-        if _acceptance_repair_count(ctx.state) >= _CONVERGENCE_CAP:
+        at_cap = _acceptance_repair_count(ctx.state) >= _CONVERGENCE_CAP
+        # A STRUCTURALLY BROKEN spec (a correct impl cannot pass) is unwinnable — it must
+        # NEVER be accepted, no matter the cap: building against it guarantees a doomed run
+        # (the false-completion / 7-rounds-against-`.value` bug). Give the oracle its
+        # redesigns, then ESCALATE rather than ADVANCE if it still can't produce a passable
+        # check (headless auto-answers then abandons — the right outcome for a broken spec).
+        if out.blocking:
+            if at_cap:
+                return NodeResult(verdict=Verdict(
+                    kind=VerdictKind.ESCALATE,
+                    query=("Acceptance spec is still structurally unwinnable after "
+                           f"{_CONVERGENCE_CAP} redesigns — a correct implementation cannot "
+                           f"pass it. Last objection: {hint[:300]}")))
+            return NodeResult(verdict=Verdict(
+                kind=VerdictKind.REPAIR, layer=Layer.ACCEPTANCE, hint=hint))
+        # Merely GAMEABLE (not broken): the gate already confirmed it is well-formed. Once
+        # we've redesigned CONVERGENCE_CAP times and the critic still finds it theoretically
+        # gameable, accept and proceed — "can you break a finite check set?" is unbounded.
+        if at_cap:
             return NodeResult(verdict=Verdict(
                 kind=VerdictKind.ADVANCE,
                 hint=(f"accepted gate-valid acceptance spec after {_CONVERGENCE_CAP} "
