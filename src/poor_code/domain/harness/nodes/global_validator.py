@@ -87,7 +87,7 @@ class GlobalValidator(AgentNode):
         self._failures = failures
         self._changeset = build_changeset(ctx.state)
         out = validate_output(_AnalyzeOut, await self._dispatch(ctx), node=self.name)
-        hint = out.hint or "Global validation failed."
+        hint = out.hint  # required non-empty by _AnalyzeOut (min_length=1)
 
         # Scoped repair: if the analyst pinned a single DONE task as the culprit and we
         # still have scoped budget, reopen ONLY it and bounce to the implement loop —

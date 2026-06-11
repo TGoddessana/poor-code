@@ -72,7 +72,7 @@ class PlanGate(GateNode):
             if len(task.edit_scope.editable) > cls._MAX_EDITABLE:
                 return (f"Task {task.id} edits {len(task.edit_scope.editable)} files — "
                         "too broad; split into patch-sized tasks (<=3 files).")
-            if md and not has_section(md, task.id):
+            if not has_section(md, task.id):  # md is non-empty (guarded above)
                 return (f"Task {task.id} is in the skeleton but not described in plan_md; "
                         f"every skeleton task must have a '## {task.id}:' section.")
         for dep in plan.deps:

@@ -113,3 +113,18 @@ def test_empty_repair_hint_is_synthesized_from_observed():
     verdict = v.parse('{"verdict": "repair_impl", "hint": ""}')
     assert verdict.hint  # must not be empty
     assert "AssertionError" in verdict.hint  # carries the observed failure tail
+
+
+def test_empty_repair_plan_hint_is_also_synthesized():
+    v = Validator(llm=None)
+    v._observed = [("pytest passes", False, "E   AssertionError: boom")]
+    verdict = v.parse('{"verdict": "repair_plan", "hint": ""}')
+    assert "AssertionError" in verdict.hint  # repair_plan branch synthesizes too
+
+
+def test_synth_hint_omits_trailing_colon_when_tail_empty():
+    v = Validator(llm=None)
+    v._observed = [("build succeeds", False, "")]
+    verdict = v.parse('{"verdict": "repair_impl", "hint": ""}')
+    assert "build succeeds" in verdict.hint
+    assert "build succeeds:" not in verdict.hint  # no dangling colon

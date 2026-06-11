@@ -121,7 +121,7 @@ class Validator(AgentNode):
         """A repair verdict with no hint wastes a retry. Synthesize one
         deterministically from the failing OBSERVED checks (their tails carry the
         real error) so the implementer gets something actionable."""
-        fails = [f"{crit}: {tail}".strip()
+        fails = [f"{crit}: {tail}".strip() if tail else crit
                  for crit, passed, tail in self._observed if not passed]
         return ("Failing checks:\n" + "\n".join(fails)) if fails else \
             "Validation failed; fix the implementation."
