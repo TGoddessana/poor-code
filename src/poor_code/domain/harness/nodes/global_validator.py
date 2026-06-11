@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _LLMClientLike
 from poor_code.domain.harness.nodes.execution import run_shell
+from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.harness.node import validate_output
 from poor_code.domain.session.models import (
@@ -117,11 +118,17 @@ class GlobalValidator(AgentNode):
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         fails = "\n\n".join(
-            f"[{tid} exit {code}]\n{out[:1500]}" for tid, code, out in self._failures)
+            f"[{tid} exit {code}]\n{clamp_tool_output(out)}"
+            for tid, code, out in self._failures)
+        # Render EACH task's diff under its own clamp so a later task is never wholly
+        # dropped by a single aggregate cut (per_task already exists on the ChangeSet).
+        changes = "\n\n".join(
+            f"# task {tid}\n{clamp_tool_output(diff)}"
+            for tid, diff in self._changeset.per_task) or "(none)"
         return [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": (
-                f"AGGREGATE CHANGES:\n{self._changeset.aggregate_diff[:4000] or '(none)'}\n\n"
+                f"AGGREGATE CHANGES (per task):\n{changes}\n\n"
                 f"FAILING VALIDATIONS:\n{fails or '(none)'}")},
         ]
 

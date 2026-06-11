@@ -89,3 +89,18 @@ async def test_global_validator_escalates_at_fixup_cap(tmp_path):
 def test_global_validator_requires_nonempty_hint():
     with pytest.raises(StructuredOutputError):
         validate_output(_AnalyzeOut, '{"culprit_task_id": "t1"}', node="global_validator")
+
+
+# ── B4: per-task diffs so no later task is dropped by an aggregate cut ────────
+
+def test_build_messages_keeps_every_task_diff():
+    from pathlib import Path
+    from poor_code.domain.session.models import ChangeSet
+    gv = GlobalValidator(llm=None, cwd=Path("."))
+    gv._failures = [("acceptance:x", 1, "boom")]
+    gv._changeset = ChangeSet(
+        aggregate_diff="huge",
+        per_task=(("t1", "A" * 5000), ("t2", "ZLAST-TASK-MARKER")))
+    msg = gv.build_messages(state=None)[-1]["content"]
+    assert "ZLAST-TASK-MARKER" in msg   # last task survives (not dropped by a 4000-char aggregate cut)
+    assert "t1" in msg and "t2" in msg
