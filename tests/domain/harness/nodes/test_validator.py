@@ -103,3 +103,13 @@ def test_missing_verdict_is_rejected():
     v = Validator(llm=None)
     with pytest.raises(Exception):  # StructuredOutputError
         v.parse('{"hint": "x"}')
+
+
+# ── A2: synthesize repair hint from OBSERVED when model omits it ──────────────
+
+def test_empty_repair_hint_is_synthesized_from_observed():
+    v = Validator(llm=None)
+    v._observed = [("pytest passes", False, "E   AssertionError: 1 != 2")]
+    verdict = v.parse('{"verdict": "repair_impl", "hint": ""}')
+    assert verdict.hint  # must not be empty
+    assert "AssertionError" in verdict.hint  # carries the observed failure tail

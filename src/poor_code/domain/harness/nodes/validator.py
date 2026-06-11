@@ -110,10 +110,21 @@ class Validator(AgentNode):
     def parse(self, args_json: str) -> Verdict:
         out = validate_output(_JudgeOut, args_json, node=self.name)
         if out.verdict == "repair_impl":
-            return Verdict(kind=VerdictKind.REPAIR, layer=Layer.IMPLEMENTATION, hint=out.hint)
+            return Verdict(kind=VerdictKind.REPAIR, layer=Layer.IMPLEMENTATION,
+                           hint=out.hint or self._synth_hint())
         if out.verdict == "repair_plan":
-            return Verdict(kind=VerdictKind.REPAIR, layer=Layer.PLAN, hint=out.hint)
+            return Verdict(kind=VerdictKind.REPAIR, layer=Layer.PLAN,
+                           hint=out.hint or self._synth_hint())
         return Verdict(kind=VerdictKind.ADVANCE)
+
+    def _synth_hint(self) -> str:
+        """A repair verdict with no hint wastes a retry. Synthesize one
+        deterministically from the failing OBSERVED checks (their tails carry the
+        real error) so the implementer gets something actionable."""
+        fails = [f"{crit}: {tail}".strip()
+                 for crit, passed, tail in self._observed if not passed]
+        return ("Failing checks:\n" + "\n".join(fails)) if fails else \
+            "Validation failed; fix the implementation."
 
     @staticmethod
     def _active_task(state: SessionState):
