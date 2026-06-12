@@ -29,3 +29,9 @@ def test_implement_loop_registers_all_inner_nodes():
     for n in ("task_selector", "composer", "implementer", "eng_gate", "validator",
               "validation_runner", "failure_analyst", "completion_gate"):
         assert cg._graph.nodes.get(n) is not None
+
+
+def test_implementer_has_read_and_search_tools():
+    from poor_code.domain.harness.subgraphs.implement_loop import _implementer_tools
+    names = {s["function"]["name"] for s in _implementer_tools().schemas()}
+    assert {"read", "grep", "glob", "list", "write", "edit", "bash"} <= names

@@ -143,3 +143,9 @@ def test_prompt_renders_both_snippet_and_previous_attempt_on_retry():
     assert "PREVIOUS ATTEMPT" in prompt           # retry block present
     assert "+ broken line" in prompt              # prior diff present
     assert prompt.index("ground truth") < prompt.index("PREVIOUS ATTEMPT")  # RELEVANT CODE precedes it
+
+
+def test_system_prompt_points_to_read_tool_not_bash_cat():
+    from poor_code.domain.harness.nodes.implementer import _SYSTEM
+    assert "cat/sed/grep" not in _SYSTEM        # old bash-reading phrasing gone
+    assert "read/grep tools" in _SYSTEM         # implementer pointed at the real tools
