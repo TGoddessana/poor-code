@@ -36,7 +36,9 @@ _SYSTEM = (
     "- plan_md: a markdown plan. One '## <task-id>: <files> — <what & why>' section per task. "
     "Describe WHAT to implement and WHICH acceptance criteria it targets. Prose is fine; do NOT "
     "emit JSON inside plan_md.\n"
-    "- tasks: for each section, {id, title, editable:[files it edits, 1-3], depends_on:[task ids]}.\n"
+    "- tasks: for each section, {id, title, purpose, editable:[files it edits, 1-3], "
+    "depends_on:[task ids]}. purpose is ONE line: what this task delivers and which "
+    "acceptance criterion it targets.\n"
     "RULES: one task = one patch-sized deliverable (default FEWER tasks; merge when unsure). Every "
     "task's editable must be a real file the task touches. Do not invent files outside the chosen "
     "stack. The implementer is an agent and will derive concrete steps itself — you do NOT write "
@@ -47,6 +49,7 @@ _SYSTEM = (
 class _SkeletonTaskOut(BaseModel):
     id: str
     title: str = ""
+    purpose: str = ""
     editable: list[str] = []
     depends_on: list[str] = []
 
@@ -125,7 +128,7 @@ class Planner(AgentNode):
             Task(
                 id=rid,
                 title=t.title or rid,
-                purpose="",
+                purpose=t.purpose or "",
                 edit_scope=EditScope(editable=tuple(dict.fromkeys(p for p in t.editable if p))),
             )
             for t, rid in resolved
