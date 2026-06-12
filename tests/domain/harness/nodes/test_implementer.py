@@ -252,3 +252,24 @@ def test_latest_round_gets_bigger_budget_than_history():
     latest = clamp_tool_output(big, head=_LATEST_HEAD, tail=_LATEST_TAIL)
     history = clamp_tool_output(big)
     assert len(latest) > len(history)   # the latest round preserves more than history
+
+
+def test_prompt_omits_empty_purpose_and_validation(tmp_path):
+    task = Task(id="t1", title="x", purpose="",
+                edit_scope=EditScope(editable=("x.py",)), how_to_validate="")
+    impl = Implementer(_WriteThenStopLLM(), cwd=tmp_path, tools=_tools())
+    prompt = impl._prompt(SessionState(), task)
+    assert "PURPOSE:" not in prompt
+    # The empty label line is gone; the bare word "VALIDATION" still appears in the
+    # always-present orientation text (render_position), which is out of scope here.
+    assert "VALIDATION (make this pass):" not in prompt
+    assert "TASK: x" in prompt          # the task header itself still renders
+
+
+def test_prompt_renders_purpose_and_validation_when_present(tmp_path):
+    task = Task(id="t1", title="x", purpose="serve fib over HTTP",
+                edit_scope=EditScope(editable=("x.py",)), how_to_validate="pytest -q")
+    impl = Implementer(_WriteThenStopLLM(), cwd=tmp_path, tools=_tools())
+    prompt = impl._prompt(SessionState(), task)
+    assert "PURPOSE: serve fib over HTTP" in prompt
+    assert "VALIDATION (make this pass): pytest -q" in prompt

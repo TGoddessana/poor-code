@@ -243,12 +243,15 @@ class Implementer:
         accept = render_acceptance(state)
         ledger = render_build_ledger(state)
         task_md = task_section(state.plan, task.id) if state.plan else task.title
+        purpose = f"PURPOSE: {task.purpose}\n" if task.purpose else ""
+        validation = (f"VALIDATION (make this pass): {task.how_to_validate}"
+                      if task.how_to_validate else "")
         return (f"ACCEPTANCE SPEC (full target; your slice is THIS TASK below):\n{accept}\n\n"
                 f"COMPLETED WORK (ledger):\n{ledger}\n\n"
                 f"{header}"
-                f"TASK: {task.title}\nPURPOSE: {task.purpose}\n"
+                f"TASK: {task.title}\n{purpose}"
                 f"DETAILS:\n{task_md}\nEDITABLE PATHS: {scope}\n"
-                f"VALIDATION (make this pass): {task.how_to_validate}"
+                f"{validation}"
                 f"{self._render_steps(task)}{refs}{api}{unknowns}{feedback}{hint}"
                 f"{steering_block(state.steering_notes)}"
                 f"{driver_feedback_block(state, self.name)}")
