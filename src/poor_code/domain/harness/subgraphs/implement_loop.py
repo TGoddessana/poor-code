@@ -20,6 +20,10 @@ from poor_code.domain.session.models import Cursor, Layer, Phase
 from poor_code.domain.tool.bash import BashTool
 from poor_code.domain.tool.edit import EditTool
 from poor_code.domain.tool.write import WriteTool
+from poor_code.domain.tool.read import ReadTool
+from poor_code.domain.tool.grep import GrepTool
+from poor_code.domain.tool.glob import GlobTool
+from poor_code.domain.tool.list import ListTool
 from poor_code.domain.tool.registry import ToolRegistry
 
 # inner forward edges — copied verbatim from route.FORWARD for these nodes, EXCEPT
@@ -41,13 +45,22 @@ _INNER_FORWARD = {
 }
 
 
+def _implementer_tools() -> ToolRegistry:
+    """The implementer's toolset. It writes/edits/runs (write/edit/bash) AND reads/
+    searches structurally (read/grep/glob/list) — same read tools the explorer has,
+    so it never has to `cat` whole files through bash."""
+    return ToolRegistry([
+        WriteTool(), EditTool(), BashTool(),
+        ReadTool(), GrepTool(), GlobTool(), ListTool(),
+    ])
+
+
 def build_implement_loop(*, llm, cwd) -> CompiledGraph:
     cwd = Path(cwd)   # Implementer/ValidationRunner expect a Path (build_default_registry passes project_map.cwd)
     reg = NodeRegistry()
     reg.register(TaskSelector())
     reg.register(Composer())
-    reg.register(Implementer(
-        llm, cwd=cwd, tools=ToolRegistry([WriteTool(), EditTool(), BashTool()])))
+    reg.register(Implementer(llm, cwd=cwd, tools=_implementer_tools()))
     reg.register(EngGate())
     reg.register(Validator(llm, cwd=cwd))
     reg.register(ValidationRunner(cwd=cwd))

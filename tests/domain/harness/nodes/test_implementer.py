@@ -273,3 +273,125 @@ def test_prompt_renders_purpose_and_validation_when_present(tmp_path):
     prompt = impl._prompt(SessionState(), task)
     assert "PURPOSE: serve fib over HTTP" in prompt
     assert "VALIDATION (make this pass): pytest -q" in prompt
+
+
+from poor_code.domain.harness.nodes.implementer import _NUDGE
+
+
+class _RepeatBashLLM:
+    """Runs the SAME bash command every round (pure repeat). Records the messages
+    list it was handed at the start of each round so tests can see injected nudges."""
+    def __init__(self, rounds=4):
+        self.calls = 0
+        self.rounds = rounds
+        self.seen: list[list[str]] = []
+    async def stream(self, messages, tools, response_format=None):
+        self.seen.append([str(m.get("content", "")) for m in messages])
+        self.calls += 1
+        if self.calls > self.rounds:
+            yield TextDelta(text="done"); yield FinishedReason(reason="stop"); return
+        yield ToolCallStarted(call_id=f"b{self.calls}", name="bash")
+        yield ToolCallInputDelta(call_id=f"b{self.calls}", json_delta='{"command":"echo hi"}')
+        yield ToolCallEnded(call_id=f"b{self.calls}")
+        yield FinishedReason(reason="tool_calls")
+
+
+class _ProgressBashLLM(_RepeatBashLLM):
+    """Different bash command each round → no repeat, no no-op → no nudge."""
+    async def stream(self, messages, tools, response_format=None):
+        self.seen.append([str(m.get("content", "")) for m in messages])
+        self.calls += 1
+        if self.calls > self.rounds:
+            yield TextDelta(text="done"); yield FinishedReason(reason="stop"); return
+        yield ToolCallStarted(call_id=f"b{self.calls}", name="bash")
+        yield ToolCallInputDelta(call_id=f"b{self.calls}", json_delta='{"command":"echo %d"}' % self.calls)
+        yield ToolCallEnded(call_id=f"b{self.calls}")
+        yield FinishedReason(reason="tool_calls")
+
+
+class _RepeatWriteLLM(_RepeatBashLLM):
+    """Writes IDENTICAL content every round → after round 1 the file is unchanged,
+    so rounds 2+ are no-op writes (tree hash stays put)."""
+    async def stream(self, messages, tools, response_format=None):
+        self.seen.append([str(m.get("content", "")) for m in messages])
+        self.calls += 1
+        if self.calls > self.rounds:
+            yield TextDelta(text="done"); yield FinishedReason(reason="stop"); return
+        yield ToolCallStarted(call_id=f"w{self.calls}", name="write")
+        yield ToolCallInputDelta(call_id=f"w{self.calls}", json_delta='{"path":"out.txt","content":"same"}')
+        yield ToolCallEnded(call_id=f"w{self.calls}")
+        yield FinishedReason(reason="tool_calls")
+
+
+def _seen_has_nudge(llm) -> bool:
+    return any(_NUDGE in c for round_msgs in llm.seen for c in round_msgs)
+
+
+def _seen_nudge_count(llm) -> int:
+    return sum(1 for c in (llm.seen[-1] if llm.seen else []) if _NUDGE in c)
+
+
+@pytest.mark.asyncio
+async def test_repeated_tool_call_injects_nudge(tmp_path):
+    llm = _RepeatBashLLM(rounds=4)
+    await Implementer(llm, cwd=tmp_path, tools=_tools()).run(
+        NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert _seen_has_nudge(llm)
+
+
+@pytest.mark.asyncio
+async def test_repeated_write_injects_nudge(tmp_path):
+    llm = _RepeatWriteLLM(rounds=4)
+    await Implementer(llm, cwd=tmp_path, tools=_tools()).run(
+        NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert _seen_has_nudge(llm)
+
+
+class _NoopEditLLM(_RepeatBashLLM):
+    """R1 writes a file; R2+ issue edits with DISTINCT args whose old_string never
+    matches → the edit errors, the file is unchanged → no-op detected via the TREE
+    branch (sig differs every round, so the repeat branch never fires)."""
+    async def stream(self, messages, tools, response_format=None):
+        self.seen.append([str(m.get("content", "")) for m in messages])
+        self.calls += 1
+        if self.calls > self.rounds:
+            yield TextDelta(text="done"); yield FinishedReason(reason="stop"); return
+        if self.calls == 1:
+            yield ToolCallStarted(call_id="w1", name="write")
+            yield ToolCallInputDelta(call_id="w1", json_delta='{"path":"out.txt","content":"AAA"}')
+            yield ToolCallEnded(call_id="w1")
+        else:
+            yield ToolCallStarted(call_id=f"e{self.calls}", name="edit")
+            yield ToolCallInputDelta(
+                call_id=f"e{self.calls}",
+                json_delta='{"path":"out.txt","old_string":"ZZZ%d","new_string":"QQQ%d"}'
+                           % (self.calls, self.calls))
+            yield ToolCallEnded(call_id=f"e{self.calls}")
+        yield FinishedReason(reason="tool_calls")
+
+
+@pytest.mark.asyncio
+async def test_noop_edit_injects_nudge_via_tree_branch(tmp_path):
+    # distinct args each round → repeat branch never fires; the failed edit leaves the
+    # file unchanged → only the (wrote and cur_tree == last_tree) no-op branch can nudge.
+    llm = _NoopEditLLM(rounds=4)
+    await Implementer(llm, cwd=tmp_path, tools=_tools()).run(
+        NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert _seen_has_nudge(llm)
+
+
+@pytest.mark.asyncio
+async def test_real_progress_does_not_nudge(tmp_path):
+    llm = _ProgressBashLLM(rounds=4)
+    await Implementer(llm, cwd=tmp_path, tools=_tools()).run(
+        NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert not _seen_has_nudge(llm)
+
+
+@pytest.mark.asyncio
+async def test_nudge_is_deduped_not_every_round(tmp_path):
+    llm = _RepeatBashLLM(rounds=4)
+    await Implementer(llm, cwd=tmp_path, tools=_tools()).run(
+        NodeContext(state=_state(), cancel=asyncio.Event()))
+    n = _seen_nudge_count(llm)
+    assert 1 <= n < 4

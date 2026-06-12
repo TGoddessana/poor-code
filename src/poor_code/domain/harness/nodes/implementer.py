@@ -1,5 +1,5 @@
 """implementer [A] — the only node that mutates the working tree. Runs a
-write/edit/bash tool loop (mirrors ExploringNode's loop), then captures the
+read/write/edit/bash tool loop (mirrors ExploringNode's loop), then captures the
 result as a ChangeRecord via the shadow-git snapshot (decision 2). Append vs
 in-place refine follows decision 1: refine the latest attempt while it has no
 run_result; start a fresh attempt after a real runner failure."""
@@ -30,13 +30,19 @@ MAX_ITERATIONS = 50
 # bigger budget; older rounds are demoted to the standard clamp to keep re-sends bounded.
 _LATEST_HEAD = 4000
 _LATEST_TAIL = 4000
+_NUDGE = (
+    "You repeated the same tool call, or your last write/edit changed no file (no-op). "
+    "Re-read the current state with the read tool and try a DIFFERENT fix. If VALIDATION "
+    "already passes, stop calling tools."
+)
 
 _SYSTEM = (
-    "You are the Implementer. Make the change described by the TASK by calling "
-    "write/edit/bash. WHEN a RELEVANT CODE section is present, treat it as ground "
+    "You are the Implementer. Make the change described by the TASK using your tools: "
+    "write/edit to change files, read/grep/glob/list to look first, bash to run commands. "
+    "WHEN a RELEVANT CODE section is present, treat it as ground "
     "truth — edit against it, do not retype from memory. If it is absent or you need "
-    "more than it shows, READ what you need with bash (cat/sed/grep) before writing. "
-    "Write ONLY inside EDITABLE PATHS.\n"
+    "more than it shows, READ what you need with the read/grep tools before writing "
+    "(bash is for running commands). Write ONLY inside EDITABLE PATHS.\n"
     "RULES:\n"
     "1. Stay strictly inside EDITABLE PATHS. Never touch anything outside them.\n"
     "2. Your goal is for the VALIDATION command to pass. NO stubs, NO skeletons, "
@@ -120,6 +126,9 @@ class Implementer:
         full_output: dict[str, str] = {}          # cid -> full tool output (for re-clamping)
         tool_msg: dict[str, dict[str, Any]] = {}  # cid -> the tool message dict in `messages`
         prev_round: list[str] = []                # cids appended in the previous round
+        last_tree = await self._snapshot.baseline()   # tree hash before this round
+        prev_sig: tuple[tuple[str, str], ...] | None = None
+        nudged_last = False
         for _ in range(MAX_ITERATIONS):
             if ctx.cancel.is_set():
                 raise asyncio.CancelledError(f"{self.name} cancelled")
@@ -158,6 +167,18 @@ class Implementer:
                 tool_msg[cid] = msg
                 round_cids.append(cid)
             prev_round = round_cids
+            # B: repetition / no-op guard — nudge (never break) when the model spins.
+            cur_tree = await self._snapshot.baseline()
+            sig = tuple((name, args) for _, name, args in calls)  # raw-arg identity; reformatted repeats may slip, the tree branch backstops writes
+            wrote = any(name in ("write", "edit") for _, name, _ in calls)
+            stuck = sig == prev_sig or (wrote and cur_tree == last_tree)
+            if stuck and not nudged_last:
+                messages.append({"role": "user", "content": _NUDGE})
+                nudged_last = True
+            else:
+                nudged_last = False
+            prev_sig = sig
+            last_tree = cur_tree
 
     async def _stream_round(self, messages, sink=None):
         text = ""
@@ -209,8 +230,8 @@ class Implementer:
             api = ("\nREAL APIs (use these exact attributes/methods; do NOT guess from "
                    f"memory):\n{self._api_digest}")
         # Unresolved questions + the explorer's "couldn't fully see this" note. Carried
-        # forward so a gap the interviewer/explorer flagged drives a READ (via bash) here
-        # instead of evaporating into a blind guess.
+        # forward so a gap the interviewer/explorer flagged drives a READ (via the read
+        # tool) here instead of evaporating into a blind guess.
         unknowns = ""
         oq = state.requirement.open_questions if state.requirement is not None else ()
         cc = state.understanding
@@ -220,8 +241,8 @@ class Implementer:
             parts = [f"  - open question: {q}" for q in oq]
             if notes:
                 parts.append(f"  - exploration was incomplete: {notes}")
-            unknowns = ("\nUNVERIFIED — confirm by READING the file (bash: sed/cat) before "
-                        "coding against an assumption:\n" + "\n".join(parts))
+            unknowns = ("\nUNVERIFIED — confirm by READING the file (use the read/grep tools) "
+                        "before coding against an assumption:\n" + "\n".join(parts))
         hint = f"\nREPAIR HINT: {state.repair_hint}" if state.repair_hint else ""
         env = ""
         if state.env_report is not None and (
