@@ -30,6 +30,11 @@ MAX_ITERATIONS = 50
 # bigger budget; older rounds are demoted to the standard clamp to keep re-sends bounded.
 _LATEST_HEAD = 4000
 _LATEST_TAIL = 4000
+_NUDGE = (
+    "You repeated the same tool call, or your last write/edit changed no file (no-op). "
+    "Re-read the current state with the read tool and try a DIFFERENT fix. If VALIDATION "
+    "already passes, stop calling tools."
+)
 
 _SYSTEM = (
     "You are the Implementer. Make the change described by the TASK by calling "
@@ -120,6 +125,9 @@ class Implementer:
         full_output: dict[str, str] = {}          # cid -> full tool output (for re-clamping)
         tool_msg: dict[str, dict[str, Any]] = {}  # cid -> the tool message dict in `messages`
         prev_round: list[str] = []                # cids appended in the previous round
+        last_tree = await self._snapshot.baseline()   # tree hash before this round
+        prev_sig: tuple[tuple[str, str], ...] | None = None
+        nudged_last = False
         for _ in range(MAX_ITERATIONS):
             if ctx.cancel.is_set():
                 raise asyncio.CancelledError(f"{self.name} cancelled")
@@ -158,6 +166,18 @@ class Implementer:
                 tool_msg[cid] = msg
                 round_cids.append(cid)
             prev_round = round_cids
+            # B: repetition / no-op guard — nudge (never break) when the model spins.
+            cur_tree = await self._snapshot.baseline()
+            sig = tuple((name, args) for _, name, args in calls)
+            wrote = any(name in ("write", "edit") for _, name, _ in calls)
+            stuck = sig == prev_sig or (wrote and cur_tree == last_tree)
+            if stuck and not nudged_last:
+                messages.append({"role": "user", "content": _NUDGE})
+                nudged_last = True
+            else:
+                nudged_last = False
+            prev_sig = sig
+            last_tree = cur_tree
 
     async def _stream_round(self, messages, sink=None):
         text = ""
