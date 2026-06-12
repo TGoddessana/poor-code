@@ -123,3 +123,23 @@ def test_prompt_no_previous_attempt_block_on_first_try():
         plan=Plan(tasks=(task,)),
         cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="implementer", task_id="t2"))
     assert "PREVIOUS ATTEMPT" not in _node()._prompt(state, task)
+
+
+def test_prompt_renders_both_snippet_and_previous_attempt_on_retry():
+    # The real retry state: context bodies AND the prior failed diff both present.
+    failed = Attempt(id="t2-a1",
+                     patch=ChangeRecord(files=("server.py",), diff="- old\n+ broken line"),
+                     run_result=ValidationResult(command="true", exit_code=1, passed=False))
+    task = Task(id="t2", title="x", purpose="p",
+                edit_scope=EditScope(editable=("server.py",)),
+                how_to_validate="true", status=TaskStatus.ACTIVE, attempts=(failed,),
+                context=TaskContext(snippet="--- server.py [EDITABLE] ---\ndef fib(n): return n"))
+    state = SessionState(
+        plan=Plan(tasks=(task,)),
+        cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="implementer", task_id="t2"))
+    prompt = _node()._prompt(state, task)
+    assert "ground truth" in prompt               # snippet block present
+    assert "def fib(n): return n" in prompt       # body present
+    assert "PREVIOUS ATTEMPT" in prompt           # retry block present
+    assert "+ broken line" in prompt              # prior diff present
+    assert prompt.index("ground truth") < prompt.index("PREVIOUS ATTEMPT")  # RELEVANT CODE precedes it
