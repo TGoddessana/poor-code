@@ -33,8 +33,10 @@ _LATEST_TAIL = 4000
 
 _SYSTEM = (
     "You are the Implementer. Make the change described by the TASK by calling "
-    "write/edit/bash. You are NOT a reader — relevant code arrives in RELEVANT "
-    "CODE; do not expect to grep the tree.\n"
+    "write/edit/bash. Relevant file contents are provided under RELEVANT CODE as "
+    "ground truth — edit against them, do not retype from memory. If you need more "
+    "than is shown, READ it yourself with bash (cat/sed/grep); write ONLY inside "
+    "EDITABLE PATHS.\n"
     "RULES:\n"
     "1. Stay strictly inside EDITABLE PATHS. Never touch anything outside them.\n"
     "2. Your goal is for the VALIDATION command to pass. NO stubs, NO skeletons, "
@@ -190,10 +192,14 @@ class Implementer:
     def _prompt(self, state: SessionState, task) -> str:
         scope = ", ".join(task.edit_scope.editable) or "(none)"
         refs = ""
-        if task.context is not None and task.context.refs:
+        ctxt = task.context
+        if ctxt is not None and ctxt.snippet:
+            refs = ("\nRELEVANT CODE (ground truth — edit against THIS; do NOT retype "
+                    "from memory):\n" + ctxt.snippet)
+        elif ctxt is not None and ctxt.refs:
             refs = "\nRELEVANT CODE:\n" + "\n".join(
                 f"  - {r.file}" + ("" if r.symbol is None else f"::{r.symbol}")
-                for r in task.context.refs)
+                for r in ctxt.refs)
         feedback = ""
         if state.feedback.entries:
             feedback = "\nPAST FAILURES TO AVOID:\n" + "\n".join(
@@ -246,13 +252,20 @@ class Implementer:
         purpose = f"PURPOSE: {task.purpose}\n" if task.purpose else ""
         validation = (f"VALIDATION (make this pass): {task.how_to_validate}"
                       if task.how_to_validate else "")
+        prev = ""
+        last = task.attempts[-1] if task.attempts else None
+        if (last is not None and last.run_result is not None
+                and not last.run_result.passed
+                and last.patch is not None and last.patch.diff):
+            prev = ("\nPREVIOUS ATTEMPT (failed validation — change the approach, do NOT "
+                    "resubmit this):\n" + clamp_tool_output(last.patch.diff))
         return (f"ACCEPTANCE SPEC (full target; your slice is THIS TASK below):\n{accept}\n\n"
                 f"COMPLETED WORK (ledger):\n{ledger}\n\n"
                 f"{header}"
                 f"TASK: {task.title}\n{purpose}"
                 f"DETAILS:\n{task_md}\nEDITABLE PATHS: {scope}\n"
                 f"{validation}"
-                f"{self._render_steps(task)}{refs}{api}{unknowns}{feedback}{hint}"
+                f"{self._render_steps(task)}{refs}{api}{unknowns}{feedback}{prev}{hint}"
                 f"{steering_block(state.steering_notes)}"
                 f"{driver_feedback_block(state, self.name)}")
 
