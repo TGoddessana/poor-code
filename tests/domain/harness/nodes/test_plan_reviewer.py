@@ -138,3 +138,34 @@ def test_reviewer_prompt_lists_steps_and_new_pathologies():
                 how_to_validate="pytest -q", steps=(step,))
     msgs = PlanReviewer(FakeLLM({"ok": True})).build_messages(_state(Plan(tasks=(task,))))
     assert "clear_layers" in msgs[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_reviewer_prompt_carries_plan_narrative():
+    llm = FakeLLM({"ok": True})
+    plan = Plan(
+        tasks=(Task(id="t1", title="server", purpose="serve",
+                    edit_scope=EditScope(editable=("server.py",))),),
+        plan_md="## t1: server.py — serve fibonacci over HTTP on :3000",
+    )
+    await PlanReviewer(llm).run(NodeContext(_state(plan), cancel=asyncio.Event()))
+    prompt = llm.seen_messages[-1]["content"]
+    assert "PLAN NARRATIVE" in prompt
+    assert "serve fibonacci over HTTP" in prompt
+
+
+def test_reviewer_system_prompt_drops_dead_field_refs():
+    from poor_code.domain.harness.nodes.plan_reviewer import _SYSTEM
+    low = _SYSTEM.lower()
+    assert "file_plan" not in low            # dead field reference removed
+    assert "whose steps" not in low          # dead steps reference removed
+    # pathology concepts survive, re-anchored to live signals:
+    assert "phantom file" in low
+    assert "type-inconsistency" in low or "inconsistent" in low
+    assert "coverage" in low
+
+
+def test_reviewer_prompt_drops_dead_file_plan_block():
+    llm = FakeLLM({"ok": True})
+    msgs = PlanReviewer(llm).build_messages(_state(_plan()))
+    assert "FILE PLAN" not in msgs[-1]["content"]
