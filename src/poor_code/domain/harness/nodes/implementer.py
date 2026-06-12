@@ -168,7 +168,7 @@ class Implementer:
             prev_round = round_cids
             # B: repetition / no-op guard — nudge (never break) when the model spins.
             cur_tree = await self._snapshot.baseline()
-            sig = tuple((name, args) for _, name, args in calls)
+            sig = tuple((name, args) for _, name, args in calls)  # raw-arg identity; reformatted repeats may slip, the tree branch backstops writes
             wrote = any(name in ("write", "edit") for _, name, _ in calls)
             stuck = sig == prev_sig or (wrote and cur_tree == last_tree)
             if stuck and not nudged_last:

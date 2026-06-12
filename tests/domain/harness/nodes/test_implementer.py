@@ -340,8 +340,41 @@ async def test_repeated_tool_call_injects_nudge(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_no_op_write_injects_nudge(tmp_path):
+async def test_repeated_write_injects_nudge(tmp_path):
     llm = _RepeatWriteLLM(rounds=4)
+    await Implementer(llm, cwd=tmp_path, tools=_tools()).run(
+        NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert _seen_has_nudge(llm)
+
+
+class _NoopEditLLM(_RepeatBashLLM):
+    """R1 writes a file; R2+ issue edits with DISTINCT args whose old_string never
+    matches → the edit errors, the file is unchanged → no-op detected via the TREE
+    branch (sig differs every round, so the repeat branch never fires)."""
+    async def stream(self, messages, tools, response_format=None):
+        self.seen.append([str(m.get("content", "")) for m in messages])
+        self.calls += 1
+        if self.calls > self.rounds:
+            yield TextDelta(text="done"); yield FinishedReason(reason="stop"); return
+        if self.calls == 1:
+            yield ToolCallStarted(call_id="w1", name="write")
+            yield ToolCallInputDelta(call_id="w1", json_delta='{"path":"out.txt","content":"AAA"}')
+            yield ToolCallEnded(call_id="w1")
+        else:
+            yield ToolCallStarted(call_id=f"e{self.calls}", name="edit")
+            yield ToolCallInputDelta(
+                call_id=f"e{self.calls}",
+                json_delta='{"path":"out.txt","old_string":"ZZZ%d","new_string":"QQQ%d"}'
+                           % (self.calls, self.calls))
+            yield ToolCallEnded(call_id=f"e{self.calls}")
+        yield FinishedReason(reason="tool_calls")
+
+
+@pytest.mark.asyncio
+async def test_noop_edit_injects_nudge_via_tree_branch(tmp_path):
+    # distinct args each round → repeat branch never fires; the failed edit leaves the
+    # file unchanged → only the (wrote and cur_tree == last_tree) no-op branch can nudge.
+    llm = _NoopEditLLM(rounds=4)
     await Implementer(llm, cwd=tmp_path, tools=_tools()).run(
         NodeContext(state=_state(), cancel=asyncio.Event()))
     assert _seen_has_nudge(llm)
