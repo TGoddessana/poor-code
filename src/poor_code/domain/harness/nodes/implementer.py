@@ -1,5 +1,5 @@
 """implementer [A] — the only node that mutates the working tree. Runs a
-write/edit/bash tool loop (mirrors ExploringNode's loop), then captures the
+read/write/edit/bash tool loop (mirrors ExploringNode's loop), then captures the
 result as a ChangeRecord via the shadow-git snapshot (decision 2). Append vs
 in-place refine follows decision 1: refine the latest attempt while it has no
 run_result; start a fresh attempt after a real runner failure."""
@@ -37,8 +37,9 @@ _NUDGE = (
 )
 
 _SYSTEM = (
-    "You are the Implementer. Make the change described by the TASK by calling "
-    "write/edit/bash. WHEN a RELEVANT CODE section is present, treat it as ground "
+    "You are the Implementer. Make the change described by the TASK using your tools: "
+    "write/edit to change files, read/grep/glob/list to look first, bash to run commands. "
+    "WHEN a RELEVANT CODE section is present, treat it as ground "
     "truth — edit against it, do not retype from memory. If it is absent or you need "
     "more than it shows, READ what you need with the read/grep tools before writing "
     "(bash is for running commands). Write ONLY inside EDITABLE PATHS.\n"
