@@ -237,3 +237,28 @@ async def test_planner_prompt_teaches_cohesion_not_behavior_split():
     assert "fewer" in system                   # bias to merge
     assert "merge" in system                   # explicit merge instruction
     assert "plan_md" in system                 # markdown-first design
+
+
+@pytest.mark.asyncio
+async def test_planner_parses_purpose_into_task():
+    payload = {"tasks": [
+        {"id": "t1", "title": "add f",
+         "purpose": "deliver the fib endpoint; targets 'GET /fib/10 returns 55'",
+         "editable": ["server.py"], "depends_on": []}]}
+    res = await Planner(FakeLLM(payload), project_map=_map()).run(
+        NodeContext(_state(), cancel=asyncio.Event()))
+    assert "fib endpoint" in res.output.tasks[0].purpose
+
+
+@pytest.mark.asyncio
+async def test_planner_purpose_defaults_empty_when_omitted():
+    # Older-shaped payloads without `purpose` must still parse (purpose -> "").
+    payload = {"tasks": [{"id": "t1", "title": "x", "editable": ["x.py"], "depends_on": []}]}
+    res = await Planner(FakeLLM(payload), project_map=_map()).run(
+        NodeContext(_state(), cancel=asyncio.Event()))
+    assert res.output.tasks[0].purpose == ""
+
+
+def test_planner_system_prompt_requests_purpose():
+    from poor_code.domain.harness.nodes.planner import _SYSTEM
+    assert "purpose" in _SYSTEM.lower()

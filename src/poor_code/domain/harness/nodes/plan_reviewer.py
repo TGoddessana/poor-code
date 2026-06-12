@@ -37,12 +37,12 @@ _SYSTEM = (
     "ask for (e.g. a package.json in a Python project).\n"
     "3. DESTRUCTIVE ORDERING — a task writes before the code it depends on exists, "
     "or puts a test ahead of its implementation so it risks clobbering files.\n"
-    "4. PHANTOM FILE — a task targets a file absent from file_plan or from the "
-    "chosen stack/environment.\n"
-    "5. TYPE-INCONSISTENCY — a step references a symbol named differently from where "
-    "another step defines it (e.g. clear_layers() defined but clearLayers() called), "
-    "or uses a function no step defines.\n"
-    "6. COVERAGE GAP — an Acceptance check has no task whose steps would satisfy it.\n"
+    "4. PHANTOM FILE — a task's editable file does not fit the chosen stack/environment "
+    "(e.g. a .js file when node is NOT FOUND).\n"
+    "5. TYPE-INCONSISTENCY — the plan calls a symbol under one name in one task but "
+    "defines it under a different name, or never defines it, in another "
+    "(e.g. clear_layers() defined but clearLayers() called).\n"
+    "6. COVERAGE GAP — an Acceptance check has no task responsible for satisfying it.\n"
     "Validation is NOT your concern: the global acceptance_oracle owns the runnable "
     "'done' check and the planner intentionally writes NO per-task validation commands. "
     "Do NOT reject a task for an empty/absent validate field.\n"
@@ -97,9 +97,7 @@ class PlanReviewer(AgentNode):
             f"  - {a}" for a in (req.acceptance if req is not None else ())
         ) or "  (none)"
         env = state.understanding.environment if state.understanding is not None else ""
-        files = "\n".join(
-            f"  - {s.path}: {s.responsibility}" for s in (plan.file_plan if plan else ())
-        ) or "  (none)"
+        narrative = (plan.plan_md[:3000] if plan and plan.plan_md else "") or "  (none)"
         tasks = "\n\n".join(
             f"  {t.id} [{', '.join(t.edit_scope.editable)}] {t.title}\n"
             + "\n".join(
@@ -118,7 +116,7 @@ class PlanReviewer(AgentNode):
                 f"REQUIREMENT summary: {summary}\n"
                 f"ACCEPTANCE:\n{acceptance}\n\n"
                 f"ENVIRONMENT:\n{env or '(none)'}\n\n"
-                f"FILE PLAN:\n{files}\n\n"
+                f"PLAN NARRATIVE:\n{narrative}\n\n"
                 f"TASKS:\n{tasks}\n\n"
                 f"DEPS:\n{deps}")},
         ]
