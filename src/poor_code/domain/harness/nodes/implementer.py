@@ -230,8 +230,8 @@ class Implementer:
             api = ("\nREAL APIs (use these exact attributes/methods; do NOT guess from "
                    f"memory):\n{self._api_digest}")
         # Unresolved questions + the explorer's "couldn't fully see this" note. Carried
-        # forward so a gap the interviewer/explorer flagged drives a READ (via bash) here
-        # instead of evaporating into a blind guess.
+        # forward so a gap the interviewer/explorer flagged drives a READ (via the read
+        # tool) here instead of evaporating into a blind guess.
         unknowns = ""
         oq = state.requirement.open_questions if state.requirement is not None else ()
         cc = state.understanding
@@ -241,8 +241,8 @@ class Implementer:
             parts = [f"  - open question: {q}" for q in oq]
             if notes:
                 parts.append(f"  - exploration was incomplete: {notes}")
-            unknowns = ("\nUNVERIFIED — confirm by READING the file (bash: sed/cat) before "
-                        "coding against an assumption:\n" + "\n".join(parts))
+            unknowns = ("\nUNVERIFIED — confirm by READING the file (use the read/grep tools) "
+                        "before coding against an assumption:\n" + "\n".join(parts))
         hint = f"\nREPAIR HINT: {state.repair_hint}" if state.repair_hint else ""
         env = ""
         if state.env_report is not None and (
