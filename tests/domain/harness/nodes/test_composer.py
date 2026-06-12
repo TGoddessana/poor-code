@@ -74,3 +74,25 @@ async def test_composer_handles_no_understanding():
     assert isinstance(res.output, TaskContext)
     assert res.output.refs == ()
     assert res.output.snippet is None
+
+
+@pytest.mark.asyncio
+async def test_composer_dedups_candidate_that_has_an_excerpt():
+    # A file present as both a candidate and an excerpt is rendered once (as a body),
+    # never also as an "Other relevant files" pointer.
+    cc = CodeContext(
+        candidates=(CodeRef(file="src/auth.py", symbol="login"),),
+        excerpts=(FileExcerpt(path="src/auth.py", text="def login(): return 1"),))
+    res = await Composer().run(NodeContext(state=_state(cc), cancel=asyncio.Event()))
+    snip = res.output.snippet
+    assert "def login(): return 1" in snip            # rendered as a body
+    assert "Other relevant files" not in snip         # not also listed as a pointer
+
+
+@pytest.mark.asyncio
+async def test_composer_labels_out_of_scope_excerpt_as_reference():
+    cc = CodeContext(
+        candidates=(CodeRef(file="src/auth.py"),),
+        excerpts=(FileExcerpt(path="src/elsewhere.py", text="def aux(): return 0"),))
+    res = await Composer().run(NodeContext(state=_state(cc), cancel=asyncio.Event()))
+    assert "src/elsewhere.py [REFERENCE]" in res.output.snippet
