@@ -11,8 +11,9 @@ from poor_code.domain.harness.graph import CompiledGraph, EdgeTable, Graph
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.harness.nodes.composer import Composer
 from poor_code.domain.harness.nodes.execution import (
-    TaskSelector, EngGate, ValidationRunner, CompletionGate,
+    TaskSelector, EngGate, ValidationRunner,
 )
+from poor_code.domain.harness.nodes.completion_judge import CompletionJudge
 from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.harness.nodes.validator import Validator
 from poor_code.domain.harness.nodes.failure_analyst import FailureAnalyst
@@ -65,7 +66,9 @@ def build_implement_loop(*, llm, cwd) -> CompiledGraph:
     reg.register(Validator(llm, cwd=cwd))
     reg.register(ValidationRunner(cwd=cwd))
     reg.register(FailureAnalyst(llm))
-    reg.register(CompletionGate())
+    # The completion decision is now an LLM judge (keeps the wiring name 'completion_gate')
+    # sitting on top of validation_runner's objective floor — see completion_judge.py.
+    reg.register(CompletionJudge(llm))
     edges = EdgeTable(
         forward=_INNER_FORWARD,
         back_edges={Layer.IMPLEMENTATION: "implementer"},

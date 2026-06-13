@@ -222,9 +222,15 @@ class ValidationRunner:
 
 
 class CompletionGate:
-    """Single code chokepoint after validation. Pass → task done. Fail below the
-    attempt cap → repair(impl). Fail at cap → escalate (Plan 4 turns this into a
-    full-auto partial under a Policy)."""
+    """Deterministic completion chokepoint. Pass → task done. Fail below the attempt
+    cap → repair(impl). Fail at cap → escalate.
+
+    SUPERSEDED IN THE LIVE LOOP: implement_loop now wires CompletionJudge
+    (nodes/completion_judge.py) under the name 'completion_gate' — an LLM judge that
+    sits ON TOP of validation_runner's objective floor (it can demote a passing task,
+    classify a broken check, and judge open-ended tasks that have no exit-0 oracle).
+    This class is retained as the pure-deterministic floor reference and is still used
+    by skeleton/adversarial loop tests; it is no longer in the default registry."""
 
     name = "completion_gate"
     phase = Phase.IMPLEMENTING

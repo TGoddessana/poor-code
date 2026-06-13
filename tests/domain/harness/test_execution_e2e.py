@@ -39,6 +39,9 @@ class E2ELLM:
                            "editable": ["out.txt"], "depends_on": []}]},
             "emit_plan_review": {"ok": True},
             "judge": {"verdict": "advance", "hint": ""},
+            # completion is now an LLM judge (tool 'decide'); the acceptance check
+            # `test -f out.txt` passes, so the judge confirms done.
+            "decide": {"verdict": "done", "reason": "out.txt exists"},
         }
         if name == "write":  # implementer tool loop
             self._impl_round += 1
