@@ -29,6 +29,9 @@ class StderrSink:
 
     def __init__(self, stream: TextIO | None = None) -> None:
         self._out = stream if stream is not None else sys.stderr
+        # Diagnostic: when POOR_CODE_DUMP_PROMPTS=<path> is set, append every node's
+        # actual constructed prompt to that file (context-fidelity audit). Off by default.
+        self._dump_path = os.environ.get("POOR_CODE_DUMP_PROMPTS") or None
 
     def _w(self, line: str) -> None:
         self._out.write(line + "\n")
@@ -43,7 +46,17 @@ class StderrSink:
         self._w(f"  ↺ {node} {detail}")
 
     def node_context(self, node, phase, messages):
-        pass
+        if not self._dump_path:
+            return
+        try:
+            with open(self._dump_path, "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*78}\nNODE: {node}  [{phase}]\n{'='*78}\n")
+                for m in messages:
+                    content = m.get("content", "") if isinstance(m, dict) else str(m)
+                    f.write(f"--- {m.get('role','?') if isinstance(m, dict) else '?'} "
+                            f"(len={len(content)}) ---\n{content}\n")
+        except Exception:
+            pass
 
     def node_thinking_delta(self, node, text):
         # Harness AgentNodes stream their generation here; keep headless showing it.

@@ -121,6 +121,12 @@ class Implementer:
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": self._prompt(state, task)},
         ]
+        # Diagnostic hook: surface the implementer's initial prompt through the same
+        # node_context sink AgentNodes use (the implementer is a plain loop, not an
+        # AgentNode, so it would otherwise be invisible to a prompt dump).
+        if ctx.sink is not None and hasattr(ctx.sink, "node_context"):
+            phase = state.cursor.phase.value if state.cursor else ""
+            ctx.sink.node_context(self.name, phase, messages)
         tool_ctx = ToolContext(turn_id="implement", cancel=ctx.cancel,
                                cwd=self._cwd, ask=allow_all)
         full_output: dict[str, str] = {}          # cid -> full tool output (for re-clamping)
