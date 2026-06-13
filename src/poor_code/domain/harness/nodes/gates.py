@@ -41,6 +41,7 @@ class PlanGate(GateNode):
     layer = Layer.PLAN
     repair_budget = 2
     phase = Phase.PLANNING
+    advisable = True   # POOR_CODE_ADVISORY_GATES → don't bounce; let the plan flow on
 
     _MAX_EDITABLE = 3
 

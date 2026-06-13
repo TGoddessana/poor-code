@@ -71,6 +71,24 @@ def _task(**overrides) -> Task:
 
 
 @pytest.mark.asyncio
+async def test_plan_gate_advisory_mode_does_not_bounce(monkeypatch):
+    # POOR_CODE_ADVISORY_GATES → plan_gate surfaces its objection but ADVANCEs instead
+    # of bouncing (the plan flows on; only the implementer's real validation binds).
+    monkeypatch.setenv("POOR_CODE_ADVISORY_GATES", "1")
+    res = await PlanGate().run(_ctx(SessionState(plan=Plan())))  # empty plan would normally REPAIR
+    assert res.verdict.kind is VerdictKind.ADVANCE
+    assert res.verdict.hint  # the objection is carried (advisory, not enforced)
+
+
+@pytest.mark.asyncio
+async def test_plan_gate_still_bounces_by_default(monkeypatch):
+    # Default (flag unset) → unchanged binding behavior.
+    monkeypatch.delenv("POOR_CODE_ADVISORY_GATES", raising=False)
+    res = await PlanGate().run(_ctx(SessionState(plan=Plan())))
+    assert res.verdict.kind is VerdictKind.REPAIR
+
+
+@pytest.mark.asyncio
 async def test_plan_gate_advances_valid_plan():
     res = await PlanGate().run(_ctx(SessionState(plan=Plan(
         tasks=(_task(),), plan_md="## t1: do A\n"))))

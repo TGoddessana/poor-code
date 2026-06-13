@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Protocol, TypeVar, Union, get_args, get_origin, runtime_checkable
@@ -247,16 +248,31 @@ class GateNode(ABC):
     layer: Layer
     repair_budget: int
     phase: Phase  # every gate declares its cursor phase (read by the Driver)
+    # Experiment toggle: a gate marked advisable may be demoted to NON-BLOCKING when
+    # POOR_CODE_ADVISORY_GATES is set — it surfaces its objection to the trace but lets
+    # work flow on (only the implementer's real validation floor binds). Tests the
+    # hypothesis that the planning-layer gate BOUNCES (not the checks) are the bottleneck.
+    advisable: bool = False
 
     @abstractmethod
     def check(self, state: SessionState) -> str | None:
         """None → 통과(ADVANCE). 문자열 → 실패 사유(hint)."""
         ...
 
+    def _advisory_mode(self) -> bool:
+        return self.advisable and os.environ.get(
+            "POOR_CODE_ADVISORY_GATES", "").strip().lower() in ("1", "true", "yes", "on")
+
     async def run(self, ctx: NodeContext) -> NodeResult:
         hint = self.check(ctx.state)
         if hint is None:
             return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
+        if self._advisory_mode():
+            # Do NOT bounce: the plan/spec flows on; the objection is advisory only.
+            sink = getattr(ctx, "sink", None)
+            if sink is not None and hasattr(sink, "node_repaired"):
+                sink.node_repaired(self.name, f"advisory (not enforced): {hint}")
+            return NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE, hint=hint))
         if self._repair_count(ctx.state) >= self.repair_budget:
             return NodeResult(verdict=Verdict(
                 kind=VerdictKind.ESCALATE, query=self.escalate_query(hint)))
