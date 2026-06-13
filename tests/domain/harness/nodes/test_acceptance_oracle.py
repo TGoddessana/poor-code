@@ -77,7 +77,8 @@ async def test_oracle_prompt_includes_requirement_and_grounding_rules():
     system = llm.seen_messages[0]["content"]
     assert "create hello.txt" in prompt
     assert "hello.txt has exact content" in prompt
-    assert "content" in system.lower() and "diff" in system.lower()
+    # v2: criteria-based — observable content + exact equality (no bash `diff` authoring)
+    assert "content" in system.lower() and "exact" in system.lower()
 
 
 @pytest.mark.asyncio
@@ -154,7 +155,8 @@ async def test_oracle_system_requires_grounding_api_against_real_attrs():
     await AcceptanceOracle(llm).run(NodeContext(_state(), cancel=asyncio.Event()))
     system = llm.seen_messages[0]["content"].lower()
     assert "real apis" in system or "do not guess" in system
-    assert "never pass" in system  # the unwinnable-check warning
+    # v2: grounding survives as naming the real attribute (e.g. `.text` not `.value`)
+    assert ".value" in system or "real attribute" in system
 
 
 @pytest.mark.asyncio
