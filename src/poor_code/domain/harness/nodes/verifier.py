@@ -1,0 +1,232 @@
+"""verifier — the observation-grounded adversarial Verifier (Plan: verification v2).
+
+Replaces the deterministic bash-check chain (validator → validation_runner →
+completion_gate) with a SINGLE intelligent node. There is NO model-authored bash
+"acceptance command" run as an absolute floor anymore — that floor was measured to be
+anti-correlated with ground truth (it abandoned correct work whose check crashed on its
+own `set -o pipefail`, and blessed wrong work whose check was too weak).
+
+Instead the Verifier is an agent with a bash + read/grep tool loop: it DRIVES the
+implementation (runs it, starts servers and curls them, feeds boundary inputs, inspects
+files/output), OBSERVES real behaviour, then judges adversarially against the CRITERIA
+(natural-language definition of done). Its judgement IS the completion verdict — there is
+no separate binding check to crash or to game.
+
+Trust rests entirely on GROUNDING: the node must judge from what it OBSERVED, not from the
+diff's appearance. Two stages mirror the Explorer: ① a tool loop to drive+observe, then
+② a forced structured verdict over that observation history."""
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel
+
+from poor_code.domain.harness.ledger import render_build_ledger, task_section
+from poor_code.domain.harness.node import (
+    AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output)
+from poor_code.domain.harness.nodes.execution import MAX_ATTEMPTS, _active
+from poor_code.domain.harness.orientation import render_position
+from poor_code.domain.harness.tool_output import clamp_tool_output
+from poor_code.domain.llm_schema import inline_refs
+from poor_code.domain.session.models import (
+    Layer, Phase, SessionState, TaskCompleted, Verdict, VerdictKind,
+    effective_requirement)
+from poor_code.domain.tool.base import ToolContext, allow_all
+from poor_code.domain.tool.registry import ToolRegistry
+from poor_code.provider.events import (
+    FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted)
+from poor_code.provider.usage import tag
+
+_TOOL_NAME = "judge"
+MAX_ITERATIONS = 20
+
+_OBSERVE_SYSTEM = (
+    "You are the adversarial Verifier. The CRITERIA below define what 'done' means for "
+    "this task. Your job in this phase: DRIVE the implementation and OBSERVE its REAL "
+    "behaviour using your tools — run it, start any server in the BACKGROUND and curl it, "
+    "feed it inputs (including empty / boundary / values NOT named in the task so a "
+    "hard-coded impl is exposed), and inspect the files and output it produced. Use bash "
+    "to execute and read/grep/glob/list to inspect.\n"
+    "Be ADVERSARIAL: actively hunt for an input or case where it FAILS a criterion. Verify "
+    "by OBSERVATION, never assume from how the code looks.\n"
+    "Do NOT modify any code — you have no write/edit tools; you only run and inspect. "
+    "When you have observed enough to judge every criterion, stop calling tools."
+)
+
+_JUDGE_SYSTEM = (
+    "From what you OBSERVED above, judge this task against the CRITERIA. Choose exactly one:\n"
+    "- 'advance': EVERY criterion is satisfied by behaviour you actually OBSERVED (ran it and "
+    "saw the right result) — not merely plausible from the code. If you could not observe "
+    "something, it is NOT advance.\n"
+    "- 'repair_impl': a criterion is not met. CITE the criterion and the OBSERVED evidence "
+    "(the real output/error you saw) and give a concrete fix hint.\n"
+    "- 'repair_plan': the task/plan is mis-scoped (wrong files, wrong decomposition). Say why.\n"
+    "Trust ONLY observation. Call judge once."
+)
+
+
+class _VerdictOut(BaseModel):
+    verdict: Literal["advance", "repair_impl", "repair_plan"]
+    hint: str = ""
+
+
+class VerifierNode(AgentNode):
+    name = "verifier"
+    phase = Phase.IMPLEMENTING
+
+    def __init__(self, llm: _LLMClientLike, cwd: Path, tools: ToolRegistry) -> None:
+        super().__init__(llm)
+        self._cwd = Path(cwd)
+        self._tools = tools
+
+    async def run(self, ctx: NodeContext) -> NodeResult:
+        state = ctx.state
+        task, attempt = _active(state)
+        history = await self._observe(ctx, task)
+        out = validate_output(
+            _VerdictOut, await self._dispatch(ctx, extra_messages=history), node=self.name)
+
+        if out.verdict == "advance":
+            return self._done(task, attempt)
+        if out.verdict == "repair_plan":
+            return NodeResult(verdict=Verdict(
+                kind=VerdictKind.REPAIR, layer=Layer.PLAN,
+                hint=out.hint or "Task is mis-scoped; re-plan."))
+        # repair_impl — loosened authority: no rigid abandon. Repair up to the attempt
+        # cap; at the cap accept best-effort and move on (the report reflects reality)
+        # rather than parking/abandoning correct-but-unverified work.
+        if attempt is None or len(task.attempts) >= MAX_ATTEMPTS:
+            return self._done(task, attempt)
+        return NodeResult(verdict=Verdict(
+            kind=VerdictKind.REPAIR, layer=Layer.IMPLEMENTATION,
+            hint=out.hint or "A criterion is not satisfied; fix the implementation."))
+
+    @staticmethod
+    def _done(task, attempt) -> NodeResult:
+        aid = attempt.id if attempt is not None else (
+            task.attempts[-1].id if task.attempts else f"{task.id}-a1")
+        return NodeResult(output=TaskCompleted(task_id=task.id, attempt_id=aid),
+                          branch="done")
+
+    # stage ① — drive + observe tool loop (mirrors ExploringNode._explore)
+    async def _observe(self, ctx: NodeContext, task) -> list[dict[str, Any]]:
+        state = ctx.state
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": _OBSERVE_SYSTEM},
+            {"role": "user", "content": self._observe_prompt(state, task)},
+        ]
+        tool_ctx = ToolContext(turn_id="verify", cancel=ctx.cancel,
+                               cwd=self._cwd, ask=allow_all)
+        for _ in range(MAX_ITERATIONS):
+            if ctx.cancel.is_set():
+                raise asyncio.CancelledError(f"{self.name} cancelled")
+            text, calls = await self._stream_round(messages, ctx.sink)
+            assistant: dict[str, Any] = {"role": "assistant", "content": text}
+            if calls:
+                assistant["tool_calls"] = [
+                    {"id": cid, "type": "function",
+                     "function": {"name": name, "arguments": args or "{}"}}
+                    for cid, name, args in calls]
+            messages.append(assistant)
+            if not calls:
+                break
+            for cid, name, args in calls:
+                if ctx.sink is not None:
+                    ctx.sink.tool_started(cid, name, _safe_args(args))
+                output = await self._run_tool(name, args, tool_ctx)
+                if ctx.sink is not None:
+                    if output.startswith("ERROR:"):
+                        ctx.sink.tool_failed(cid, output)
+                    else:
+                        ctx.sink.tool_finished(cid, output)
+                messages.append({"role": "tool", "tool_call_id": cid,
+                                 "content": clamp_tool_output(output)})
+        return messages[1:]   # hand observation history (minus its system) to stage ②
+
+    async def _stream_round(self, messages, sink=None):
+        text = ""
+        pending: dict[str, dict[str, str]] = {}
+        order: list[str] = []
+        tag(self._llm, self.name)
+        async for ev in self._llm.stream(messages=messages, tools=self._tools.schemas()):
+            match ev:
+                case TextDelta(text=t):
+                    text += t
+                case ToolCallStarted(call_id=cid, name=name):
+                    pending[cid] = {"name": name, "args": ""}
+                    order.append(cid)
+                case ToolCallInputDelta(call_id=cid, json_delta=d):
+                    if cid in pending:
+                        pending[cid]["args"] += d
+                case ToolCallEnded() | FinishedReason():
+                    pass
+        return text, [(cid, pending[cid]["name"], pending[cid]["args"]) for cid in order]
+
+    async def _run_tool(self, name: str, args_json: str, tool_ctx: ToolContext) -> str:
+        tool = self._tools.get(name)
+        if tool is None:
+            return f"ERROR: unknown tool {name}"
+        try:
+            parsed = tool.params.model_validate_json(args_json or "{}")
+            result = await tool.execute(parsed, tool_ctx)
+            return result.output
+        except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
+            return f"ERROR: {type(e).__name__}: {e}"
+
+    def _observe_prompt(self, state: SessionState, task) -> str:
+        criteria = self._criteria(state)
+        attempt = task.attempts[-1] if task.attempts else None
+        diff = "" if attempt is None or attempt.patch is None else attempt.patch.diff
+        req = effective_requirement(state)
+        header = f"{render_position(self.name, state)}\n\n"
+        if state.request is not None:
+            header += f"ORIGINAL REQUEST:\n{state.request.raw_text}\n"
+        header += f"OVERALL GOAL:\n{req.summary}\n"
+        task_md = task_section(state.plan, task.id) if state.plan else task.title
+        return (
+            f"CRITERIA (the definition of done — verify EACH by observation):\n{criteria}\n\n"
+            f"{header}\n"
+            f"TASK UNDER VERIFICATION:\n{task_md}\n\n"
+            f"COMPLETED WORK (ledger):\n{render_build_ledger(state)}\n\n"
+            f"PATCH JUST PRODUCED (do not trust it — observe its real effect):\n"
+            f"{clamp_tool_output(diff, head=2000, tail=2000) if diff else '(empty)'}")
+
+    @staticmethod
+    def _criteria(state: SessionState) -> str:
+        checks = state.acceptance.checks if state.acceptance else ()
+        if checks:
+            return "\n".join(f"  - {c.criterion}" for c in checks)
+        req = effective_requirement(state)
+        return ("\n".join(f"  - {a}" for a in req.acceptance)
+                or "  (no explicit criteria — judge against the REQUEST and the task PURPOSE)")
+
+    # stage ② — verdict envelope
+    def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
+        return [
+            {"role": "system", "content": _JUDGE_SYSTEM},
+            {"role": "user", "content": "Emit your verdict for the task above, judging "
+             "ONLY from what you observed."},
+        ]
+
+    def output_tool(self) -> dict[str, Any]:
+        return {"type": "function",
+                "function": {"name": _TOOL_NAME,
+                             "description": "Judge the task against the criteria from observation.",
+                             "parameters": inline_refs(_VerdictOut.model_json_schema())}}
+
+    def output_model(self) -> type[BaseModel]:
+        return _VerdictOut
+
+    def parse(self, args_json: str) -> _VerdictOut:
+        return validate_output(_VerdictOut, args_json, node=self.name)
+
+
+def _safe_args(args_json: str) -> dict:
+    try:
+        v = json.loads(args_json or "{}")
+        return v if isinstance(v, dict) else {"_": v}
+    except (ValueError, TypeError):
+        return {}

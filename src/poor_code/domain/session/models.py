@@ -445,9 +445,13 @@ def effective_requirement(state: "SessionState") -> Requirement:
 
 @dataclass(frozen=True, slots=True)
 class AcceptanceCheck:
-    """One runnable acceptance check: exit 0 == criterion satisfied."""
+    """A criterion in the definition of done. Verification v2: `criterion` (natural
+    language) is authoritative and the observe-judge Verifier checks it by observation.
+    `command` is optional/vestigial — no longer run as a binding bash floor (it was the
+    measured source of false-abandon/false-accept); kept for back-compat and as an
+    optional hint the verifier MAY choose to run."""
     criterion: str
-    command: str
+    command: str = ""
     rationale: str = ""
 
 

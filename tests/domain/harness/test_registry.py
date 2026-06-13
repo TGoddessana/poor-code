@@ -31,15 +31,15 @@ def test_execution_agent_nodes_are_registered():
     pm = ProjectMap(version=2, generated_at=datetime.now(UTC), cwd=Path("."),
                     files=(), parse_errors=())
     reg = build_default_registry(llm=_LLM(), project_map=pm)
-    # global_validator + plan_reviewer remain top-level; the execution agents
-    # (composer/implementer/validator/failure_analyst) moved INTO the implement_loop
-    # subgraph and are registered in its inner registry.
+    # global_validator + plan_reviewer remain top-level; the execution agents moved INTO
+    # the implement_loop subgraph. Verification v2: validator/failure_analyst are replaced
+    # by the single observe-judge verifier.
     for name in ("global_validator", "plan_reviewer"):
         assert reg.get(name) is not None, f"{name} not registered"
     loop = reg.get("implement_loop")
     assert loop is not None, "implement_loop not registered"
     inner = loop._graph.nodes
-    for name in ("composer", "implementer", "validator", "failure_analyst"):
+    for name in ("composer", "implementer", "verifier"):
         assert inner.get(name) is not None, f"{name} not registered inside implement_loop"
 
 

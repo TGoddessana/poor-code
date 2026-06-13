@@ -45,6 +45,7 @@ async def test_passes_when_acceptance_and_tasks_pass(tmp_path):
     assert res.branch == "pass"
 
 
+@pytest.mark.skip(reason="v2: global_validator no longer runs bash acceptance checks (pass-through)")
 @pytest.mark.asyncio
 async def test_repairs_when_acceptance_check_fails(tmp_path):
     gv = GlobalValidator(FakeLLM(), cwd=tmp_path)

@@ -402,7 +402,7 @@ def test_build_registry_has_code_nodes():
     loop = reg.get("implement_loop")
     assert loop is not None
     inner = loop._graph.nodes
-    for n in ("task_selector", "eng_gate", "validation_runner", "completion_gate"):
+    for n in ("task_selector", "eng_gate", "verifier"):
         assert inner.get(n) is not None
         assert inner.get(n).name == n
 

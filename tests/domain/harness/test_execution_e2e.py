@@ -96,11 +96,11 @@ async def test_full_execution_reaches_reporter_and_writes_file(tmp_path):
     assert final.report.outcome is ReportOutcome.SUCCEEDED
     # the implementer actually created the file in the work tree
     assert (tmp_path / "out.txt").read_text() == "ok"
-    # the task completed via the binding runner
+    # the task completed via the observe-judge Verifier (no bash run_result anymore)
     assert final.plan.tasks[0].status is TaskStatus.DONE
-    # per-attempt artifacts landed on disk
+    # per-attempt artifacts landed on disk (the patch; verification v2 produces no
+    # ValidationResult, so there is no run_result.json)
     from poor_code.domain.session import paths
     aid = final.plan.tasks[0].attempts[-1].id
     adir = paths.attempt_dir(tmp_path / ".poor-code", sid, "t1", aid)
-    assert (adir / "run_result.json").exists()
     assert (adir / "diff.patch").exists()

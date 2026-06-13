@@ -11,12 +11,13 @@ def test_implement_loop_inner_topology():
     assert ("task_selector", "done") not in fwd       # done exits the subgraph (forward miss)
     assert fwd[("composer", None)] == "implementer"
     assert fwd[("implementer", None)] == "eng_gate"
-    assert fwd[("eng_gate", None)] == "validator"
-    assert fwd[("validator", None)] == "validation_runner"
-    assert fwd[("validation_runner", "pass")] == "completion_gate"
-    assert fwd[("validation_runner", "fail")] == "failure_analyst"
-    assert fwd[("failure_analyst", None)] == "completion_gate"
-    assert fwd[("completion_gate", "done")] == "task_selector"
+    # Verification v2: the bash-check chain is replaced by a single observe-judge Verifier.
+    assert fwd[("eng_gate", None)] == "verifier"
+    assert fwd[("verifier", "done")] == "task_selector"
+    # the old chain nodes are no longer wired in the loop
+    assert ("validator", None) not in fwd
+    assert ("validation_runner", "pass") not in fwd
+    assert ("completion_gate", "done") not in fwd
     # IMPLEMENTATION repairs handled inside; other layers bubble out (not present)
     assert inner.edges.back_edges == {Layer.IMPLEMENTATION: "implementer"}
     # the loop node is a Node with the IMPLEMENTING phase
@@ -26,8 +27,7 @@ def test_implement_loop_inner_topology():
 
 def test_implement_loop_registers_all_inner_nodes():
     cg = build_implement_loop(llm=None, cwd=".")
-    for n in ("task_selector", "composer", "implementer", "eng_gate", "validator",
-              "validation_runner", "failure_analyst", "completion_gate"):
+    for n in ("task_selector", "composer", "implementer", "eng_gate", "verifier"):
         assert cg._graph.nodes.get(n) is not None
 
 

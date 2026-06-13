@@ -66,7 +66,14 @@ class GlobalValidator(AgentNode):
     async def run(self, ctx: NodeContext) -> NodeResult:
         plan = ctx.state.plan
         assert plan is not None, "global_validator requires a plan"
-        failures: list[tuple[str, int, str]] = []
+        # Verification v2: the per-task Verifier now owns verification by OBSERVATION, so
+        # there is no model-authored bash acceptance command to re-run here (re-running it
+        # was the last bash floor that could false-abandon a correct build on its own
+        # `set -o pipefail`). Finalize as pass — every task that reached here was judged by
+        # the Verifier. (A whole-build cross-task observe-judge is a planned v2 refinement.)
+        return NodeResult(branch="pass")
+        # --- v1-disabled bash-check path (kept for the v2 observe-judge rewrite) ---
+        failures: list[tuple[str, int, str]] = []  # type: ignore[unreachable]
         if ctx.state.acceptance is not None:
             for chk in ctx.state.acceptance.checks:
                 code, out = await run_shell(chk.command, self._cwd, ctx.cancel)

@@ -10,13 +10,9 @@ from pathlib import Path
 from poor_code.domain.harness.graph import CompiledGraph, EdgeTable, Graph
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.harness.nodes.composer import Composer
-from poor_code.domain.harness.nodes.execution import (
-    TaskSelector, EngGate, ValidationRunner,
-)
-from poor_code.domain.harness.nodes.completion_judge import CompletionJudge
+from poor_code.domain.harness.nodes.execution import TaskSelector, EngGate
 from poor_code.domain.harness.nodes.implementer import Implementer
-from poor_code.domain.harness.nodes.validator import Validator
-from poor_code.domain.harness.nodes.failure_analyst import FailureAnalyst
+from poor_code.domain.harness.nodes.verifier import VerifierNode
 from poor_code.domain.session.models import Cursor, Layer, Phase
 from poor_code.domain.tool.bash import BashTool
 from poor_code.domain.tool.edit import EditTool
@@ -27,22 +23,19 @@ from poor_code.domain.tool.glob import GlobTool
 from poor_code.domain.tool.list import ListTool
 from poor_code.domain.tool.registry import ToolRegistry
 
-# inner forward edges — copied verbatim from route.FORWARD for these nodes, EXCEPT
-# ("task_selector","done") is intentionally absent so 'done' exits the subgraph.
-# DRIFT WARNING: these rows are a hand-copy of the inner execution edges that USED to
-# live in route.FORWARD. Those rows have been removed from route.FORWARD (they are now
-# internal to this subgraph). If you change an execution-layer edge, change it HERE —
-# route.FORWARD no longer carries it, so the two can silently drift apart.
+# inner forward edges. Verification v2: the deterministic bash-check chain (validator →
+# validation_runner → completion_gate / failure_analyst) is replaced by a SINGLE
+# observation-grounded adversarial Verifier (nodes/verifier.py). It drives+observes the
+# work and emits the completion verdict directly — there is no model-authored bash
+# acceptance command run as an absolute floor anymore.
+# DRIFT WARNING: these rows are internal to this subgraph; route.FORWARD does not carry
+# them. Change an execution-layer edge HERE.
 _INNER_FORWARD = {
     ("task_selector", "task"): "composer",
     ("composer", None): "implementer",
     ("implementer", None): "eng_gate",
-    ("eng_gate", None): "validator",
-    ("validator", None): "validation_runner",
-    ("validation_runner", "pass"): "completion_gate",
-    ("validation_runner", "fail"): "failure_analyst",
-    ("failure_analyst", None): "completion_gate",
-    ("completion_gate", "done"): "task_selector",
+    ("eng_gate", None): "verifier",
+    ("verifier", "done"): "task_selector",
 }
 
 
@@ -56,19 +49,25 @@ def _implementer_tools() -> ToolRegistry:
     ])
 
 
+def _verifier_tools() -> ToolRegistry:
+    """The verifier OBSERVES — it runs and inspects but never mutates: bash to drive the
+    work (start servers, curl, feed inputs) + read/grep/glob/list to inspect. No
+    write/edit, so verification can't accidentally 'fix' what it is judging."""
+    return ToolRegistry([
+        BashTool(), ReadTool(), GrepTool(), GlobTool(), ListTool(),
+    ])
+
+
 def build_implement_loop(*, llm, cwd) -> CompiledGraph:
-    cwd = Path(cwd)   # Implementer/ValidationRunner expect a Path (build_default_registry passes project_map.cwd)
+    cwd = Path(cwd)   # Implementer/Verifier expect a Path (build_default_registry passes project_map.cwd)
     reg = NodeRegistry()
     reg.register(TaskSelector())
     reg.register(Composer())
     reg.register(Implementer(llm, cwd=cwd, tools=_implementer_tools()))
     reg.register(EngGate())
-    reg.register(Validator(llm, cwd=cwd))
-    reg.register(ValidationRunner(cwd=cwd))
-    reg.register(FailureAnalyst(llm))
-    # The completion decision is now an LLM judge (keeps the wiring name 'completion_gate')
-    # sitting on top of validation_runner's objective floor — see completion_judge.py.
-    reg.register(CompletionJudge(llm))
+    # Verification v2: one observation-grounded adversarial verifier replaces the whole
+    # validator→validation_runner→failure_analyst→completion_judge bash-check chain.
+    reg.register(VerifierNode(llm, cwd=cwd, tools=_verifier_tools()))
     edges = EdgeTable(
         forward=_INNER_FORWARD,
         back_edges={Layer.IMPLEMENTATION: "implementer"},

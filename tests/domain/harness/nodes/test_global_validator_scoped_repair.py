@@ -8,6 +8,12 @@ import json
 
 import pytest
 
+# Verification v2: global_validator no longer re-runs model-authored bash acceptance
+# checks, so the scoped/full regression-repair path it gated is unreachable (pass-through).
+# These tests cover that disabled path — re-enable with the planned v2 whole-build
+# observe-judge global verifier.
+pytestmark = pytest.mark.skip(reason="v2: global_validator bash-regression repair disabled")
+
 from poor_code.domain.harness.node import NodeContext
 from poor_code.domain.harness.nodes.global_validator import (
     GlobalValidator, MAX_SCOPED_FIXUPS,
