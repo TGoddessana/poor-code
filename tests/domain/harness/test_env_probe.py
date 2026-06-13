@@ -14,8 +14,10 @@ async def test_probe_reports_os_and_present_runtimes(tmp_path):
     assert "OS:" in out
     assert "TOOLCHAIN" in out
     assert "python" in out.lower()
-    # the catch-all inventory is present so long-tail tools are never silently missed
-    assert "PATH COMMANDS" in out.upper() or "PATH_COMMANDS" in out
+    # The full PATH-command catch-all is deliberately NOT dumped — it was ~5.5k chars
+    # of irrelevant binary names (37–50% of downstream prompts), pure noise for weak
+    # models. Long-tail tools are discovered on demand via the implementer's bash tool.
+    assert "PATH COMMANDS" not in out.upper()
 
 
 @pytest.mark.asyncio

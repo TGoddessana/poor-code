@@ -5,19 +5,24 @@ tech stack that actually exists in the container. A bench task on bare
 ubuntu-24-04 has python3 but no node; without this the implementer happily wrote
 a Node server and died on `node: not found`.
 
-Design: there is no universal "describe my environment" tool, so we combine
-(1) a broad CURATED probe of common runtimes/compilers/package-managers/VCS —
-read with `command -v` + `--version` for human-readable detail, and (2) a full
-PATH command INVENTORY as a catch-all, so long-tail tools (conda, pnpm, deno,
-rustc, …) we did not curate still show up. Deterministic (not a model-invoked
-tool) so it can never be "forgotten"."""
+Design: there is no universal "describe my environment" tool, so we run a broad
+CURATED probe of common runtimes/compilers/package-managers/VCS — `command -v` +
+`--version` for human-readable detail — and explicitly name the curated tools that
+are ABSENT. Deterministic (not a model-invoked tool) so it can never be "forgotten".
+
+We deliberately do NOT dump the full PATH command inventory. It added ~5.5k chars of
+irrelevant binary names to every planning/implementer prompt (measured at 37–50% of
+the prompt), drowning the actual task signal for weak models — context POLLUTION, not
+fidelity. The implementer has a bash tool and discovers any long-tail tool it actually
+needs on demand (`command -v <tool>`), which is cheaper and on-target."""
 from __future__ import annotations
 
 import asyncio
 
 _MAX_OUTPUT = 7000
 
-# Broad but curated. The PATH inventory below is the catch-all for anything missing.
+# Broad but curated. Long-tail tools not listed are discovered on demand by the
+# implementer's bash tool (`command -v <tool>`) — see module docstring.
 _TOOLS = (
     "python3 python node deno bun ruby perl php go java dotnet "
     "gcc g++ cc clang rustc "
@@ -42,9 +47,6 @@ for t in %TOOLS%; do
   command -v "$t" >/dev/null 2>&1 || miss="$miss $t"
 done
 echo " ${miss# }"
-echo "PATH COMMANDS (names only, catch-all):"
-for d in $(printf '%s' "$PATH" | tr ':' ' '); do ls -1 "$d" 2>/dev/null; done | sort -u | tr '\n' ' '
-echo ""
 """.replace("%TOOLS%", _TOOLS)
 
 
