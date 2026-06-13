@@ -37,7 +37,8 @@ def build_env() -> dict[str, str]:
     # Let the host pick which branch/tag/commit and repo install.sh installs in the
     # container. install.sh reads these from the container env (defaulting to main);
     # without forwarding them here, a host-side override silently has no effect.
-    for opt in ("POOR_CODE_GIT_REF", "POOR_CODE_GIT_URL"):
+    for opt in ("POOR_CODE_GIT_REF", "POOR_CODE_GIT_URL",
+                "POOR_CODE_ADVISORY_GATES"):  # runtime experiment flags, forwarded if set
         val = os.environ.get(opt)
         if val:
             env[opt] = val
