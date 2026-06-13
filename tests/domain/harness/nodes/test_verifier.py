@@ -19,11 +19,19 @@ from poor_code.provider.events import (
     FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted)
 
 
+_BACKED = [{"criterion": "empty input shows an error",
+            "observed": "ran run_shell('') and saw ValueError raised", "satisfied": True}]
+
+
 class _VerifierLLM:
     """Two-phase fake: in the observe loop (tools = bash/read/...) it observes nothing
-    and stops; in the judge phase (tool 'judge') it emits the scripted verdict."""
-    def __init__(self, verdict, hint="because observed"):
-        self._args = json.dumps({"verdict": verdict, "hint": hint})
+    and stops; in the judge phase (tool 'judge') it emits the scripted verdict. `checks`
+    supplies the per-criterion observation evidence the leniency guard requires."""
+    def __init__(self, verdict, hint="because observed", checks=None):
+        payload = {"verdict": verdict, "hint": hint}
+        if checks is not None:
+            payload["checks"] = checks
+        self._args = json.dumps(payload)
         self.seen = None
 
     async def stream(self, messages, tools, response_format=None):
@@ -39,9 +47,10 @@ class _VerifierLLM:
             yield FinishedReason(reason="stop")
 
 
-def _state(*, n_attempts=1):
+def _state(*, n_attempts=1, adv_rounds=0):
     attempts = tuple(
-        Attempt(id=f"t1-a{i+1}", patch=ChangeRecord(files=("a.py",), diff="d"))
+        Attempt(id=f"t1-a{i+1}", patch=ChangeRecord(files=("a.py",), diff="d"),
+                adversarial_rounds=(adv_rounds if i == n_attempts - 1 else 0))
         for i in range(n_attempts))
     return SessionState(
         plan=Plan(tasks=(Task(id="t1", title="A", purpose="p",
@@ -66,10 +75,22 @@ def test_name_is_verifier():
 
 
 @pytest.mark.asyncio
-async def test_advance_marks_task_done():
-    r = await _node(_VerifierLLM("advance")).run(_ctx(_state()))
+async def test_advance_with_observation_evidence_marks_done():
+    r = await _node(_VerifierLLM("advance", checks=_BACKED)).run(_ctx(_state()))
     assert r.branch == "done"
     assert isinstance(r.output, TaskCompleted) and r.output.task_id == "t1"
+
+
+@pytest.mark.asyncio
+async def test_advance_without_observation_is_downgraded_to_repair():
+    # Leniency guard: an 'advance' not backed by per-criterion observed evidence (no checks,
+    # or a check left unsatisfied/unobserved) must NOT pass — it becomes repair_impl.
+    r = await _node(_VerifierLLM("advance")).run(_ctx(_state()))  # no checks
+    assert r.verdict.kind is VerdictKind.REPAIR
+    assert r.verdict.layer is Layer.IMPLEMENTATION
+    r2 = await _node(_VerifierLLM("advance", checks=[
+        {"criterion": "x", "observed": "", "satisfied": True}])).run(_ctx(_state()))  # observed empty
+    assert r2.verdict.kind is VerdictKind.REPAIR
 
 
 @pytest.mark.asyncio
@@ -89,9 +110,9 @@ async def test_repair_plan_bubbles_to_plan_layer():
 
 @pytest.mark.asyncio
 async def test_at_cap_accepts_best_effort_instead_of_abandoning():
-    # Loosened authority: at the attempt cap a repair_impl verdict does NOT abandon —
-    # it accepts best-effort and moves on (no rigid park/abandon).
-    r = await _node(_VerifierLLM("repair_impl")).run(_ctx(_state(n_attempts=MAX_ATTEMPTS)))
+    # Loosened authority: at the refinement cap (adversarial_rounds) a repair_impl verdict
+    # does NOT abandon — it accepts best-effort and moves on (no rigid park/abandon).
+    r = await _node(_VerifierLLM("repair_impl")).run(_ctx(_state(adv_rounds=MAX_ATTEMPTS)))
     assert r.branch == "done"
     assert isinstance(r.output, TaskCompleted)
 

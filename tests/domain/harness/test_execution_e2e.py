@@ -38,9 +38,12 @@ class E2ELLM:
                 "tasks": [{"id": "t1", "title": "make out.txt",
                            "editable": ["out.txt"], "depends_on": []}]},
             "emit_plan_review": {"ok": True},
-            "judge": {"verdict": "advance", "hint": ""},
-            # completion is now an LLM judge (tool 'decide'); the acceptance check
-            # `test -f out.txt` passes, so the judge confirms done.
+            # verification v2: the verifier's 'judge' tool. advance must carry per-criterion
+            # observed evidence or the leniency guard downgrades it to repair_impl.
+            "judge": {"verdict": "advance", "hint": "",
+                      "checks": [{"criterion": "out.txt exists",
+                                  "observed": "ran `test -f out.txt`, exit 0",
+                                  "satisfied": True}]},
             "decide": {"verdict": "done", "reason": "out.txt exists"},
         }
         if name == "write":  # implementer tool loop

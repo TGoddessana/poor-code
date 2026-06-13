@@ -19,18 +19,20 @@ Emit the CodeContext for the exploration above.
 ==============================================================================
 NODE: acceptance_oracle  [planning]
 ==============================================================================
---- system (len=1738) ---
-You are the Acceptance Oracle. From the binding REQUIREMENT (CODE CONTEXT is reference only), define the GLOBAL CRITERIA for 'done' — what an observer must SEE to be sure the result is correct. You do NOT design the implementation plan, and you do NOT write shell scripts: a separate observe-judge Verifier will DRIVE the program and OBSERVE its real behaviour to check each criterion. Your job is to state each criterion clearly, concretely, and adversarially so a wrong implementation cannot pass it. One precise criterion per acceptance point.
+--- system (len=2258) ---
+You are the Acceptance Oracle. From the binding REQUIREMENT (CODE CONTEXT is reference only), design the GLOBAL acceptance check — the authoritative, runnable definition of 'done'. You do NOT see or design the implementation plan; you decide ONLY how we will KNOW the result is correct.
 RULES:
-1. State the EXACT expected behaviour/value, not a vague goal — e.g. 'for the 2x2 grid [[0,1],[2,3]] the output is the 6x6 grid <...>', not 'transforms the grid correctly'.
-2. Describe BEHAVIOUR an observer can check by running it (the file content produced, the HTTP response, the exit status), not that some string appears somewhere.
-ANTI-GAMING (a weak criterion lets a wrong or hard-coded impl pass):
-3. Demand EXACT equality of the whole value, never a substring that would also match a wrong value (e.g. a criterion satisfied by 5 must not be satisfied by 55).
-4. Name AT LEAST ONE input the requirement never mentions, with its correct expected output, so a lookup-table / hard-coded implementation fails.
-5. Name AT LEAST ONE boundary / extreme input (empty, zero, negative, very large, or malformed) and the behaviour expected for it.
-6. GROUND any API you reference against the CODE CONTEXT 'REAL APIs' below — name the real attribute/method (e.g. `.text`, not a recalled `.value`).
-You MAY optionally suggest a shell command per criterion as a hint, but it is NOT binding and is not run as a gate — the criterion TEXT is what the Verifier checks. Call emit_acceptance once.
---- user (len=9794) ---
+1. Each check is a RUNNABLE shell command; exit 0 means its criterion holds. Map each check to one acceptance criterion.
+2. Prefer CONTENT / BEHAVIOR equality over derived metrics. To check exact file content use `printf '%s' "$EXPECTED" | diff - file` or a literal grep — NOT a byte count like `wc -c == N`.
+3. NEVER assert a size/count/digest you did not obtain by actually running a command, and NEVER hard-code a guessed integer. Derive expected at run time, e.g. `expected=$(printf '%s' "$S" | wc -c)`.
+4. Observe REAL behavior (start the thing, curl it), never a surface string. A check that starts a long-running process MUST kill it and exit with the check's status.
+ANTI-GAMING INVARIANTS (apply to EVERY task — a check that violates these will be rejected by an adversarial critic):
+5. EXACT equality, never SUBSTRING. Match the whole value: `test "$got" = "$want"`, `grep -qx`, or `diff`. A check like `grep -q '"result":5'` is BROKEN — it also passes on 55 or 500.
+6. Defend against a LOOKUP-TABLE / hard-coded implementation: do NOT only check inputs named in the requirement or its examples. Include AT LEAST ONE input the requirement never mentions, whose expected output you DERIVE at run time — so an impl that hard-codes the example answers cannot pass.
+7. Include AT LEAST ONE boundary / extreme input (empty, zero, negative, very large, or malformed) where a naive or hard-coded implementation would diverge from a correct one.
+8. GROUND every API you assert against the CODE CONTEXT below. When a check inspects a library object, use the attributes/methods listed under 'REAL APIs' — do NOT guess from memory. A check that calls an attribute the object does not have (e.g. `.value` on a type whose real attribute is `.text`) raises at runtime and can NEVER pass, no matter how correct the implementation is. If the target type changes (e.g. Input→TextArea), assert against the NEW type's real API, not the old one's.
+Call emit_acceptance once.
+--- user (len=9666) ---
 REQUIREMENT:
 summary: Add input validation to run_shell in src/poor_code/domain/harness/nodes/execution.py: raise ValueError when the command string is empty or whitespace-only.
 acceptance:
@@ -43,10 +45,19 @@ open_questions (unresolved — do NOT design a check that pretends these are set
   (none)
 
 CODE CONTEXT:
-summary: The function `run_shell` is defined in `src/poor_code/domain/harness/nodes/execution.py` (line 99). It currently accepts a `command` string and passes it directly to `asyncio.create_subprocess_shell` without validating if the string is empty or whitespace-only. Several other modules call this function, including `api_probe.py`, `global_validator.py`, `provisioner.py`, and `validator.py`. No existing tests for this functionality were found in the codebase.
-INCOMPLETE EXPLORATION (unverified — treat with caution): Searched for tests in 'tests/' directory and across the project using glob and grep for 'test_', 'pytest', and 'unittest', but no test files were found in the current codebase.
+summary: Found the target function `run_shell` in `src/poor_code/domain/harness/nodes/execution.py` at line 99. It currently lacks input validation for the `command` argument. I identified several callers across the harness (api_probe, global_validator, provisioner, validator) that pass commands to this utility.
+INCOMPLETE EXPLORATION (unverified — treat with caution): I searched for all occurrences of run_shell() to see how it's called. No existing tests for run_shell were found in the provided codebase snippets, but the function itself and its callers are identified.
 relevant code: src/poor_code/domain/harness/nodes/execution.py:run_shell
 --- src/poor_code/domain/harness/nodes/execution.py …(truncated) ---
+    90	            if f in forbidden:
+    91	                return f"Edited forbidden path: {f}"
+    92	        return None
+    93	
+    94	
+    95	_OUTPUT_LIMIT = 30_000
+    96	_DEFAULT_TIMEOUT = 120
+    97	
+    98	
     99	async def run_shell(
    100	    command: str, cwd: Path, cancel: asyncio.Event, timeout: int = _DEFAULT_TIMEOUT
    101	) -> tuple[int, str]:
@@ -83,9 +94,7 @@ relevant code: src/poor_code/domain/harness/nodes/execution.py:run_shell
    132	
    133	def _prev_green_criteria(state, task) -> set[str]:
    134	    """Criteria that were GREEN on an EARLIER attempt of THIS task (union over the
-   135	    task's prior attempts' check_results). Excludes the cursor's latest attempt so a
-   136	    just-recorded result never counts itself as a baseline. This is the no-regression
-   137	    floor: a check that was once green must stay gree
+   135	    task's prior atte
 --- src/poor_code/domain/harness/api_probe.py ---
    100	    symbols = _select_symbols(excerpts, focus_terms)
    101	    if not symbols:
@@ -122,33 +131,38 @@ relevant code: src/poor_code/domain/harness/nodes/execution.py:run_shell
    132	    return frozenset(terms)
 
 --- src/poor_code/domain/harness/nodes/global_validator.py …(truncated) ---
-    70	        # there is no model-authored bash acceptance command to re-run here (re-running it
-    71	        # was the last bash floor that could false-abandon a correct build on its own
-    72	        # `set -o pipefail`). Finalize as pass — every task that reached here was judged by
-    73	        # the Verifier. (A whole-build cross-task observe-judge is a planned v2 refinement.)
-    74	        return NodeResult(branch="pass")
-    75	        # --- v1-disabled bash-check path (kept for the v2 observe-judge rewrite) ---
-    76	        failures: list[tuple[str, int, str]] = []  # type: ignore[unreachable]
-    77	        if ctx.state.acceptance is not None:
-    78	            for chk in ctx.state.acceptance.checks:
-    79	                code, out = await run_shell(chk.command, self._cwd, ctx.cancel)
-    80	                if code != 0:
-    81	                    failures.append((f"acceptance:{chk.criterion[:40]}", code, out))
-    82	        if not failures:
-    83	            return NodeResult(branch="pass")
-    84	
-    85	        # Repair hierarchy: scoped single-task repairs first (cheap), then full re-plan
-    86	        # fixups (heavy), then escalate to the user. The heavy fallback being exhausted
-    87	        # is the terminal condition — scoped repairs precede it and don't count here.
-    88	        plan_fixups = self._count(ctx.state, "planner")
-    89	        if plan_fixups >= MAX_FIXUPS:
-    90	            summary = "; ".join(f"{tid} exit {code}" for tid, code, _ in failures)
-    91	            return NodeResult(verdict=Verdict(
-    92	                kind=VerdictKind.ESCALATE,
-    93	                query=f"Global validation still failing after fixups: {summary}"))
-    94	
-    95	        self._failures = failures
-    96	        self._changeset = build_c
+    60	    def __init__(self, llm: _LLMClientLike, cwd: Path) -> None:
+    61	        super().__init__(llm)
+    62	        self._cwd = cwd
+    63	        self._failures: list[tuple[str, int, str]] = []
+    64	        self._changeset = ChangeSet()
+    65	
+    66	    async def run(self, ctx: NodeContext) -> NodeResult:
+    67	        plan = ctx.state.plan
+    68	        assert plan is not None, "global_validator requires a plan"
+    69	        failures: list[tuple[str, int, str]] = []
+    70	        if ctx.state.acceptance is not None:
+    71	            for chk in ctx.state.acceptance.checks:
+    72	                code, out = await run_shell(chk.command, self._cwd, ctx.cancel)
+    73	                if code != 0:
+    74	                    failures.append((f"acceptance:{chk.criterion[:40]}", code, out))
+    75	        if not failures:
+    76	            return NodeResult(branch="pass")
+    77	
+    78	        # Repair hierarchy: scoped single-task repairs first (cheap), then full re-plan
+    79	        # fixups (heavy), then escalate to the user. The heavy fallback being exhausted
+    80	        # is the terminal condition — scoped repairs precede it and don't count here.
+    81	        plan_fixups = self._count(ctx.state, "planner")
+    82	        if plan_fixups >= MAX_FIXUPS:
+    83	            summary = "; ".join(f"{tid} exit {code}" for tid, code, _ in failures)
+    84	            return NodeResult(verdict=Verdict(
+    85	                kind=VerdictKind.ESCALATE,
+    86	                query=f"Global validation still failing after fixups: {summary}"))
+    87	
+    88	        self._failures = failures
+    89	        self._changeset = build_changeset(ctx.state)
+    90	        out = validate_output(_AnalyzeOut, await self._dispatch(ctx), node=self.name)
+    91	        h
 --- src/poor_code/domain/harness/nodes/provisioner.py ---
    200	        ready, probe_note = await self._probe(ctx)
    201	        notes = " | ".join(n for n in (summary, probe_note) if n)
@@ -227,7 +241,7 @@ You are the Planner. Produce an implementation plan as MARKDOWN plus a tiny mach
 - tasks: for each section, {id, title, purpose, editable:[files it edits, 1-3], depends_on:[task ids]}. purpose is ONE line: what this task delivers and which acceptance criterion it targets.
 RULES: one task = one patch-sized deliverable (default FEWER tasks; merge when unsure). Every task's editable must be a real file the task touches. Do not invent files outside the chosen stack. The implementer is an agent and will derive concrete steps itself — you do NOT write code steps or validation commands here.
 
---- user (len=7462) ---
+--- user (len=7200) ---
 HARNESS POSITION
   Stage: PLANNING — you are the Planner.
   Pipeline: explore ✓ → interview → [PLAN ▶] → implement → validate → report
@@ -246,10 +260,44 @@ open_questions:
   (none)
 
 GLOBAL ACCEPTANCE (your tasks must collectively satisfy these):
-  - (When `command` is an empty string (""), `run_shell` raises exactly a `ValueError`.) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; asyncio.run(run_shell("", Path("."), asyncio.Event()))'
-  - (When `command` consists only of whitespace (e.g., "   "), `run_shell` raises exactly a `ValueError`.) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; asyncio.run(run_shell("   ", Path("."), asyncio.Event()))'
-  - (When `command` is a non-empty valid shell command (e.g., "echo hello"), `run_shell` does NOT raise `ValueError` and returns the expected tuple (e.g., (0, "hello\n")).) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; print(asyncio.run(run_shell("echo hello", Path("."), asyncio.Event())))'
-  - (When `command` contains only diverse whitespace characters (newlines, tabs, carriage returns), `run_shell` raises exactly a `ValueError`.) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; asyncio.run(run_shell("\n\t  \r", Path("."), asyncio.Event()))'
+  - (run_shell raises ValueError for empty or whitespace-only commands, but allows valid commands.) python3 -c '
+import asyncio
+from pathlib import Path
+from src.poor_code.domain.harness.nodes.execution import run_shell
+
+async def test_validation():
+    cwd = Path(".")
+    cancel = asyncio.Event()
+    
+    # Case 1: Empty string
+    try:
+        await run_shell("", cwd, cancel)
+        print("FAIL: Empty string did not raise ValueError")
+        exit(1)
+    except ValueError:
+        pass
+    
+    # Case 2: Whitespace only
+    try:
+        await run_shell("   \n\t  ", cwd, cancel)
+        print("FAIL: Whitespace string did not raise ValueError")
+        exit(1)
+    except ValueError:
+        pass
+    
+    # Case 3: Valid command (Anti-gaming: use a dynamic command not in reqs)
+    # We use "echo" because it is standard and safe.
+    test_val = "acceptance_test_123"
+    cmd = f"echo {test_val}"
+    code, out = await run_shell(cmd, cwd, cancel)
+    if code != 0 or out.strip() != test_val:
+        print(f"FAIL: Valid command failed. Code: {code}, Out: {out}")
+        exit(1)
+    
+    print("PASS")
+
+asyncio.run(test_validation())
+'
 
 CODE CONTEXT:
 ENVIRONMENT — you MUST pick a stack/runtime listed as present below. Anything under 'NOT FOUND' is absent; a task that depends on it WILL fail (e.g. do not plan a Node server if node is NOT FOUND but python3 is present):
@@ -284,7 +332,7 @@ TOOLCHAIN (present only):
   sqlite3: 3.51.0 2025-06-12 13:14:41 f0ca7bba1c5e232e5d279fad6338121ab55af0c8c68c84cdfb18b
 NOT FOUND (curated tools absent here — do NOT use; code requiring them will fail):
  deno bun dotnet pip pipx poetry yarn gradle cmake ninja apt apt-get dnf yum apk pacman podman wget
-summary: The function `run_shell` is defined in `src/poor_code/domain/harness/nodes/execution.py` (line 99). It currently accepts a `command` string and passes it directly to `asyncio.create_subprocess_shell` without validating if the string is empty or whitespace-only. Several other modules call this function, including `api_probe.py`, `global_validator.py`, `provisioner.py`, and `validator.py`. No existing tests for this functionality were found in the codebase.
+summary: Found the target function `run_shell` in `src/poor_code/domain/harness/nodes/execution.py` at line 99. It currently lacks input validation for the `command` argument. I identified several callers across the harness (api_probe, global_validator, provisioner, validator) that pass commands to this utility.
 candidates:
   - src/poor_code/domain/harness/nodes/execution.py::run_shell
 confusers:
@@ -292,18 +340,22 @@ confusers:
 related_tests:
   (none)
 --- src/poor_code/domain/harness/nodes/execution.py (truncated) ---
+    90	            if f in forbidden:
+    91	                return f"Edited forbidden path: {f}"
+    92	        return None
+    93	
+    94	
+    95	_OUTPUT_LIMIT = 30_000
+    96	_DEFAULT_TIMEOUT = 120
+    97	
+    98	
     99	async def run_shell(
    100	    command: str, cwd: Path, cancel: asyncio.Event, timeout: int = _DEFAULT_TIMEOUT
    101	) -> tuple[int, str]:
    102	    """Run a shell command in cwd; return (exit_code, truncated combined output).
    103	    Honors cancel (kills the process) and a timeout (exit 124)."""
    104	    if cancel.is_set():
-   105	        raise asyncio.CancelledError
-   106	    proc = await asyncio.create_subprocess_shell(
-   107	        command, stdout=asyncio.subprocess.PIPE,
-   108	        stderr=asyncio.subprocess.STDOUT, cwd=str(cwd))
-   109	
-   110	    async def _cancel_o …
+   105	        raise asyncio.CancelledErr …
 --- src/poor_code/domain/harness/api_probe.py (truncated) ---
    100	    symbols = _select_symbols(excerpts, focus_terms)
    101	    if not symbols:
@@ -320,13 +372,19 @@ related_tests:
    112	        else:
    113	          …
 --- src/poor_code/domain/harness/nodes/global_validator.py (truncated) ---
-    70	        # there is no model-authored bash acceptance command to re-run here (re-running it
-    71	        # was the last bash floor that could false-abandon a correct build on its own
-    72	        # `set -o pipefail`). Finalize as pass — every task that reached here was judged by
-    73	        # the Verifier. (A whole-build cross-task observe-judge is a planned v2 refinement.)
-    74	        return NodeResult(branch="pass")
-    75	        # --- v1-disabled bash-check path (kept for the v2 observe-judge rewrite) ---
-    76	        failures: list[tuple[str, int, str]] = []  # type: ign …
+    60	    def __init__(self, llm: _LLMClientLike, cwd: Path) -> None:
+    61	        super().__init__(llm)
+    62	        self._cwd = cwd
+    63	        self._failures: list[tuple[str, int, str]] = []
+    64	        self._changeset = ChangeSet()
+    65	
+    66	    async def run(self, ctx: NodeContext) -> NodeResult:
+    67	        plan = ctx.state.plan
+    68	        assert plan is not None, "global_validator requires a plan"
+    69	        failures: list[tuple[str, int, str]] = []
+    70	        if ctx.state.acceptance is not None:
+    71	            for chk in ctx.state.acceptance.checks:
+  …
 --- src/poor_code/domain/harness/nodes/provisioner.py (truncated) ---
    200	        ready, probe_note = await self._probe(ctx)
    201	        notes = " | ".join(n for n in (summary, probe_note) if n)
@@ -359,11 +417,11 @@ You are the Planner. Produce an implementation plan as MARKDOWN plus a tiny mach
 - tasks: for each section, {id, title, purpose, editable:[files it edits, 1-3], depends_on:[task ids]}. purpose is ONE line: what this task delivers and which acceptance criterion it targets.
 RULES: one task = one patch-sized deliverable (default FEWER tasks; merge when unsure). Every task's editable must be a real file the task touches. Do not invent files outside the chosen stack. The implementer is an agent and will derive concrete steps itself — you do NOT write code steps or validation commands here.
 
---- user (len=7865) ---
+--- user (len=7594) ---
 HARNESS POSITION
   Stage: PLANNING — you are the Planner.
   Pipeline: explore ✓ → interview → [PLAN ▶] → implement → validate → report
-  Progress: request captured; located (1 candidates); plan has 1 task; left: task_1.
+  Progress: request captured; located (1 candidates); plan has 1 task; left: task-1.
   After you: PlanGate checks your plan, then the Implementer builds each task.
 
 REQUIREMENT:
@@ -378,10 +436,44 @@ open_questions:
   (none)
 
 GLOBAL ACCEPTANCE (your tasks must collectively satisfy these):
-  - (When `command` is an empty string (""), `run_shell` raises exactly a `ValueError`.) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; asyncio.run(run_shell("", Path("."), asyncio.Event()))'
-  - (When `command` consists only of whitespace (e.g., "   "), `run_shell` raises exactly a `ValueError`.) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; asyncio.run(run_shell("   ", Path("."), asyncio.Event()))'
-  - (When `command` is a non-empty valid shell command (e.g., "echo hello"), `run_shell` does NOT raise `ValueError` and returns the expected tuple (e.g., (0, "hello\n")).) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; print(asyncio.run(run_shell("echo hello", Path("."), asyncio.Event())))'
-  - (When `command` contains only diverse whitespace characters (newlines, tabs, carriage returns), `run_shell` raises exactly a `ValueError`.) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; asyncio.run(run_shell("\n\t  \r", Path("."), asyncio.Event()))'
+  - (run_shell raises ValueError for empty or whitespace-only commands, but allows valid commands.) python3 -c '
+import asyncio
+from pathlib import Path
+from src.poor_code.domain.harness.nodes.execution import run_shell
+
+async def test_validation():
+    cwd = Path(".")
+    cancel = asyncio.Event()
+    
+    # Case 1: Empty string
+    try:
+        await run_shell("", cwd, cancel)
+        print("FAIL: Empty string did not raise ValueError")
+        exit(1)
+    except ValueError:
+        pass
+    
+    # Case 2: Whitespace only
+    try:
+        await run_shell("   \n\t  ", cwd, cancel)
+        print("FAIL: Whitespace string did not raise ValueError")
+        exit(1)
+    except ValueError:
+        pass
+    
+    # Case 3: Valid command (Anti-gaming: use a dynamic command not in reqs)
+    # We use "echo" because it is standard and safe.
+    test_val = "acceptance_test_123"
+    cmd = f"echo {test_val}"
+    code, out = await run_shell(cmd, cwd, cancel)
+    if code != 0 or out.strip() != test_val:
+        print(f"FAIL: Valid command failed. Code: {code}, Out: {out}")
+        exit(1)
+    
+    print("PASS")
+
+asyncio.run(test_validation())
+'
 
 CODE CONTEXT:
 ENVIRONMENT — you MUST pick a stack/runtime listed as present below. Anything under 'NOT FOUND' is absent; a task that depends on it WILL fail (e.g. do not plan a Node server if node is NOT FOUND but python3 is present):
@@ -416,7 +508,7 @@ TOOLCHAIN (present only):
   sqlite3: 3.51.0 2025-06-12 13:14:41 f0ca7bba1c5e232e5d279fad6338121ab55af0c8c68c84cdfb18b
 NOT FOUND (curated tools absent here — do NOT use; code requiring them will fail):
  deno bun dotnet pip pipx poetry yarn gradle cmake ninja apt apt-get dnf yum apk pacman podman wget
-summary: The function `run_shell` is defined in `src/poor_code/domain/harness/nodes/execution.py` (line 99). It currently accepts a `command` string and passes it directly to `asyncio.create_subprocess_shell` without validating if the string is empty or whitespace-only. Several other modules call this function, including `api_probe.py`, `global_validator.py`, `provisioner.py`, and `validator.py`. No existing tests for this functionality were found in the codebase.
+summary: Found the target function `run_shell` in `src/poor_code/domain/harness/nodes/execution.py` at line 99. It currently lacks input validation for the `command` argument. I identified several callers across the harness (api_probe, global_validator, provisioner, validator) that pass commands to this utility.
 candidates:
   - src/poor_code/domain/harness/nodes/execution.py::run_shell
 confusers:
@@ -424,18 +516,22 @@ confusers:
 related_tests:
   (none)
 --- src/poor_code/domain/harness/nodes/execution.py (truncated) ---
+    90	            if f in forbidden:
+    91	                return f"Edited forbidden path: {f}"
+    92	        return None
+    93	
+    94	
+    95	_OUTPUT_LIMIT = 30_000
+    96	_DEFAULT_TIMEOUT = 120
+    97	
+    98	
     99	async def run_shell(
    100	    command: str, cwd: Path, cancel: asyncio.Event, timeout: int = _DEFAULT_TIMEOUT
    101	) -> tuple[int, str]:
    102	    """Run a shell command in cwd; return (exit_code, truncated combined output).
    103	    Honors cancel (kills the process) and a timeout (exit 124)."""
    104	    if cancel.is_set():
-   105	        raise asyncio.CancelledError
-   106	    proc = await asyncio.create_subprocess_shell(
-   107	        command, stdout=asyncio.subprocess.PIPE,
-   108	        stderr=asyncio.subprocess.STDOUT, cwd=str(cwd))
-   109	
-   110	    async def _cancel_o …
+   105	        raise asyncio.CancelledErr …
 --- src/poor_code/domain/harness/api_probe.py (truncated) ---
    100	    symbols = _select_symbols(excerpts, focus_terms)
    101	    if not symbols:
@@ -452,13 +548,19 @@ related_tests:
    112	        else:
    113	          …
 --- src/poor_code/domain/harness/nodes/global_validator.py (truncated) ---
-    70	        # there is no model-authored bash acceptance command to re-run here (re-running it
-    71	        # was the last bash floor that could false-abandon a correct build on its own
-    72	        # `set -o pipefail`). Finalize as pass — every task that reached here was judged by
-    73	        # the Verifier. (A whole-build cross-task observe-judge is a planned v2 refinement.)
-    74	        return NodeResult(branch="pass")
-    75	        # --- v1-disabled bash-check path (kept for the v2 observe-judge rewrite) ---
-    76	        failures: list[tuple[str, int, str]] = []  # type: ign …
+    60	    def __init__(self, llm: _LLMClientLike, cwd: Path) -> None:
+    61	        super().__init__(llm)
+    62	        self._cwd = cwd
+    63	        self._failures: list[tuple[str, int, str]] = []
+    64	        self._changeset = ChangeSet()
+    65	
+    66	    async def run(self, ctx: NodeContext) -> NodeResult:
+    67	        plan = ctx.state.plan
+    68	        assert plan is not None, "global_validator requires a plan"
+    69	        failures: list[tuple[str, int, str]] = []
+    70	        if ctx.state.acceptance is not None:
+    71	            for chk in ctx.state.acceptance.checks:
+  …
 --- src/poor_code/domain/harness/nodes/provisioner.py (truncated) ---
    200	        ready, probe_note = await self._probe(ctx)
    201	        notes = " | ".join(n for n in (summary, probe_note) if n)
@@ -483,10 +585,10 @@ related_tests:
     67	        checks = ctx.state.acceptance.checks if ctx.state.acceptance else ( …
 
 SURGICAL REPAIR — your previous plan was REJECTED for this reason:
-  Task task_1 is in the skeleton but not described in plan_md; every skeleton task must have a '## task_1:' section.
+  Task task-1 is in the skeleton but not described in plan_md; every skeleton task must have a '## task-1:' section.
 Fix ONLY the task named in that reason; keep every other task unchanged.
 PRIOR PLAN (tasks):
-  task_1 [src/poor_code/domain/harness/nodes/execution.py] Add input validation to run_shell
+  task-1 [src/poor_code/domain/harness/nodes/execution.py] Validate run_shell input
 
 
 ==============================================================================
@@ -502,12 +604,46 @@ RULES:
 4b. If STEPS are listed, execute them IN ORDER: apply the step's code to its file, then run its command and confirm the result matches EXPECTED before moving to the next step. If a step's command does not match EXPECTED, fix that step and re-run it before advancing — do not skip ahead.
 5. If PAST FAILURES or a REPAIR HINT are present, address them first.
 6. If the TASK runs a service (a server/daemon), launch it with bash background:true and LEAVE IT RUNNING — never kill it on success; it must outlive this run, and the validation probe checks the LIVE instance, so launch before the probe runs. If a launch fails (e.g. the port is already bound), READ the error and adapt — free the port, or use another port if the task allows — do not retry the identical launch.
---- user (len=13804) ---
+--- user (len=13685) ---
 ACCEPTANCE SPEC (full target; your slice is THIS TASK below):
-  - (When `command` is an empty string (""), `run_shell` raises exactly a `ValueError`.) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; asyncio.run(run_shell("", Path("."), asyncio.Event()))'
-  - (When `command` consists only of whitespace (e.g., "   "), `run_shell` raises exactly a `ValueError`.) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; asyncio.run(run_shell("   ", Path("."), asyncio.Event()))'
-  - (When `command` is a non-empty valid shell command (e.g., "echo hello"), `run_shell` does NOT raise `ValueError` and returns the expected tuple (e.g., (0, "hello\n")).) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; print(asyncio.run(run_shell("echo hello", Path("."), asyncio.Event())))'
-  - (When `command` contains only diverse whitespace characters (newlines, tabs, carriage returns), `run_shell` raises exactly a `ValueError`.) python3 -c 'import asyncio; from pathlib import Path; from src.poor_code.domain.harness.nodes.execution import run_shell; asyncio.run(run_shell("\n\t  \r", Path("."), asyncio.Event()))'
+  - (run_shell raises ValueError for empty or whitespace-only commands, but allows valid commands.) python3 -c '
+import asyncio
+from pathlib import Path
+from src.poor_code.domain.harness.nodes.execution import run_shell
+
+async def test_validation():
+    cwd = Path(".")
+    cancel = asyncio.Event()
+    
+    # Case 1: Empty string
+    try:
+        await run_shell("", cwd, cancel)
+        print("FAIL: Empty string did not raise ValueError")
+        exit(1)
+    except ValueError:
+        pass
+    
+    # Case 2: Whitespace only
+    try:
+        await run_shell("   \n\t  ", cwd, cancel)
+        print("FAIL: Whitespace string did not raise ValueError")
+        exit(1)
+    except ValueError:
+        pass
+    
+    # Case 3: Valid command (Anti-gaming: use a dynamic command not in reqs)
+    # We use "echo" because it is standard and safe.
+    test_val = "acceptance_test_123"
+    cmd = f"echo {test_val}"
+    code, out = await run_shell(cmd, cwd, cancel)
+    if code != 0 or out.strip() != test_val:
+        print(f"FAIL: Valid command failed. Code: {code}, Out: {out}")
+        exit(1)
+    
+    print("PASS")
+
+asyncio.run(test_validation())
+'
 
 COMPLETED WORK (ledger):
 (no completed work yet)
@@ -515,7 +651,7 @@ COMPLETED WORK (ledger):
 HARNESS POSITION
   Stage: IMPLEMENTING — you are the Implementer.
   Pipeline: explore ✓ → interview → plan ✓ → [IMPLEMENT ▶] → validate → report
-  Progress: request captured; located (1 candidates); plan has 1 task; doing: task_1 "Add input validation to run_shell".
+  Progress: request captured; located (1 candidates); plan has 1 task; doing: task-1 "Validate run_shell input".
   After this task: ValidationRunner runs your VALIDATION; pass -> next task, fail -> you retry.
 
 ORIGINAL REQUEST:
@@ -552,16 +688,25 @@ TOOLCHAIN (present only):
   sqlite3: 3.51.0 2025-06-12 13:14:41 f0ca7bba1c5e232e5d279fad6338121ab55af0c8c68c84cdfb18b
 NOT FOUND (curated tools absent here — do NOT use; code requiring them will fail):
  deno bun dotnet pip pipx poetry yarn gradle cmake ninja apt apt-get dnf yum apk pacman podman wget
-TASK: Add input validation to run_shell
-PURPOSE: Raise ValueError if command is empty or whitespace-only in run_shell to satisfy all acceptance criteria.
+TASK: Validate run_shell input
+PURPOSE: Raise ValueError for empty or whitespace-only commands in run_shell.
 DETAILS:
-## task_1: src/poor_code/domain/harness/nodes/execution.py — Add input validation to run_shell
+## task-1: src/poor_code/domain/harness/nodes/execution.py — Add input validation to run_shell
 
-Add a check at the beginning of `run_shell` to ensure the `command` argument is not empty or consisting solely of whitespace. If it is, a `ValueError` must be raised. This satisfies all global acceptance criteria regarding empty, whitespace-only, and valid shell command inputs.
+Implement a check at the beginning of the `run_shell` function to ensure the `command` string is not empty or composed solely of whitespace. If the command is invalid, raise a `ValueError`. This ensures that the shell is not invoked with empty input, satisfying the global acceptance criteria.
 EDITABLE PATHS: src/poor_code/domain/harness/nodes/execution.py
 
 RELEVANT CODE (ground truth — edit against THIS; do NOT retype from memory):
 --- src/poor_code/domain/harness/nodes/execution.py [EDITABLE] …(truncated) ---
+    90	            if f in forbidden:
+    91	                return f"Edited forbidden path: {f}"
+    92	        return None
+    93	
+    94	
+    95	_OUTPUT_LIMIT = 30_000
+    96	_DEFAULT_TIMEOUT = 120
+    97	
+    98	
     99	async def run_shell(
    100	    command: str, cwd: Path, cancel: asyncio.Event, timeout: int = _DEFAULT_TIMEOUT
    101	) -> tuple[int, str]:
@@ -598,9 +743,7 @@ RELEVANT CODE (ground truth — edit against THIS; do NOT retype from memory):
    132	
    133	def _prev_green_criteria(state, task) -> set[str]:
    134	    """Criteria that were GREEN on an EARLIER attempt of THIS task (union over the
-   135	    task's prior attempts' check_results). Excludes the cursor's latest attempt so a
-   136	    just-recorded result never counts itself as a baseline. This is the no-regression
-   137	    floor: a check that was once green must stay gree
+   135	    task's prior atte
 --- src/poor_code/domain/harness/api_probe.py [REFERENCE] ---
    100	    symbols = _select_symbols(excerpts, focus_terms)
    101	    if not symbols:
@@ -637,33 +780,38 @@ RELEVANT CODE (ground truth — edit against THIS; do NOT retype from memory):
    132	    return frozenset(terms)
 
 --- src/poor_code/domain/harness/nodes/global_validator.py [REFERENCE] …(truncated) ---
-    70	        # there is no model-authored bash acceptance command to re-run here (re-running it
-    71	        # was the last bash floor that could false-abandon a correct build on its own
-    72	        # `set -o pipefail`). Finalize as pass — every task that reached here was judged by
-    73	        # the Verifier. (A whole-build cross-task observe-judge is a planned v2 refinement.)
-    74	        return NodeResult(branch="pass")
-    75	        # --- v1-disabled bash-check path (kept for the v2 observe-judge rewrite) ---
-    76	        failures: list[tuple[str, int, str]] = []  # type: ignore[unreachable]
-    77	        if ctx.state.acceptance is not None:
-    78	            for chk in ctx.state.acceptance.checks:
-    79	                code, out = await run_shell(chk.command, self._cwd, ctx.cancel)
-    80	                if code != 0:
-    81	                    failures.append((f"acceptance:{chk.criterion[:40]}", code, out))
-    82	        if not failures:
-    83	            return NodeResult(branch="pass")
-    84	
-    85	        # Repair hierarchy: scoped single-task repairs first (cheap), then full re-plan
-    86	        # fixups (heavy), then escalate to the user. The heavy fallback being exhausted
-    87	        # is the terminal condition — scoped repairs precede it and don't count here.
-    88	        plan_fixups = self._count(ctx.state, "planner")
-    89	        if plan_fixups >= MAX_FIXUPS:
-    90	            summary = "; ".join(f"{tid} exit {code}" for tid, code, _ in failures)
-    91	            return NodeResult(verdict=Verdict(
-    92	                kind=VerdictKind.ESCALATE,
-    93	                query=f"Global validation still failing after fixups: {summary}"))
-    94	
-    95	        self._failures = failures
-    96	        self._changeset = build_c
+    60	    def __init__(self, llm: _LLMClientLike, cwd: Path) -> None:
+    61	        super().__init__(llm)
+    62	        self._cwd = cwd
+    63	        self._failures: list[tuple[str, int, str]] = []
+    64	        self._changeset = ChangeSet()
+    65	
+    66	    async def run(self, ctx: NodeContext) -> NodeResult:
+    67	        plan = ctx.state.plan
+    68	        assert plan is not None, "global_validator requires a plan"
+    69	        failures: list[tuple[str, int, str]] = []
+    70	        if ctx.state.acceptance is not None:
+    71	            for chk in ctx.state.acceptance.checks:
+    72	                code, out = await run_shell(chk.command, self._cwd, ctx.cancel)
+    73	                if code != 0:
+    74	                    failures.append((f"acceptance:{chk.criterion[:40]}", code, out))
+    75	        if not failures:
+    76	            return NodeResult(branch="pass")
+    77	
+    78	        # Repair hierarchy: scoped single-task repairs first (cheap), then full re-plan
+    79	        # fixups (heavy), then escalate to the user. The heavy fallback being exhausted
+    80	        # is the terminal condition — scoped repairs precede it and don't count here.
+    81	        plan_fixups = self._count(ctx.state, "planner")
+    82	        if plan_fixups >= MAX_FIXUPS:
+    83	            summary = "; ".join(f"{tid} exit {code}" for tid, code, _ in failures)
+    84	            return NodeResult(verdict=Verdict(
+    85	                kind=VerdictKind.ESCALATE,
+    86	                query=f"Global validation still failing after fixups: {summary}"))
+    87	
+    88	        self._failures = failures
+    89	        self._changeset = build_changeset(ctx.state)
+    90	        out = validate_output(_AnalyzeOut, await self._dispatch(ctx), node=self.name)
+    91	        h
 --- src/poor_code/domain/harness/nodes/provisioner.py [REFERENCE] ---
    200	        ready, probe_note = await self._probe(ctx)
    201	        notes = " | ".join(n for n in (summary, probe_note) if n)
@@ -733,57 +881,86 @@ RELEVANT CODE (ground truth — edit against THIS; do NOT retype from memory):
     86	                f"ACCEPTANCE SPEC (the whole target; judge PROGRESS + NO-REGRESSION, not full pass):\n"
     87	                f"{accept}\
 UNVERIFIED — confirm by READING the file (use the read/grep tools) before coding against an assumption:
-  - exploration was incomplete: Searched for tests in 'tests/' directory and across the project using glob and grep for 'test_', 'pytest', and 'unittest', but no test files were found in the current codebase.
+  - exploration was incomplete: I searched for all occurrences of run_shell() to see how it's called. No existing tests for run_shell were found in the provided codebase snippets, but the function itself and its callers are identified.
 ENVIRONMENT READY — the provisioner already set up the test env. Dependencies are ALREADY installed: do NOT reinstall them and do NOT hand-create stub/fake modules to satisfy imports. Run the project's tests with: python -m pytest -q. Notes: pytest collection failed (exit 5): no tests collected in 0.01s
-REPAIR HINT: Task task_1 is in the skeleton but not described in plan_md; every skeleton task must have a '## task_1:' section.
+REPAIR HINT: Task task-1 is in the skeleton but not described in plan_md; every skeleton task must have a '## task-1:' section.
 
 ==============================================================================
-NODE: verifier  [implementing]
+NODE: validator  [implementing]
 ==============================================================================
---- system (len=754) ---
-You are the adversarial Verifier. The CRITERIA below define what 'done' means for this task. Your job in this phase: DRIVE the implementation and OBSERVE its REAL behaviour using your tools — run it, start any server in the BACKGROUND and curl it, feed it inputs (including empty / boundary / values NOT named in the task so a hard-coded impl is exposed), and inspect the files and output it produced. Use bash to execute and read/grep/glob/list to inspect.
-Be ADVERSARIAL: actively hunt for an input or case where it FAILS a criterion. Verify by OBSERVATION, never assume from how the code looks.
-Do NOT modify any code — you have no write/edit tools; you only run and inspect. When you have observed enough to judge every criterion, stop calling tools.
---- user (len=4003) ---
-CRITERIA (the definition of done — verify EACH by observation):
-  - When `command` is an empty string (""), `run_shell` raises exactly a `ValueError`.
-  - When `command` consists only of whitespace (e.g., "   "), `run_shell` raises exactly a `ValueError`.
-  - When `command` is a non-empty valid shell command (e.g., "echo hello"), `run_shell` does NOT raise `ValueError` and returns the expected tuple (e.g., (0, "hello\n")).
-  - When `command` contains only diverse whitespace characters (newlines, tabs, carriage returns), `run_shell` raises exactly a `ValueError`.
+--- system (len=542) ---
+You are an adversarial Validator with REAL EXECUTION RESULTS in hand (see OBSERVED). The acceptance spec is the whole target; this task is one step toward it. Decide: 'advance' (this patch is correct and regresses NO already-green acceptance check), 'repair_impl' (a hole — cite the failing OBSERVED check and give a specific hint), or 'repair_plan' (the plan/task is mis-scoped — say why). Trust OBSERVED over the patch's narrative. Judge SCOPE with sense (a closely-related file is fine; only flag clearly unrelated edits). Call judge once.
+--- user (len=4293) ---
+ACCEPTANCE SPEC (the whole target; judge PROGRESS + NO-REGRESSION, not full pass):
+  - (run_shell raises ValueError for empty or whitespace-only commands, but allows valid commands.) python3 -c '
+import asyncio
+from pathlib import Path
+from src.poor_code.domain.harness.nodes.execution import run_shell
 
-HARNESS POSITION
-  Stage: verifier
-  Pipeline: explore ✓ → interview → plan ✓ → implement → validate → report
-  Progress: request captured; located (1 candidates); plan has 1 task; doing: task_1 "Add input validation to run_shell".
+async def test_validation():
+    cwd = Path(".")
+    cancel = asyncio.Event()
+    
+    # Case 1: Empty string
+    try:
+        await run_shell("", cwd, cancel)
+        print("FAIL: Empty string did not raise ValueError")
+        exit(1)
+    except ValueError:
+        pass
+    
+    # Case 2: Whitespace only
+    try:
+        await run_shell("   \n\t  ", cwd, cancel)
+        print("FAIL: Whitespace string did not raise ValueError")
+        exit(1)
+    except ValueError:
+        pass
+    
+    # Case 3: Valid command (Anti-gaming: use a dynamic command not in reqs)
+    # We use "echo" because it is standard and safe.
+    test_val = "acceptance_test_123"
+    cmd = f"echo {test_val}"
+    code, out = await run_shell(cmd, cwd, cancel)
+    if code != 0 or out.strip() != test_val:
+        print(f"FAIL: Valid command failed. Code: {code}, Out: {out}")
+        exit(1)
+    
+    print("PASS")
 
-ORIGINAL REQUEST:
-Add input validation to run_shell in src/poor_code/domain/harness/nodes/execution.py: raise ValueError when the command string is empty or whitespace-only.
-OVERALL GOAL:
-Add input validation to run_shell in src/poor_code/domain/harness/nodes/execution.py: raise ValueError when the command string is empty or whitespace-only.
+asyncio.run(test_validation())
+'
 
-TASK UNDER VERIFICATION:
-## task_1: src/poor_code/domain/harness/nodes/execution.py — Add input validation to run_shell
+OBSERVED (real execution of the acceptance checks just now):
+  - run_shell raises ValueError for empty or whitespace-only commands, but allows valid commands. -> PASS
+    PASS
 
-Add a check at the beginning of `run_shell` to ensure the `command` argument is not empty or consisting solely of whitespace. If it is, a `ValueError` must be raised. This satisfies all global acceptance criteria regarding empty, whitespace-only, and valid shell command inputs.
 
 COMPLETED WORK (ledger):
 (no completed work yet)
 
-PATCH JUST PRODUCED (do not trust it — observe its real effect):
+THIS TASK:
+## task-1: src/poor_code/domain/harness/nodes/execution.py — Add input validation to run_shell
+
+Implement a check at the beginning of the `run_shell` function to ensure the `command` string is not empty or composed solely of whitespace. If the command is invalid, raise a `ValueError`. This ensures that the shell is not invoked with empty input, satisfying the global acceptance criteria.
+EDITABLE (guidance): src/poor_code/domain/harness/nodes/execution.py
+FORBIDDEN: (none)
+
+PATCH:
 diff --git a/src/poor_code/__pycache__/__init__.cpython-314.pyc b/src/poor_code/__pycache__/__init__.cpython-314.pyc
-index 33ac9f8..c156efd 100644
+index 33ac9f8..c599b98 100644
 Binary files a/src/poor_code/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/__pycache__/__init__.cpython-314.pyc differ
 diff --git a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc
-index 59c6990..fb286e1 100644
+index 59c6990..3391b18 100644
 Binary files a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc differ
 diff --git a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc
-index 716a1db..ff11780 100644
+index 716a1db..345b385 100644
 Binary files a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc differ
 diff --git a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc
-index a1630b8..f2e18cd 100644
+index a1630b8..b060cbe 100644
 Binary files a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc differ
 diff --git a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc
-index cfd5c2d..7c6c780 100644
+index cfd5c2d..b46247b 100644
 Binary files a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc differ
 diff --git a/src/poor_code/domain/harness/nodes/execution.py b/src/poor_code/domain/harness/nodes/execution.py
 index 0c34fdf..4d9690a 100644
@@ -801,13 +978,104 @@ index 0c34fdf..4d9690a 100644
 
 
 ==============================================================================
-NODE: verifier  [implementing]
+NODE: completion_gate  [implementing]
 ==============================================================================
---- system (len=570) ---
-From what you OBSERVED above, judge this task against the CRITERIA. Choose exactly one:
-- 'advance': EVERY criterion is satisfied by behaviour you actually OBSERVED (ran it and saw the right result) — not merely plausible from the code. If you could not observe something, it is NOT advance.
-- 'repair_impl': a criterion is not met. CITE the criterion and the OBSERVED evidence (the real output/error you saw) and give a concrete fix hint.
-- 'repair_plan': the task/plan is mis-scoped (wrong files, wrong decomposition). Say why.
-Trust ONLY observation. Call judge once.
---- user (len=74) ---
-Emit your verdict for the task above, judging ONLY from what you observed.
+--- system (len=1229) ---
+You are the Completion Judge — the final authority on whether THIS task is DONE. You are given OBSERVED objective check results that were just executed. Choose ONE verdict:
+- 'done': the task's goal is genuinely achieved.
+    * VERIFIABLE task (objective checks exist): choose done ONLY when the checks PASS. If they pass but do NOT actually capture the request (a wrong implementation would also pass them), choose 'repair_impl' instead. You may NOT call a task with FAILING checks done.
+    * OPEN-ENDED task (no objective check): judge holistically from the PATCH and the REQUEST intent — is the change real, complete, and on-target?
+- 'repair_impl': the implementation has a hole. Cite the failing OBSERVED check and give a concrete, actionable hint.
+- 'repair_plan': the task is mis-scoped — wrong files, wrong decomposition. Say why.
+- 'repair_accept': the CHECK ITSELF is broken — it errors or cannot pass regardless of a correct implementation. Signs: 'Illegal option', 'command not found', a missing tool/runtime, a shell incompatibility, or a hard-coded expectation nobody derived. The implementation is NOT at fault; the acceptance check must be redesigned.
+Trust OBSERVED over the patch's narrative. Call decide once.
+--- user (len=4524) ---
+REQUEST (the user's intent — what 'done' must mean):
+Add input validation to run_shell in src/poor_code/domain/harness/nodes/execution.py: raise ValueError when the command string is empty or whitespace-only.
+
+STATED ACCEPTANCE:
+  (none stated)
+
+ACCEPTANCE SPEC (objective checks):
+  - (run_shell raises ValueError for empty or whitespace-only commands, but allows valid commands.) python3 -c '
+import asyncio
+from pathlib import Path
+from src.poor_code.domain.harness.nodes.execution import run_shell
+
+async def test_validation():
+    cwd = Path(".")
+    cancel = asyncio.Event()
+    
+    # Case 1: Empty string
+    try:
+        await run_shell("", cwd, cancel)
+        print("FAIL: Empty string did not raise ValueError")
+        exit(1)
+    except ValueError:
+        pass
+    
+    # Case 2: Whitespace only
+    try:
+        await run_shell("   \n\t  ", cwd, cancel)
+        print("FAIL: Whitespace string did not raise ValueError")
+        exit(1)
+    except ValueError:
+        pass
+    
+    # Case 3: Valid command (Anti-gaming: use a dynamic command not in reqs)
+    # We use "echo" because it is standard and safe.
+    test_val = "acceptance_test_123"
+    cmd = f"echo {test_val}"
+    code, out = await run_shell(cmd, cwd, cancel)
+    if code != 0 or out.strip() != test_val:
+        print(f"FAIL: Valid command failed. Code: {code}, Out: {out}")
+        exit(1)
+    
+    print("PASS")
+
+asyncio.run(test_validation())
+'
+
+TASK TYPE: VERIFIABLE (objective checks exist — done requires them to PASS)
+OBJECTIVE FLOOR: PASS
+
+OBSERVED (real check execution just now):
+  - run_shell raises ValueError for empty or whitespace-only commands, but allows valid commands. -> PASS
+  output:
+all known-green checks still pass; 1/1 acceptance checks green
+
+THIS TASK:
+## task-1: src/poor_code/domain/harness/nodes/execution.py — Add input validation to run_shell
+
+Implement a check at the beginning of the `run_shell` function to ensure the `command` string is not empty or composed solely of whitespace. If the command is invalid, raise a `ValueError`. This ensures that the shell is not invoked with empty input, satisfying the global acceptance criteria.
+
+PATCH (the change being judged):
+diff --git a/src/poor_code/__pycache__/__init__.cpython-314.pyc b/src/poor_code/__pycache__/__init__.cpython-314.pyc
+index 33ac9f8..c599b98 100644
+Binary files a/src/poor_code/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/__pycache__/__init__.cpython-314.pyc differ
+diff --git a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc
+index 59c6990..3391b18 100644
+Binary files a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc differ
+diff --git a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc
+index 716a1db..345b385 100644
+Binary files a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc differ
+diff --git a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc
+index a1630b8..b060cbe 100644
+Binary files a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc differ
+diff --git a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc
+index cfd5c2d..b46247b 100644
+Binary files a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc differ
+diff --git a/src/poor_code/domain/harness/nodes/execution.py b/src/poor_code/domain/harness/nodes/execution.py
+index 0c34fdf..4d9690a 100644
+--- a/src/poor_code/domain/harness/nodes/execution.py
++++ b/src/poor_code/domain/harness/nodes/execution.py
+@@ -101,6 +101,8 @@ async def run_shell(
+ ) -> tuple[int, str]:
+     """Run a shell command in cwd; return (exit_code, truncated combined output).
+     Honors cancel (kills the process) and a timeout (exit 124)."""
++    if not command or not command.strip():
++        raise ValueError("Command cannot be empty or whitespace-only")
+     if cancel.is_set():
+         raise asyncio.CancelledError
+     proc = await asyncio.create_subprocess_shell(
+

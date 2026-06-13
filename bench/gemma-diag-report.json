@@ -2,81 +2,75 @@
   "outcome": "succeeded",
   "tasks": [
     {
-      "task_id": "task-1",
-      "title": "Validate run_shell input",
+      "task_id": "task_1",
+      "title": "Add input validation to run_shell",
       "status": "done",
       "attempts": 1,
-      "validation_command": "python3 -c '\nimport asyncio\nfrom pathlib import Path\nfrom src.poor_code.domain.harness.nodes.execution import run_shell\n\nasync def test_validation():\n    cwd = Path(\".\")\n    cancel = asyncio.Event()\n    \n    # Case 1: Empty string\n    try:\n        await run_shell(\"\", cwd, cancel)\n        print(\"FAIL: Empty string did not raise ValueError\")\n        exit(1)\n    except ValueError:\n        pass\n    \n    # Case 2: Whitespace only\n    try:\n        await run_shell(\"   \\n\\t  \", cwd, cancel)\n        print(\"FAIL: Whitespace string did not raise ValueError\")\n        exit(1)\n    except ValueError:\n        pass\n    \n    # Case 3: Valid command (Anti-gaming: use a dynamic command not in reqs)\n    # We use \"echo\" because it is standard and safe.\n    test_val = \"acceptance_test_123\"\n    cmd = f\"echo {test_val}\"\n    code, out = await run_shell(cmd, cwd, cancel)\n    if code != 0 or out.strip() != test_val:\n        print(f\"FAIL: Valid command failed. Code: {code}, Out: {out}\")\n        exit(1)\n    \n    print(\"PASS\")\n\nasyncio.run(test_validation())\n'",
-      "validation_exit": 0,
-      "validation_output": "all known-green checks still pass; 1/1 acceptance checks green"
+      "validation_command": "",
+      "validation_exit": null,
+      "validation_output": ""
     }
   ],
   "global_validation_passed": true,
   "changeset": {
-    "aggregate_diff": "# task task-1\ndiff --git a/src/poor_code/__pycache__/__init__.cpython-314.pyc b/src/poor_code/__pycache__/__init__.cpython-314.pyc\nindex 33ac9f8..c599b98 100644\nBinary files a/src/poor_code/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc\nindex 59c6990..3391b18 100644\nBinary files a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc\nindex 716a1db..345b385 100644\nBinary files a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc\nindex a1630b8..b060cbe 100644\nBinary files a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc\nindex cfd5c2d..b46247b 100644\nBinary files a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/execution.py b/src/poor_code/domain/harness/nodes/execution.py\nindex 0c34fdf..4d9690a 100644\n--- a/src/poor_code/domain/harness/nodes/execution.py\n+++ b/src/poor_code/domain/harness/nodes/execution.py\n@@ -101,6 +101,8 @@ async def run_shell(\n ) -> tuple[int, str]:\n     \"\"\"Run a shell command in cwd; return (exit_code, truncated combined output).\n     Honors cancel (kills the process) and a timeout (exit 124).\"\"\"\n+    if not command or not command.strip():\n+        raise ValueError(\"Command cannot be empty or whitespace-only\")\n     if cancel.is_set():\n         raise asyncio.CancelledError\n     proc = await asyncio.create_subprocess_shell(\n",
+    "aggregate_diff": "# task task_1\ndiff --git a/src/poor_code/__pycache__/__init__.cpython-314.pyc b/src/poor_code/__pycache__/__init__.cpython-314.pyc\nindex 33ac9f8..c156efd 100644\nBinary files a/src/poor_code/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc\nindex 59c6990..fb286e1 100644\nBinary files a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc\nindex 716a1db..ff11780 100644\nBinary files a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc\nindex a1630b8..f2e18cd 100644\nBinary files a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc\nindex cfd5c2d..7c6c780 100644\nBinary files a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/execution.py b/src/poor_code/domain/harness/nodes/execution.py\nindex 0c34fdf..4d9690a 100644\n--- a/src/poor_code/domain/harness/nodes/execution.py\n+++ b/src/poor_code/domain/harness/nodes/execution.py\n@@ -101,6 +101,8 @@ async def run_shell(\n ) -> tuple[int, str]:\n     \"\"\"Run a shell command in cwd; return (exit_code, truncated combined output).\n     Honors cancel (kills the process) and a timeout (exit 124).\"\"\"\n+    if not command or not command.strip():\n+        raise ValueError(\"Command cannot be empty or whitespace-only\")\n     if cancel.is_set():\n         raise asyncio.CancelledError\n     proc = await asyncio.create_subprocess_shell(\n",
     "per_task": [
       [
-        "task-1",
-        "diff --git a/src/poor_code/__pycache__/__init__.cpython-314.pyc b/src/poor_code/__pycache__/__init__.cpython-314.pyc\nindex 33ac9f8..c599b98 100644\nBinary files a/src/poor_code/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc\nindex 59c6990..3391b18 100644\nBinary files a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc\nindex 716a1db..345b385 100644\nBinary files a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc\nindex a1630b8..b060cbe 100644\nBinary files a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc\nindex cfd5c2d..b46247b 100644\nBinary files a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/execution.py b/src/poor_code/domain/harness/nodes/execution.py\nindex 0c34fdf..4d9690a 100644\n--- a/src/poor_code/domain/harness/nodes/execution.py\n+++ b/src/poor_code/domain/harness/nodes/execution.py\n@@ -101,6 +101,8 @@ async def run_shell(\n ) -> tuple[int, str]:\n     \"\"\"Run a shell command in cwd; return (exit_code, truncated combined output).\n     Honors cancel (kills the process) and a timeout (exit 124).\"\"\"\n+    if not command or not command.strip():\n+        raise ValueError(\"Command cannot be empty or whitespace-only\")\n     if cancel.is_set():\n         raise asyncio.CancelledError\n     proc = await asyncio.create_subprocess_shell(\n"
+        "task_1",
+        "diff --git a/src/poor_code/__pycache__/__init__.cpython-314.pyc b/src/poor_code/__pycache__/__init__.cpython-314.pyc\nindex 33ac9f8..c156efd 100644\nBinary files a/src/poor_code/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc\nindex 59c6990..fb286e1 100644\nBinary files a/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc\nindex 716a1db..ff11780 100644\nBinary files a/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc\nindex a1630b8..f2e18cd 100644\nBinary files a/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/__init__.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc\nindex cfd5c2d..7c6c780 100644\nBinary files a/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc and b/src/poor_code/domain/harness/nodes/__pycache__/execution.cpython-314.pyc differ\ndiff --git a/src/poor_code/domain/harness/nodes/execution.py b/src/poor_code/domain/harness/nodes/execution.py\nindex 0c34fdf..4d9690a 100644\n--- a/src/poor_code/domain/harness/nodes/execution.py\n+++ b/src/poor_code/domain/harness/nodes/execution.py\n@@ -101,6 +101,8 @@ async def run_shell(\n ) -> tuple[int, str]:\n     \"\"\"Run a shell command in cwd; return (exit_code, truncated combined output).\n     Honors cancel (kills the process) and a timeout (exit 124).\"\"\"\n+    if not command or not command.strip():\n+        raise ValueError(\"Command cannot be empty or whitespace-only\")\n     if cancel.is_set():\n         raise asyncio.CancelledError\n     proc = await asyncio.create_subprocess_shell(\n"
       ]
     ]
   },
   "summary": "1/1 tasks done; global validation passed",
   "token_usage": {
     "total": {
-      "input_tokens": 116084,
-      "output_tokens": 3124,
+      "input_tokens": 287956,
+      "output_tokens": 4313,
       "cached_input_tokens": 0,
-      "calls": 34
+      "calls": 58
     },
     "by_node": {
       "router": {
         "input_tokens": 231,
-        "output_tokens": 79,
+        "output_tokens": 85,
         "cached_input_tokens": 0,
         "calls": 1
       },
       "explorer": {
-        "input_tokens": 40536,
-        "output_tokens": 934,
+        "input_tokens": 118391,
+        "output_tokens": 773,
         "cached_input_tokens": 0,
-        "calls": 10
+        "calls": 21
       },
       "acceptance_oracle": {
-        "input_tokens": 3858,
-        "output_tokens": 381,
+        "input_tokens": 3690,
+        "output_tokens": 469,
         "cached_input_tokens": 0,
         "calls": 1
       },
       "planner": {
-        "input_tokens": 5963,
-        "output_tokens": 419,
+        "input_tokens": 6003,
+        "output_tokens": 465,
         "cached_input_tokens": 0,
         "calls": 2
       },
       "provisioner": {
-        "input_tokens": 18346,
-        "output_tokens": 226,
+        "input_tokens": 16536,
+        "output_tokens": 242,
         "cached_input_tokens": 0,
         "calls": 12
       },
       "implementer": {
-        "input_tokens": 43532,
-        "output_tokens": 1011,
+        "input_tokens": 115398,
+        "output_tokens": 1004,
         "cached_input_tokens": 0,
-        "calls": 6
+        "calls": 13
       },
-      "validator": {
-        "input_tokens": 1702,
-        "output_tokens": 14,
+      "verifier": {
+        "input_tokens": 27707,
+        "output_tokens": 1275,
         "cached_input_tokens": 0,
-        "calls": 1
-      },
-      "completion_gate": {
-        "input_tokens": 1916,
-        "output_tokens": 60,
-        "cached_input_tokens": 0,
-        "calls": 1
+        "calls": 8
       }
     }
   }

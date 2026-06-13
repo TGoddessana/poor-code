@@ -57,18 +57,30 @@ _OBSERVE_SYSTEM = (
 )
 
 _JUDGE_SYSTEM = (
-    "From what you OBSERVED above, judge this task against the CRITERIA. Choose exactly one:\n"
-    "- 'advance': EVERY criterion is satisfied by behaviour you actually OBSERVED (ran it and "
-    "saw the right result) — not merely plausible from the code. If you could not observe "
-    "something, it is NOT advance.\n"
-    "- 'repair_impl': a criterion is not met. CITE the criterion and the OBSERVED evidence "
-    "(the real output/error you saw) and give a concrete fix hint.\n"
-    "- 'repair_plan': the task/plan is mis-scoped (wrong files, wrong decomposition). Say why.\n"
+    "From what you OBSERVED above, judge this task against the CRITERIA. FIRST fill `checks` "
+    "— one entry PER criterion, with: (a) `criterion`, (b) `observed` = the command you "
+    "actually RAN and the real output you SAW for it, and (c) `satisfied` = whether that "
+    "observation meets the criterion. A criterion you did NOT actually exercise has empty "
+    "`observed` and is NOT satisfied — do not claim otherwise.\n"
+    "THEN choose the verdict:\n"
+    "- 'advance': ONLY when EVERY criterion has a real `observed` and is `satisfied`. Default "
+    "to repair_impl when any criterion is unobserved or unmet — do NOT rubber-stamp a result "
+    "you did not verify by running it.\n"
+    "- 'repair_impl': a criterion is unmet or unobserved. Cite it and the observed evidence; "
+    "give a concrete fix hint.\n"
+    "- 'repair_plan': the task/plan is mis-scoped (wrong files, wrong decomposition).\n"
     "Trust ONLY observation. Call judge once."
 )
 
 
+class _CriterionCheck(BaseModel):
+    criterion: str
+    observed: str = ""        # the command run + the real output seen ("" = not exercised)
+    satisfied: bool = False
+
+
 class _VerdictOut(BaseModel):
+    checks: list[_CriterionCheck] = []
     verdict: Literal["advance", "repair_impl", "repair_plan"]
     hint: str = ""
 
@@ -88,21 +100,47 @@ class VerifierNode(AgentNode):
         history = await self._observe(ctx, task)
         out = validate_output(
             _VerdictOut, await self._dispatch(ctx, extra_messages=history), node=self.name)
+        verdict, hint = out.verdict, out.hint
 
-        if out.verdict == "advance":
+        # LENIENCY GUARD — the v2 false_accept frontier. A weak verifier observes (many bash
+        # calls) but rubber-stamps 'advance'. Block an advance that is not backed by a real
+        # per-criterion observation: every criterion must be marked satisfied AND carry the
+        # output that was actually seen. Unbacked advance -> repair_impl.
+        if verdict == "advance" and not self._observation_backed(out):
+            verdict, hint = "repair_impl", (hint or self._unbacked_hint(out))
+
+        if verdict == "advance":
             return self._done(task, attempt)
-        if out.verdict == "repair_plan":
+        if verdict == "repair_plan":
             return NodeResult(verdict=Verdict(
                 kind=VerdictKind.REPAIR, layer=Layer.PLAN,
-                hint=out.hint or "Task is mis-scoped; re-plan."))
-        # repair_impl — loosened authority: no rigid abandon. Repair up to the attempt
-        # cap; at the cap accept best-effort and move on (the report reflects reality)
-        # rather than parking/abandoning correct-but-unverified work.
-        if attempt is None or len(task.attempts) >= MAX_ATTEMPTS:
+                hint=hint or "Task is mis-scoped; re-plan."))
+        # repair_impl — loosened authority: no rigid abandon. Repair up to the cap; at the
+        # cap accept best-effort and move on rather than parking/abandoning correct-but-
+        # unverified work. The cap counts the implementer's REFINEMENTS of the live attempt
+        # (adversarial_rounds): with no validation_runner there is no run_result, so the
+        # implementer refines the same attempt in place — len(attempts) stays 1 and cannot
+        # be the cap (that bug looped implementer<->verifier forever).
+        if attempt is None or attempt.adversarial_rounds >= MAX_ATTEMPTS:
             return self._done(task, attempt)
         return NodeResult(verdict=Verdict(
             kind=VerdictKind.REPAIR, layer=Layer.IMPLEMENTATION,
-            hint=out.hint or "A criterion is not satisfied; fix the implementation."))
+            hint=hint or "A criterion is not satisfied; fix the implementation."))
+
+    @staticmethod
+    def _observation_backed(out: "_VerdictOut") -> bool:
+        """'advance' is trustworthy only if every criterion was actually exercised: a
+        non-empty per-criterion check set where each is satisfied AND carries observed output."""
+        return bool(out.checks) and all(
+            c.satisfied and c.observed.strip() for c in out.checks)
+
+    @staticmethod
+    def _unbacked_hint(out: "_VerdictOut") -> str:
+        gaps = [c.criterion for c in out.checks if not (c.satisfied and c.observed.strip())]
+        detail = ("; ".join(gaps) if gaps
+                  else "no per-criterion observations were provided")
+        return ("Advance blocked: every criterion must be verified by running it and "
+                f"observing the result. Not yet observed-and-satisfied: {detail}")
 
     @staticmethod
     def _done(task, attempt) -> NodeResult:
@@ -118,6 +156,11 @@ class VerifierNode(AgentNode):
             {"role": "system", "content": _OBSERVE_SYSTEM},
             {"role": "user", "content": self._observe_prompt(state, task)},
         ]
+        # Diagnostic: surface the verifier's observe prompt through the dump sink (the
+        # rich criteria prompt lives here, not in build_messages' judge envelope).
+        if ctx.sink is not None and hasattr(ctx.sink, "node_context"):
+            phase = state.cursor.phase.value if state.cursor else ""
+            ctx.sink.node_context(self.name, phase, messages)
         tool_ctx = ToolContext(turn_id="verify", cancel=ctx.cancel,
                                cwd=self._cwd, ask=allow_all)
         for _ in range(MAX_ITERATIONS):
