@@ -3,6 +3,8 @@ authoritative 'done'). Reads only the binding Requirement (+ CodeContext as
 reference); never the plan. Emits a runnable AcceptanceSpec via one tool call."""
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -11,13 +13,20 @@ from pydantic import BaseModel
 from poor_code.domain.harness.api_probe import focus_terms, probe_apis
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output)
+from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
     AcceptanceCheck, AcceptanceSpec, GroundingStatus, Phase, SessionState,
     effective_requirement,
 )
+from poor_code.domain.tool.base import ToolContext, allow_all
+from poor_code.domain.tool.registry import ToolRegistry
+from poor_code.provider.events import (
+    FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted)
+from poor_code.provider.usage import tag
 
 _MAX_EXCERPT_IN_PROMPT = 1800   # per-file body slice handed to the oracle as ground truth
+_AUTHOR_MAX_ITERATIONS = 12
 
 _TOOL_NAME = "emit_acceptance"
 
@@ -125,9 +134,11 @@ class AcceptanceOracle(AgentNode):
     name = "acceptance_oracle"
     phase = Phase.PLANNING
 
-    def __init__(self, llm: _LLMClientLike, cwd: Path = Path(".")) -> None:
+    def __init__(self, llm: _LLMClientLike, cwd: Path = Path("."),
+                 tools: ToolRegistry | None = None) -> None:
         super().__init__(llm)
-        self._cwd = cwd
+        self._cwd = Path(cwd)
+        self._tools = tools
         # Real public APIs of the libraries the explored code imports — probed in run()
         # so build_messages (sync) can hand the oracle ground truth instead of leaving
         # it to RECALL `TextArea.text` vs `.value` from training. "" when nothing to probe.
@@ -139,7 +150,8 @@ class AcceptanceOracle(AgentNode):
             req = effective_requirement(ctx.state)
             terms = focus_terms(req.summary, *req.acceptance, *req.assumptions)
             self._api_digest = await probe_apis(cc.excerpts, terms, self._cwd, ctx.cancel)
-        args_json = await self._dispatch(ctx)
+        history = await self._author(ctx) if self._tools is not None else None
+        args_json = await self._dispatch(ctx, extra_messages=history)
         return NodeResult(output=self.parse(args_json))
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
@@ -222,3 +234,91 @@ class AcceptanceOracle(AgentNode):
             trunc = " …(truncated)" if (ex.truncated or len(ex.text) > _MAX_EXCERPT_IN_PROMPT) else ""
             lines.append(f"--- {ex.path}{trunc} ---\n{body}")
         return "\n".join(lines) if lines else "(none)"
+
+    # stage ① — author + self-test tool loop (mirrors VerifierNode._observe; runs BEFORE
+    # any implementation exists, so it derives expectations independently from inputs).
+    async def _author(self, ctx: NodeContext) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": _AUTHOR_SYSTEM},
+            {"role": "user", "content": self._author_prompt(ctx.state)},
+        ]
+        if ctx.sink is not None and hasattr(ctx.sink, "node_context"):
+            phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
+            ctx.sink.node_context(self.name, phase, messages)
+        tool_ctx = ToolContext(turn_id="author", cancel=ctx.cancel,
+                               cwd=self._cwd, ask=allow_all)
+        for _ in range(_AUTHOR_MAX_ITERATIONS):
+            if ctx.cancel.is_set():
+                raise asyncio.CancelledError(f"{self.name} cancelled")
+            text, calls = await self._stream_round(messages, ctx.sink)
+            assistant: dict[str, Any] = {"role": "assistant", "content": text}
+            if calls:
+                assistant["tool_calls"] = [
+                    {"id": cid, "type": "function",
+                     "function": {"name": name, "arguments": args or "{}"}}
+                    for cid, name, args in calls]
+            messages.append(assistant)
+            if not calls:
+                break
+            for cid, name, args in calls:
+                if ctx.sink is not None:
+                    ctx.sink.tool_started(cid, name, _safe_args(args))
+                output = await self._run_tool(name, args, tool_ctx)
+                if ctx.sink is not None:
+                    if output.startswith("ERROR:"):
+                        ctx.sink.tool_failed(cid, output)
+                    else:
+                        ctx.sink.tool_finished(cid, output)
+                messages.append({"role": "tool", "tool_call_id": cid,
+                                 "content": clamp_tool_output(output)})
+        return messages[1:]   # hand authoring history (minus its system) to the emit dispatch
+
+    def _author_prompt(self, state: SessionState) -> str:
+        req = effective_requirement(state)
+        return (
+            "Work out the correct expected behaviour for this task BEFORE emitting criteria. "
+            "Read the real inputs and derive expected values/outputs with $TMPDIR scratch "
+            "tests; mark anything you cannot establish as 'unknown' later.\n\n"
+            "REQUIREMENT:\n"
+            f"summary: {req.summary}\n"
+            f"acceptance:\n{self._bullets(req.acceptance)}\n"
+            f"assumptions:\n{self._bullets(req.assumptions)}\n\n"
+            f"CODE CONTEXT:\n{self._context_digest(state)}")
+
+    async def _stream_round(self, messages, sink=None):
+        text = ""
+        pending: dict[str, dict[str, str]] = {}
+        order: list[str] = []
+        tag(self._llm, self.name)
+        async for ev in self._llm.stream(messages=messages, tools=self._tools.schemas()):
+            match ev:
+                case TextDelta(text=t):
+                    text += t
+                case ToolCallStarted(call_id=cid, name=name):
+                    pending[cid] = {"name": name, "args": ""}
+                    order.append(cid)
+                case ToolCallInputDelta(call_id=cid, json_delta=d):
+                    if cid in pending:
+                        pending[cid]["args"] += d
+                case ToolCallEnded() | FinishedReason():
+                    pass
+        return text, [(cid, pending[cid]["name"], pending[cid]["args"]) for cid in order]
+
+    async def _run_tool(self, name: str, args_json: str, tool_ctx: ToolContext) -> str:
+        tool = self._tools.get(name)
+        if tool is None:
+            return f"ERROR: unknown tool {name}"
+        try:
+            parsed = tool.params.model_validate_json(args_json or "{}")
+            result = await tool.execute(parsed, tool_ctx)
+            return result.output
+        except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
+            return f"ERROR: {type(e).__name__}: {e}"
+
+
+def _safe_args(args_json: str) -> dict:
+    try:
+        v = json.loads(args_json or "{}")
+        return v if isinstance(v, dict) else {"_": v}
+    except (ValueError, TypeError):
+        return {}
