@@ -95,6 +95,21 @@ async def test_oracle_system_states_task_independent_anti_gaming_rules():
 
 
 @pytest.mark.asyncio
+async def test_oracle_system_forbids_destructive_input_probes():
+    # E-poisoning fix: rules 4-5 (alternate / boundary inputs) must be NON-DESTRUCTIVE —
+    # the oracle must NOT emit criteria that require replacing/emptying/corrupting a named
+    # task input (which forces the Verifier to destroy the artifact under test / a user's
+    # data). The anti-gaming words (boundary/lookup/substring) must SURVIVE this addition.
+    llm = FakeLLM({"checks": []})
+    await AcceptanceOracle(llm).run(NodeContext(_state(), cancel=asyncio.Event()))
+    system = llm.seen_messages[0]["content"].lower()
+    assert "non-destructive" in system
+    assert "replaced" in system and ("survive" in system or "unchanged" in system)
+    # anti-gaming intent preserved
+    assert "boundary" in system and "lookup" in system and "substring" in system
+
+
+@pytest.mark.asyncio
 async def test_oracle_prompt_carries_excerpts_candidates_and_real_api(monkeypatch):
     """The oracle must see GROUND TRUTH (the explorer's real file bodies, candidate
     refs, and probed APIs) — not just a prose summary. This is the fix for the

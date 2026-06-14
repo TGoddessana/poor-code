@@ -9,7 +9,7 @@ import pytest
 
 from poor_code.domain.harness.node import NodeContext, StructuredOutputError
 from poor_code.domain.harness.nodes.execution import MAX_ATTEMPTS
-from poor_code.domain.harness.nodes.verifier import VerifierNode
+from poor_code.domain.harness.nodes.verifier import VerifierNode, _OBSERVE_SYSTEM
 from poor_code.domain.harness.subgraphs.implement_loop import _verifier_tools
 from poor_code.domain.session.models import (
     AcceptanceCheck, AcceptanceSpec, Attempt, ChangeRecord, Cursor, Layer, Phase,
@@ -72,6 +72,21 @@ def _ctx(state):
 
 def test_name_is_verifier():
     assert _node(_VerifierLLM("advance")).name == "verifier"
+
+
+def test_observe_system_forbids_fixture_destruction_and_urges_scratch_tests():
+    # E-poisoning fix: the verifier must NEVER mutate the task's real inputs to probe an
+    # edge case (that poisons the graded artifact / deletes user data); it must instead
+    # write a throwaway test in $TMPDIR. Pin both halves of that guardrail.
+    s = _OBSERVE_SYSTEM.lower()
+    # never destroy real inputs (names the destructive ops it must avoid)
+    assert "never destroy" in s
+    for op in ("overwrite", "truncate", "replace", "corrupt"):
+        assert op in s
+    # positively: write a scratch/throwaway test in $TMPDIR for edge cases
+    assert "$tmpdir" in s
+    assert "edge case" in s
+    assert "throwaway test" in s or "small throwaway test" in s
 
 
 @pytest.mark.asyncio
