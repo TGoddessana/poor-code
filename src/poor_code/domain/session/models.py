@@ -447,12 +447,19 @@ def effective_requirement(state: "SessionState") -> Requirement:
 class AcceptanceCheck:
     """A criterion in the definition of done. Verification v2: `criterion` (natural
     language) is authoritative and the observe-judge Verifier checks it by observation.
-    `command` is optional/vestigial — no longer run as a binding bash floor (it was the
-    measured source of false-abandon/false-accept); kept for back-compat and as an
-    optional hint the verifier MAY choose to run."""
+    `command` is the oracle-AUTHORED acceptance test (an executable check it wrote and
+    self-validated) — handed to the Verifier as strong EVIDENCE, NOT run as a binding
+    floor (the binding floor was the measured source of false-abandon/false-accept).
+    `status` is 'verified' when the oracle could establish a trustworthy expected
+    behaviour, or 'unknown' when it could not (honest abstention instead of a guessed
+    expectation). `confidence`/`evidence` record the oracle's self-assessment and what it
+    OBSERVED while authoring, for post-hoc audit."""
     criterion: str
     command: str = ""
     rationale: str = ""
+    status: str = "verified"     # "verified" | "unknown"
+    confidence: str = ""         # "high" | "medium" | "low" (free-form, audit only)
+    evidence: str = ""           # what the oracle observed while authoring/self-testing
 
 
 @dataclass(frozen=True, slots=True)

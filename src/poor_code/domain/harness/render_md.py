@@ -14,7 +14,12 @@ def render_spec_md(req: Requirement, accept: AcceptanceSpec | None) -> str:
         lines.append("## Assumptions\n" + "\n".join(f"- {a}" for a in req.assumptions))
     if accept and accept.checks:
         lines.append("## Acceptance checks (runnable)\n" +
-                     "\n".join(f"- `{c.command}`  — {c.criterion}" for c in accept.checks))
+                     "\n".join(
+                         f"- {c.criterion}  _(unknown — oracle abstained)_"
+                         if c.status == "unknown"
+                         else f"- `{c.command}`  — {c.criterion}"
+                         for c in accept.checks
+                     ))
     return "\n\n".join(lines)
 
 

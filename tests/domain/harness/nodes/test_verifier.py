@@ -4,6 +4,7 @@ stops), then emits a verdict that maps to advance(done) / repair_impl / repair_p
 a LOOSENED authority: at the attempt cap it accepts best-effort rather than abandoning."""
 import asyncio
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -203,3 +204,86 @@ async def test_verdict_trace_records_leniency_guard_downgrade():
     assert record["raw_verdict"] == "advance"
     assert record["final_verdict"] == "repair_impl"
     assert record["leniency_guard_fired"] is True
+
+
+def _state_with_unknown():
+    s = _state()
+    return replace(s, acceptance=AcceptanceSpec(checks=(
+        AcceptanceCheck(criterion="core behaviour works", status="verified"),
+        AcceptanceCheck(criterion="hard value is exact", status="unknown",
+                        evidence="oracle could not derive expected value"))))
+
+
+@pytest.mark.asyncio
+async def test_unknown_criterion_does_not_block_advance():
+    # Only the verified criterion must be observed-and-satisfied; the 'unknown' one is
+    # advisory (the oracle abstained) and must NOT force repair.
+    checks = [{"criterion": "core behaviour works",
+               "observed": "ran prog, saw correct output", "satisfied": True}]
+    r = await _node(_VerifierLLM("advance", checks=checks)).run(_ctx(_state_with_unknown()))
+    assert r.branch == "done"
+
+
+@pytest.mark.asyncio
+async def test_unknown_criterion_is_surfaced_in_observe_prompt():
+    node = _node(_VerifierLLM("advance"))
+    s = _state_with_unknown()
+    prompt = node._observe_prompt(s, s.plan.tasks[0])
+    assert "advisory" in prompt.lower() or "unknown" in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_unknown_criterion_does_not_block_advance_even_when_emitted_unsatisfied():
+    # DISCRIMINATION TEST: the LLM reports BOTH criteria in its checks — the binding one
+    # satisfied+observed, and the advisory "unknown" one unsatisfied/unobserved.
+    # Old _observation_backed scanned all checks and would block on the unsatisfied advisory
+    # one. New code filters to binding-only, so advance must still reach branch=="done".
+    checks = [
+        {"criterion": "core behaviour works",
+         "observed": "ran prog, saw correct output", "satisfied": True},
+        {"criterion": "hard value is exact",   # the "unknown" (advisory) criterion
+         "observed": "", "satisfied": False},   # unobserved and unsatisfied
+    ]
+    r = await _node(_VerifierLLM("advance", checks=checks)).run(_ctx(_state_with_unknown()))
+    assert r.branch == "done"
+
+
+@pytest.mark.asyncio
+async def test_paraphrased_criterion_falls_back_to_requiring_all_checks_not_blocked():
+    # Robustness: if the judge PARAPHRASES the binding criterion text (case/whitespace/wording)
+    # so it does not exact-match the oracle's criterion, the advance must NOT be silently
+    # blocked (that would resurrect false_abandon). Normalization handles case/space; and when
+    # nothing matches at all, the gate falls back to requiring every emitted check (old behaviour).
+    checks = [{"criterion": "  CORE Behaviour Works  ",   # same criterion, different case/space
+               "observed": "ran prog, saw correct output", "satisfied": True}]
+    r = await _node(_VerifierLLM("advance", checks=checks)).run(_ctx(_state_with_unknown()))
+    assert r.branch == "done"
+
+
+@pytest.mark.asyncio
+async def test_fully_paraphrased_unmatched_criteria_still_gate_on_all_checks():
+    # If the judge reports a check that matches NO binding criterion at all, the binding filter
+    # would leave `relevant` empty. Rather than block (false_abandon) OR rubber-stamp, the gate
+    # falls back to requiring every emitted check satisfied+observed. Here the single emitted
+    # check is satisfied+observed -> advance proceeds.
+    checks = [{"criterion": "something totally different the judge invented",
+               "observed": "did a thing", "satisfied": True}]
+    r = await _node(_VerifierLLM("advance", checks=checks)).run(_ctx(_state_with_unknown()))
+    assert r.branch == "done"
+    # ...and if that fallback check is NOT satisfied, advance is blocked (no rubber-stamp):
+    checks2 = [{"criterion": "something totally different", "observed": "", "satisfied": False}]
+    r2 = await _node(_VerifierLLM("advance", checks=checks2)).run(_ctx(_state_with_unknown()))
+    assert r2.verdict is not None and r2.verdict.kind.name == "REPAIR"
+
+
+@pytest.mark.asyncio
+async def test_oracle_authored_test_is_surfaced_as_evidence():
+    s = _state()
+    s = replace(s, acceptance=AcceptanceSpec(checks=(
+        AcceptanceCheck(criterion="avg is exact",
+                        command="test \"$(cat avg_temp.txt)\" = 11.429",
+                        status="verified"),)))
+    prompt = _node(_VerifierLLM("advance"))._observe_prompt(s, s.plan.tasks[0])
+    # the oracle's authored test appears as runnable evidence (not as a binding floor)
+    assert "11.429" in prompt
+    assert "evidence" in prompt.lower()

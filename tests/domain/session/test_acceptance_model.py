@@ -28,3 +28,22 @@ def test_driver_apply_writes_acceptance():
     spec = AcceptanceSpec(checks=(AcceptanceCheck(criterion="c", command="true"),))
     out = Driver._apply(SessionState(), NodeResult(output=spec))
     assert out.acceptance is spec
+
+
+def test_acceptance_check_defaults_to_verified():
+    c = AcceptanceCheck(criterion="c")
+    assert c.status == "verified"
+    assert c.confidence == ""
+    assert c.evidence == ""
+
+
+def test_acceptance_check_can_be_unknown_with_evidence():
+    c = AcceptanceCheck(
+        criterion="avg is exact",
+        status="unknown",
+        confidence="low",
+        evidence="could not derive expected average from heterogeneous date formats",
+    )
+    assert c.status == "unknown"
+    assert c.confidence == "low"
+    assert "heterogeneous" in c.evidence

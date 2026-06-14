@@ -102,7 +102,10 @@ class AcceptanceCritic(AgentNode):
         req = state.requirement
         spec = state.acceptance
         checks = "\n".join(
-            f"  - ({c.criterion}) {c.command}" for c in (spec.checks if spec else ())
+            f"  - ({c.criterion}) [unknown — oracle abstained]"
+            if c.status == "unknown"
+            else f"  - ({c.criterion}) {c.command}"
+            for c in (spec.checks if spec else ())
         ) or "  (none)"
         summary = req.summary if req is not None else "(no requirement)"
         return [

@@ -43,6 +43,14 @@ from poor_code.provider.usage import tag
 _TOOL_NAME = "judge"
 MAX_ITERATIONS = 20
 
+
+def _norm_criterion(s: str) -> str:
+    """Normalize a criterion string for matching the oracle's binding set against the
+    judge's echoed `checks[].criterion` — collapse case and surrounding/internal whitespace
+    so a paraphrase in spacing/case still matches. NOT semantic matching; just transport
+    robustness for the exact-text the judge is asked to echo."""
+    return " ".join(s.split()).lower()
+
 _OBSERVE_SYSTEM = (
     "You are the adversarial Verifier. The CRITERIA below define what 'done' means for "
     "this task. Your job in this phase: DRIVE the implementation and OBSERVE its REAL "
@@ -78,6 +86,9 @@ _OBSERVE_SYSTEM = (
     "Do NOT modify the implementation's code (you only run, inspect, and write throwaway "
     "tests under $TMPDIR). When you have observed enough to judge every criterion, stop "
     "calling tools."
+    " You may be given ORACLE-AUTHORED TESTS as evidence; running them is a strong signal, "
+    "but a passing authored test is NOT sufficient on its own and a crashing one is NOT an "
+    "automatic failure — your own adversarial observation is the verdict."
 )
 
 _JUDGE_SYSTEM = (
@@ -87,9 +98,10 @@ _JUDGE_SYSTEM = (
     "observation meets the criterion. A criterion you did NOT actually exercise has empty "
     "`observed` and is NOT satisfied — do not claim otherwise.\n"
     "THEN choose the verdict:\n"
-    "- 'advance': ONLY when EVERY criterion has a real `observed` and is `satisfied`. Default "
-    "to repair_impl when any criterion is unobserved or unmet — do NOT rubber-stamp a result "
-    "you did not verify by running it.\n"
+    "- 'advance': ONLY when EVERY BINDING criterion has a real `observed` and is `satisfied`. "
+    "Criteria listed under ADVISORY are ones the oracle abstained on — report what you see "
+    "but they do not block advance. Default to repair_impl when any BINDING criterion is "
+    "unobserved or unmet — do NOT rubber-stamp a result you did not verify by running it.\n"
     "- 'repair_impl': a criterion is unmet or unobserved. Cite it and the observed evidence; "
     "give a concrete fix hint.\n"
     "- 'repair_plan': the task/plan is mis-scoped (wrong files, wrong decomposition).\n"
@@ -130,8 +142,9 @@ class VerifierNode(AgentNode):
         # calls) but rubber-stamps 'advance'. Block an advance that is not backed by a real
         # per-criterion observation: every criterion must be marked satisfied AND carry the
         # output that was actually seen. Unbacked advance -> repair_impl.
-        if verdict == "advance" and not self._observation_backed(out):
-            verdict, hint = "repair_impl", (hint or self._unbacked_hint(out))
+        binding = self._binding_criteria(state)
+        if verdict == "advance" and not self._observation_backed(out, binding):
+            verdict, hint = "repair_impl", (hint or self._unbacked_hint(out, binding))
 
         # DIAGNOSTIC — persist the verdict + its grounding so a false_accept can be CLASSIFIED
         # post-hoc (weak criteria vs unobserved vs rubber-stamped vs fabricated evidence)
@@ -158,18 +171,38 @@ class VerifierNode(AgentNode):
             hint=hint or "A criterion is not satisfied; fix the implementation."))
 
     @staticmethod
-    def _observation_backed(out: "_VerdictOut") -> bool:
-        """'advance' is trustworthy only if every criterion was actually exercised: a
-        non-empty per-criterion check set where each is satisfied AND carries observed output."""
-        return bool(out.checks) and all(
-            c.satisfied and c.observed.strip() for c in out.checks)
+    def _binding_criteria(state: SessionState) -> set[str]:
+        """Criteria the verdict gate must satisfy — everything the oracle did NOT mark
+        'unknown', normalized for robust matching against the judge's echoed criterion text.
+        Empty set means 'no acceptance spec' → fall back to requiring all checks."""
+        if state.acceptance is None or not state.acceptance.checks:
+            return set()
+        return {_norm_criterion(c.criterion)
+                for c in state.acceptance.checks if c.status != "unknown"}
 
     @staticmethod
-    def _unbacked_hint(out: "_VerdictOut") -> str:
-        gaps = [c.criterion for c in out.checks if not (c.satisfied and c.observed.strip())]
+    def _observation_backed(out: "_VerdictOut", binding: set[str]) -> bool:
+        """'advance' is trustworthy only if every BINDING criterion was actually exercised:
+        each has a satisfied check carrying observed output. Advisory ('unknown') criteria the
+        oracle abstained on are excluded from the gate. With no acceptance spec (binding empty)
+        — OR when the judge paraphrased every criterion so none string-match the binding set —
+        fall back to requiring EVERY emitted check to be observed-and-satisfied (this avoids
+        silently blocking a verified result, which would resurrect false_abandon)."""
+        relevant = [c for c in out.checks if c.criterion and _norm_criterion(c.criterion) in binding]
+        if not binding or not relevant:
+            relevant = list(out.checks)
+        return bool(relevant) and all(
+            c.satisfied and c.observed.strip() for c in relevant)
+
+    @staticmethod
+    def _unbacked_hint(out: "_VerdictOut", binding: set[str]) -> str:
+        relevant = [c for c in out.checks if c.criterion and _norm_criterion(c.criterion) in binding]
+        if not binding or not relevant:
+            relevant = list(out.checks)
+        gaps = [c.criterion for c in relevant if not (c.satisfied and c.observed.strip())]
         detail = ("; ".join(gaps) if gaps
                   else "no per-criterion observations were provided")
-        return ("Advance blocked: every criterion must be verified by running it and "
+        return ("Advance blocked: every binding criterion must be verified by running it and "
                 f"observing the result. Not yet observed-and-satisfied: {detail}")
 
     def _emit_verdict_trace(self, ctx: NodeContext, history: list[dict[str, Any]],
@@ -281,8 +314,16 @@ class VerifierNode(AgentNode):
             header += f"ORIGINAL REQUEST:\n{state.request.raw_text}\n"
         header += f"OVERALL GOAL:\n{req.summary}\n"
         task_md = task_section(state.plan, task.id) if state.plan else task.title
+        authored = self._authored_tests(state)
+        evidence = (
+            f"\nORACLE-AUTHORED TESTS (strong EVIDENCE the oracle wrote and self-checked "
+            f"BEFORE the implementation existed — you SHOULD run these as a starting point, "
+            f"but they are NOT a binding floor; if one crashes, investigate rather than "
+            f"abandon, and still observe adversarially):\n{authored}\n"
+            if authored else "")
         return (
-            f"CRITERIA (the definition of done — verify EACH by observation):\n{criteria}\n\n"
+            f"CRITERIA (the definition of done — verify EACH by observation):\n{criteria}\n"
+            f"{evidence}\n"
             f"{header}\n"
             f"TASK UNDER VERIFICATION:\n{task_md}\n\n"
             f"COMPLETED WORK (ledger):\n{render_build_ledger(state)}\n\n"
@@ -293,10 +334,26 @@ class VerifierNode(AgentNode):
     def _criteria(state: SessionState) -> str:
         checks = state.acceptance.checks if state.acceptance else ()
         if checks:
-            return "\n".join(f"  - {c.criterion}" for c in checks)
+            binding = [c for c in checks if c.status != "unknown"]
+            advisory = [c for c in checks if c.status == "unknown"]
+            lines = [f"  - {c.criterion}" for c in binding]
+            if advisory:
+                lines.append(
+                    "\nADVISORY (the oracle could NOT establish the expected value and "
+                    "ABSTAINED — observe if you can, REPORT what you see, but do NOT block "
+                    "or bless on these; they are not part of the pass/fail gate):")
+                lines += [f"  - {c.criterion}" for c in advisory]
+            return "\n".join(lines)
         req = effective_requirement(state)
         return ("\n".join(f"  - {a}" for a in req.acceptance)
                 or "  (no explicit criteria — judge against the REQUEST and the task PURPOSE)")
+
+    @staticmethod
+    def _authored_tests(state: SessionState) -> str:
+        checks = state.acceptance.checks if state.acceptance else ()
+        rows = [f"  - ({c.criterion}) -> {c.command}"
+                for c in checks if c.command.strip()]
+        return "\n".join(rows)
 
     # stage ② — verdict envelope
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:

@@ -126,7 +126,13 @@ def _acceptance_repair_count(state) -> int:
 class AcceptanceGate(GateNode):
     """Deterministic floor on the AcceptanceSpec: it must have at least one check and
     each check must be a runnable command (not prose). Task-DEPENDENT adequacy is the
-    acceptance_critic's job, NOT this gate's."""
+    acceptance_critic's job, NOT this gate's.
+
+    Exception: 'unknown'-status checks are honest abstentions with no authored test.
+    The oracle emits them with an empty command when it cannot establish the expected
+    behaviour. The verifier treats them as advisory only; requiring a runnable command
+    here would force a guessed test and defeat abstention. The command floor is skipped
+    for 'unknown'-status checks."""
 
     name = "acceptance_gate"
     layer = Layer.ACCEPTANCE
@@ -147,6 +153,13 @@ class AcceptanceGate(GateNode):
         if spec is None or not spec.checks:
             return "Acceptance spec has no checks; design at least one runnable check."
         for i, chk in enumerate(spec.checks, start=1):
+            if chk.status == "unknown":
+                # Honest abstention: the oracle could not establish the expected behaviour,
+                # so it emits no authored test (empty command) and marks the criterion
+                # 'unknown'. Such criteria are advisory (the verifier excludes them from
+                # the pass/fail gate); requiring a runnable command here would force a
+                # guessed test and defeat abstention. Skip the command floor for them.
+                continue
             floor = validation_floor_hint(chk.command)
             if floor is not None:
                 return f"Acceptance check {i} ({chk.criterion!r}) command {floor}"

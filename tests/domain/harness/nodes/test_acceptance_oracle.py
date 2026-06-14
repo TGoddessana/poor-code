@@ -4,14 +4,21 @@ import json
 import pytest
 
 from poor_code.domain.harness.node import NodeContext
-from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
+from poor_code.domain.harness.nodes.acceptance_oracle import (
+    AcceptanceOracle, _AUTHOR_SYSTEM, _SYSTEM)
 from poor_code.domain.session.models import (
     AcceptanceSpec, CodeContext, CodeRef, FileExcerpt, GroundingStatus, Request,
     RequestKind, Requirement, SessionState,
 )
 from poor_code.domain.harness import api_probe as _api_probe_mod
+from poor_code.domain.tool.registry import ToolRegistry
+from poor_code.domain.tool.bash import BashTool
+from poor_code.domain.tool.read import ReadTool
+from poor_code.domain.tool.grep import GrepTool
+from poor_code.domain.tool.glob import GlobTool
+from poor_code.domain.tool.list import ListTool
 from poor_code.provider.events import (
-    FinishedReason, ToolCallEnded, ToolCallInputDelta, ToolCallStarted,
+    FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted,
 )
 
 
@@ -199,3 +206,103 @@ async def test_oracle_surfaces_repair_hint_forcefully():
     # the counterexample must be framed as something the redesign has to DEFEAT
     assert "counterexample" in prompt.lower()
     assert "fail" in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_oracle_carries_status_confidence_evidence():
+    llm = FakeLLM({"checks": [
+        {"criterion": "avg_temp.txt is exactly 11.429",
+         "command": "test \"$(cat avg_temp.txt)\" = 11.429",
+         "status": "verified", "confidence": "high",
+         "evidence": "read 247 rows, normalized 3 date formats, computed 11.429"},
+        {"criterion": "rare edge value mapping is correct",
+         "status": "unknown", "confidence": "low",
+         "evidence": "could not derive expected mapping from source"}]})
+    res = await AcceptanceOracle(llm).run(NodeContext(_state(), cancel=asyncio.Event()))
+    c0, c1 = res.output.checks
+    assert c0.status == "verified" and c0.confidence == "high"
+    assert "11.429" in c0.evidence
+    assert c1.status == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_oracle_status_defaults_to_verified_when_omitted():
+    # Back-compat: a check emitted without the new fields stays 'verified'.
+    llm = FakeLLM({"checks": [{"criterion": "exact content", "command": "true"}]})
+    res = await AcceptanceOracle(llm).run(NodeContext(_state(), cancel=asyncio.Event()))
+    assert res.output.checks[0].status == "verified"
+
+
+def test_author_system_drives_tools_and_is_non_destructive():
+    s = _AUTHOR_SYSTEM.lower()
+    # authors an executable test by computing, not recalling
+    assert "compute" in s or "derive" in s
+    assert "$tmpdir" in s
+    # discrimination self-check: the test must FAIL on a wrong/stub implementation
+    assert "stub" in s or "wrong implementation" in s
+    assert "discriminat" in s or "must fail" in s
+    # honest abstention floor
+    assert "unknown" in s
+    # non-destructive (E-guard) + independence (no candidate to run yet)
+    for op in ("overwrite", "truncate", "replace"):
+        assert op in s
+
+
+def test_emit_system_mentions_status_and_evidence():
+    s = _SYSTEM.lower()
+    assert "status" in s and "unknown" in s
+    assert "evidence" in s
+
+
+class _TwoPhaseLLM:
+    """Authoring phase: emit one bash call then stop. Emit phase (tool 'emit_acceptance'):
+    emit the scripted spec, and capture the messages so we can assert the authoring
+    observations were threaded in as evidence."""
+    def __init__(self, payload):
+        self._args = json.dumps(payload)
+        self.emit_messages = None
+        self._authored = False
+
+    async def stream(self, messages, tools, response_format=None):
+        name = tools[0]["function"]["name"]
+        if name == "emit_acceptance":
+            self.emit_messages = messages
+            yield ToolCallStarted(call_id="e1", name="emit_acceptance")
+            yield ToolCallInputDelta(call_id="e1", json_delta=self._args)
+            yield ToolCallEnded(call_id="e1")
+            yield FinishedReason(reason="tool_calls")
+        elif not self._authored:           # first authoring round: run one tool
+            self._authored = True
+            yield ToolCallStarted(call_id="a1", name="bash")
+            yield ToolCallInputDelta(call_id="a1", json_delta=json.dumps({"command": "echo 11.429"}))
+            yield ToolCallEnded(call_id="a1")
+            yield FinishedReason(reason="tool_calls")
+        else:                               # second authoring round: stop
+            yield TextDelta(text="worked it out")
+            yield FinishedReason(reason="stop")
+
+
+def _oracle_tools():
+    return ToolRegistry([BashTool(), ReadTool(), GrepTool(), GlobTool(), ListTool()])
+
+
+@pytest.mark.asyncio
+async def test_oracle_runs_authoring_loop_then_emits(tmp_path):
+    llm = _TwoPhaseLLM({"checks": [
+        {"criterion": "avg is 11.429", "command": "true",
+         "status": "verified", "confidence": "high", "evidence": "echo 11.429 -> 11.429"}]})
+    node = AcceptanceOracle(llm, cwd=tmp_path, tools=_oracle_tools())
+    res = await node.run(NodeContext(_state(), cancel=asyncio.Event()))
+    assert res.output.checks[0].status == "verified"
+    # authoring observations (the bash round) were threaded into the emit call
+    blob = json.dumps(llm.emit_messages)
+    assert "echo 11.429" in blob
+
+
+@pytest.mark.asyncio
+async def test_oracle_without_tools_still_emits(tmp_path):
+    # Back-compat: constructed without tools (greenfield / no inputs), the 1-shot FakeLLM
+    # must still produce a spec — the authoring loop is skipped when no tools are present.
+    llm = FakeLLM({"checks": [{"criterion": "exact content", "command": "true"}]})
+    res = await AcceptanceOracle(llm, cwd=tmp_path).run(NodeContext(_state(), cancel=asyncio.Event()))
+    assert res.output.checks[0].criterion == "exact content"
