@@ -246,3 +246,31 @@ async def test_unknown_criterion_does_not_block_advance_even_when_emitted_unsati
     ]
     r = await _node(_VerifierLLM("advance", checks=checks)).run(_ctx(_state_with_unknown()))
     assert r.branch == "done"
+
+
+@pytest.mark.asyncio
+async def test_paraphrased_criterion_falls_back_to_requiring_all_checks_not_blocked():
+    # Robustness: if the judge PARAPHRASES the binding criterion text (case/whitespace/wording)
+    # so it does not exact-match the oracle's criterion, the advance must NOT be silently
+    # blocked (that would resurrect false_abandon). Normalization handles case/space; and when
+    # nothing matches at all, the gate falls back to requiring every emitted check (old behaviour).
+    checks = [{"criterion": "  CORE Behaviour Works  ",   # same criterion, different case/space
+               "observed": "ran prog, saw correct output", "satisfied": True}]
+    r = await _node(_VerifierLLM("advance", checks=checks)).run(_ctx(_state_with_unknown()))
+    assert r.branch == "done"
+
+
+@pytest.mark.asyncio
+async def test_fully_paraphrased_unmatched_criteria_still_gate_on_all_checks():
+    # If the judge reports a check that matches NO binding criterion at all, the binding filter
+    # would leave `relevant` empty. Rather than block (false_abandon) OR rubber-stamp, the gate
+    # falls back to requiring every emitted check satisfied+observed. Here the single emitted
+    # check is satisfied+observed -> advance proceeds.
+    checks = [{"criterion": "something totally different the judge invented",
+               "observed": "did a thing", "satisfied": True}]
+    r = await _node(_VerifierLLM("advance", checks=checks)).run(_ctx(_state_with_unknown()))
+    assert r.branch == "done"
+    # ...and if that fallback check is NOT satisfied, advance is blocked (no rubber-stamp):
+    checks2 = [{"criterion": "something totally different", "observed": "", "satisfied": False}]
+    r2 = await _node(_VerifierLLM("advance", checks=checks2)).run(_ctx(_state_with_unknown()))
+    assert r2.verdict is not None and r2.verdict.kind.name == "REPAIR"

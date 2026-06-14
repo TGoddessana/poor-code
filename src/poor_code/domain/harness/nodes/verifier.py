@@ -43,6 +43,14 @@ from poor_code.provider.usage import tag
 _TOOL_NAME = "judge"
 MAX_ITERATIONS = 20
 
+
+def _norm_criterion(s: str) -> str:
+    """Normalize a criterion string for matching the oracle's binding set against the
+    judge's echoed `checks[].criterion` — collapse case and surrounding/internal whitespace
+    so a paraphrase in spacing/case still matches. NOT semantic matching; just transport
+    robustness for the exact-text the judge is asked to echo."""
+    return " ".join(s.split()).lower()
+
 _OBSERVE_SYSTEM = (
     "You are the adversarial Verifier. The CRITERIA below define what 'done' means for "
     "this task. Your job in this phase: DRIVE the implementation and OBSERVE its REAL "
@@ -162,24 +170,32 @@ class VerifierNode(AgentNode):
     @staticmethod
     def _binding_criteria(state: SessionState) -> set[str]:
         """Criteria the verdict gate must satisfy — everything the oracle did NOT mark
-        'unknown'. Empty set means 'no acceptance spec' → fall back to requiring all checks."""
+        'unknown', normalized for robust matching against the judge's echoed criterion text.
+        Empty set means 'no acceptance spec' → fall back to requiring all checks."""
         if state.acceptance is None or not state.acceptance.checks:
             return set()
-        return {c.criterion for c in state.acceptance.checks if c.status != "unknown"}
+        return {_norm_criterion(c.criterion)
+                for c in state.acceptance.checks if c.status != "unknown"}
 
     @staticmethod
     def _observation_backed(out: "_VerdictOut", binding: set[str]) -> bool:
         """'advance' is trustworthy only if every BINDING criterion was actually exercised:
         each has a satisfied check carrying observed output. Advisory ('unknown') criteria the
         oracle abstained on are excluded from the gate. With no acceptance spec (binding empty)
-        fall back to requiring every emitted check to be observed-and-satisfied."""
-        relevant = [c for c in out.checks if (not binding) or c.criterion in binding]
+        — OR when the judge paraphrased every criterion so none string-match the binding set —
+        fall back to requiring EVERY emitted check to be observed-and-satisfied (this avoids
+        silently blocking a verified result, which would resurrect false_abandon)."""
+        relevant = [c for c in out.checks if c.criterion and _norm_criterion(c.criterion) in binding]
+        if not binding or not relevant:
+            relevant = list(out.checks)
         return bool(relevant) and all(
             c.satisfied and c.observed.strip() for c in relevant)
 
     @staticmethod
     def _unbacked_hint(out: "_VerdictOut", binding: set[str]) -> str:
-        relevant = [c for c in out.checks if (not binding) or c.criterion in binding]
+        relevant = [c for c in out.checks if c.criterion and _norm_criterion(c.criterion) in binding]
+        if not binding or not relevant:
+            relevant = list(out.checks)
         gaps = [c.criterion for c in relevant if not (c.satisfied and c.observed.strip())]
         detail = ("; ".join(gaps) if gaps
                   else "no per-criterion observations were provided")
