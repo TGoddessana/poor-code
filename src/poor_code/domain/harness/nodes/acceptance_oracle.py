@@ -79,8 +79,11 @@ _SYSTEM = (
 
 class _AcceptanceCheckOut(BaseModel):
     criterion: str
-    command: str = ""   # optional/non-binding hint — the observe-judge Verifier checks the criterion
+    command: str = ""        # the executable test the oracle AUTHORED (evidence, not a floor)
     rationale: str = ""
+    status: str = "verified" # "verified" | "unknown" (honest abstention)
+    confidence: str = ""     # "high" | "medium" | "low"
+    evidence: str = ""       # what the oracle observed while authoring/self-testing
 
 
 class _AcceptanceSpecOut(BaseModel):
@@ -146,7 +149,10 @@ class AcceptanceOracle(AgentNode):
     def parse(self, args_json: str) -> AcceptanceSpec:
         out = validate_output(_AcceptanceSpecOut, args_json, node=self.name)
         return AcceptanceSpec(checks=tuple(
-            AcceptanceCheck(criterion=c.criterion, command=c.command, rationale=c.rationale)
+            AcceptanceCheck(
+                criterion=c.criterion, command=c.command, rationale=c.rationale,
+                status=(c.status or "verified"), confidence=c.confidence,
+                evidence=c.evidence)
             for c in out.checks))
 
     @staticmethod

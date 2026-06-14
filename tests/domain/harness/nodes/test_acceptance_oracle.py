@@ -199,3 +199,28 @@ async def test_oracle_surfaces_repair_hint_forcefully():
     # the counterexample must be framed as something the redesign has to DEFEAT
     assert "counterexample" in prompt.lower()
     assert "fail" in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_oracle_carries_status_confidence_evidence():
+    llm = FakeLLM({"checks": [
+        {"criterion": "avg_temp.txt is exactly 11.429",
+         "command": "test \"$(cat avg_temp.txt)\" = 11.429",
+         "status": "verified", "confidence": "high",
+         "evidence": "read 247 rows, normalized 3 date formats, computed 11.429"},
+        {"criterion": "rare edge value mapping is correct",
+         "status": "unknown", "confidence": "low",
+         "evidence": "could not derive expected mapping from source"}]})
+    res = await AcceptanceOracle(llm).run(NodeContext(_state(), cancel=asyncio.Event()))
+    c0, c1 = res.output.checks
+    assert c0.status == "verified" and c0.confidence == "high"
+    assert "11.429" in c0.evidence
+    assert c1.status == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_oracle_status_defaults_to_verified_when_omitted():
+    # Back-compat: a check emitted without the new fields stays 'verified'.
+    llm = FakeLLM({"checks": [{"criterion": "exact content", "command": "true"}]})
+    res = await AcceptanceOracle(llm).run(NodeContext(_state(), cancel=asyncio.Event()))
+    assert res.output.checks[0].status == "verified"
