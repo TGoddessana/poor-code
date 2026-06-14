@@ -4,6 +4,7 @@ stops), then emits a verdict that maps to advance(done) / repair_impl / repair_p
 a LOOSENED authority: at the attempt cap it accepts best-effort rather than abandoning."""
 import asyncio
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -203,3 +204,29 @@ async def test_verdict_trace_records_leniency_guard_downgrade():
     assert record["raw_verdict"] == "advance"
     assert record["final_verdict"] == "repair_impl"
     assert record["leniency_guard_fired"] is True
+
+
+def _state_with_unknown():
+    s = _state()
+    return replace(s, acceptance=AcceptanceSpec(checks=(
+        AcceptanceCheck(criterion="core behaviour works", status="verified"),
+        AcceptanceCheck(criterion="hard value is exact", status="unknown",
+                        evidence="oracle could not derive expected value"))))
+
+
+@pytest.mark.asyncio
+async def test_unknown_criterion_does_not_block_advance():
+    # Only the verified criterion must be observed-and-satisfied; the 'unknown' one is
+    # advisory (the oracle abstained) and must NOT force repair.
+    checks = [{"criterion": "core behaviour works",
+               "observed": "ran prog, saw correct output", "satisfied": True}]
+    r = await _node(_VerifierLLM("advance", checks=checks)).run(_ctx(_state_with_unknown()))
+    assert r.branch == "done"
+
+
+@pytest.mark.asyncio
+async def test_unknown_criterion_is_surfaced_in_observe_prompt():
+    node = _node(_VerifierLLM("advance"))
+    s = _state_with_unknown()
+    prompt = node._observe_prompt(s, s.plan.tasks[0])
+    assert "advisory" in prompt.lower() or "unknown" in prompt.lower()
