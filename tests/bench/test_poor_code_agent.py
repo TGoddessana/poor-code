@@ -66,6 +66,26 @@ def test_env_forwards_git_ref_and_url_when_set(monkeypatch):
     assert env["POOR_CODE_GIT_URL"] == "https://example.com/repo"
 
 
+def test_env_forwards_dump_prompts_when_set(monkeypatch):
+    # The verifier diagnostic: a /logs container path is forwarded so the prompt+verdict
+    # dump lands in the run artifacts. Forwarded verbatim, only when the host sets it.
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("OLLAMA_API_KEY", "k")
+    monkeypatch.setenv("POOR_CODE_MODEL", "m")
+    monkeypatch.setenv("POOR_CODE_DUMP_PROMPTS", "/logs/poorcode-dump.txt")
+    mod = _load_agent_module()
+    assert mod.build_env()["POOR_CODE_DUMP_PROMPTS"] == "/logs/poorcode-dump.txt"
+
+
+def test_env_omits_dump_prompts_when_unset(monkeypatch):
+    _clear_keys(monkeypatch)
+    monkeypatch.delenv("POOR_CODE_DUMP_PROMPTS", raising=False)
+    monkeypatch.setenv("OLLAMA_API_KEY", "k")
+    monkeypatch.setenv("POOR_CODE_MODEL", "m")
+    mod = _load_agent_module()
+    assert "POOR_CODE_DUMP_PROMPTS" not in mod.build_env()
+
+
 def test_env_omits_git_ref_when_unset(monkeypatch):
     _clear_keys(monkeypatch)
     monkeypatch.delenv("POOR_CODE_GIT_REF", raising=False)

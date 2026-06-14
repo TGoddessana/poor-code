@@ -37,8 +37,13 @@ def build_env() -> dict[str, str]:
     # Let the host pick which branch/tag/commit and repo install.sh installs in the
     # container. install.sh reads these from the container env (defaulting to main);
     # without forwarding them here, a host-side override silently has no effect.
+    # POOR_CODE_DUMP_PROMPTS: when set to a CONTAINER path under /logs (e.g.
+    # /logs/poorcode-dump.txt), headless appends every node's constructed prompt AND the
+    # verifier's verdict trace there; tb collects /logs into the run's sessions/ dir, so the
+    # diagnostic survives the container. Forwarded verbatim — the host must give a /logs path.
     for opt in ("POOR_CODE_GIT_REF", "POOR_CODE_GIT_URL",
-                "POOR_CODE_ADVISORY_GATES"):  # runtime experiment flags, forwarded if set
+                "POOR_CODE_ADVISORY_GATES",
+                "POOR_CODE_DUMP_PROMPTS"):  # runtime experiment flags, forwarded if set
         val = os.environ.get(opt)
         if val:
             env[opt] = val

@@ -104,7 +104,7 @@ class VerifierNode(AgentNode):
         history = await self._observe(ctx, task)
         out = validate_output(
             _VerdictOut, await self._dispatch(ctx, extra_messages=history), node=self.name)
-        verdict, hint = out.verdict, out.hint
+        raw_verdict, verdict, hint = out.verdict, out.verdict, out.hint
 
         # LENIENCY GUARD — the v2 false_accept frontier. A weak verifier observes (many bash
         # calls) but rubber-stamps 'advance'. Block an advance that is not backed by a real
@@ -112,6 +112,12 @@ class VerifierNode(AgentNode):
         # output that was actually seen. Unbacked advance -> repair_impl.
         if verdict == "advance" and not self._observation_backed(out):
             verdict, hint = "repair_impl", (hint or self._unbacked_hint(out))
+
+        # DIAGNOSTIC — persist the verdict + its grounding so a false_accept can be CLASSIFIED
+        # post-hoc (weak criteria vs unobserved vs rubber-stamped vs fabricated evidence)
+        # rather than inferred from pass/fail. Routed through the sink so it lands in the
+        # POOR_CODE_DUMP_PROMPTS dump (headless/bench) and the TUI trace alike. No-op when off.
+        self._emit_verdict_trace(ctx, history, out, raw_verdict, verdict, hint)
 
         if verdict == "advance":
             return self._done(task, attempt)
@@ -145,6 +151,28 @@ class VerifierNode(AgentNode):
                   else "no per-criterion observations were provided")
         return ("Advance blocked: every criterion must be verified by running it and "
                 f"observing the result. Not yet observed-and-satisfied: {detail}")
+
+    def _emit_verdict_trace(self, ctx: NodeContext, history: list[dict[str, Any]],
+                            out: "_VerdictOut", raw_verdict: str, final_verdict: str,
+                            hint: str) -> None:
+        """Append a 'verifier:verdict' record (observe transcript + per-criterion checks +
+        raw/guarded verdict) to the sink. The whole verdict reasoning was previously dropped
+        — only rendered transiently in the TUI — so a false_accept could not be classified
+        from run artifacts. `raw_verdict` is what the model emitted; `final_verdict` is after
+        the leniency guard, so a fired guard (raw=advance, final=repair_impl) is visible."""
+        if ctx.sink is None or not hasattr(ctx.sink, "node_context"):
+            return
+        phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
+        record = {
+            "raw_verdict": raw_verdict,
+            "final_verdict": final_verdict,
+            "leniency_guard_fired": raw_verdict != final_verdict,
+            "hint": hint,
+            "checks": [c.model_dump() for c in out.checks],
+        }
+        messages = list(history) + [
+            {"role": "verdict", "content": json.dumps(record, ensure_ascii=False, indent=2)}]
+        ctx.sink.node_context(f"{self.name}:verdict", phase, messages)
 
     @staticmethod
     def _done(task, attempt) -> NodeResult:

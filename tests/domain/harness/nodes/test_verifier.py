@@ -129,3 +129,53 @@ async def test_observe_prompt_carries_criteria():
     # the judge phase sees the observation history, which began with the criteria prompt
     blob = "\n".join(str(m.get("content", "")) for m in llm.seen)
     assert "empty input shows an error" in blob   # the criterion reached the verifier
+
+
+class _RecordingSink:
+    """Captures node_context(...) calls so a test can read what the verifier dumped.
+    Every other sink method (thinking deltas, tool events the dispatch path emits) is a
+    no-op via __getattr__."""
+    def __init__(self):
+        self.contexts = []  # list[(node, phase, messages)]
+
+    def node_context(self, node, phase, messages):
+        self.contexts.append((node, phase, messages))
+
+    def __getattr__(self, _name):
+        return lambda *a, **k: None
+
+
+def _ctx_with_sink(state, sink):
+    return NodeContext(state=state, cancel=asyncio.Event(), sink=sink)
+
+
+@pytest.mark.asyncio
+async def test_verdict_trace_is_emitted_for_post_mortem():
+    # Diagnostic instrumentation: after judging, the verifier dumps a 'verifier:verdict'
+    # record carrying the observe transcript + the per-criterion checks + raw/final verdict.
+    # This is the artifact that lets a false_accept be classified (weak criteria vs
+    # unobserved vs rubber-stamped vs fabricated-evidence) instead of guessed.
+    sink = _RecordingSink()
+    await _node(_VerifierLLM("advance", checks=_BACKED)).run(_ctx_with_sink(_state(), sink))
+    verdicts = [c for c in sink.contexts if c[0] == "verifier:verdict"]
+    assert len(verdicts) == 1
+    _, _, messages = verdicts[0]
+    record = json.loads(messages[-1]["content"])
+    assert record["raw_verdict"] == "advance"
+    assert record["final_verdict"] == "advance"
+    assert record["leniency_guard_fired"] is False
+    assert record["checks"] == _BACKED
+
+
+@pytest.mark.asyncio
+async def test_verdict_trace_records_leniency_guard_downgrade():
+    # When the guard turns a bare 'advance' into repair_impl, the trace must show BOTH
+    # the model's raw verdict and that the guard fired — the signal that separates a
+    # rubber-stamp (model said advance) from an honest repair.
+    sink = _RecordingSink()
+    await _node(_VerifierLLM("advance")).run(_ctx_with_sink(_state(), sink))  # no checks
+    record = json.loads(
+        [c for c in sink.contexts if c[0] == "verifier:verdict"][0][2][-1]["content"])
+    assert record["raw_verdict"] == "advance"
+    assert record["final_verdict"] == "repair_impl"
+    assert record["leniency_guard_fired"] is True
