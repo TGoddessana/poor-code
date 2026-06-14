@@ -4,7 +4,8 @@ import json
 import pytest
 
 from poor_code.domain.harness.node import NodeContext
-from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
+from poor_code.domain.harness.nodes.acceptance_oracle import (
+    AcceptanceOracle, _AUTHOR_SYSTEM, _SYSTEM)
 from poor_code.domain.session.models import (
     AcceptanceSpec, CodeContext, CodeRef, FileExcerpt, GroundingStatus, Request,
     RequestKind, Requirement, SessionState,
@@ -224,3 +225,24 @@ async def test_oracle_status_defaults_to_verified_when_omitted():
     llm = FakeLLM({"checks": [{"criterion": "exact content", "command": "true"}]})
     res = await AcceptanceOracle(llm).run(NodeContext(_state(), cancel=asyncio.Event()))
     assert res.output.checks[0].status == "verified"
+
+
+def test_author_system_drives_tools_and_is_non_destructive():
+    s = _AUTHOR_SYSTEM.lower()
+    # authors an executable test by computing, not recalling
+    assert "compute" in s or "derive" in s
+    assert "$tmpdir" in s
+    # discrimination self-check: the test must FAIL on a wrong/stub implementation
+    assert "stub" in s or "wrong implementation" in s
+    assert "discriminat" in s or "must fail" in s
+    # honest abstention floor
+    assert "unknown" in s
+    # non-destructive (E-guard) + independence (no candidate to run yet)
+    for op in ("overwrite", "truncate", "replace"):
+        assert op in s
+
+
+def test_emit_system_mentions_status_and_evidence():
+    s = _SYSTEM.lower()
+    assert "status" in s and "unknown" in s
+    assert "evidence" in s
