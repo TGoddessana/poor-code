@@ -110,6 +110,20 @@ async def test_oracle_system_forbids_destructive_input_probes():
 
 
 @pytest.mark.asyncio
+async def test_oracle_system_demands_traceability_for_extraction_not_computation():
+    # sqlite frontier: when the answer can't be precomputed (recovery/extraction), structure-
+    # only criteria (valid JSON / count>0) pass FABRICATED placeholder output. The oracle must
+    # demand traceability to the real source — and must NOT impose that on COMPUTED outputs
+    # (a sum/average legitimately is not present in the source).
+    llm = FakeLLM({"checks": []})
+    await AcceptanceOracle(llm).run(NodeContext(_state(), cancel=asyncio.Event()))
+    system = llm.seen_messages[0]["content"].lower()
+    assert "fabricat" in system
+    assert "traceab" in system or "occur in the real source" in system or "present in the real source" in system
+    assert "computation" in system or "computed" in system   # carve-out so averages aren't rejected
+
+
+@pytest.mark.asyncio
 async def test_oracle_prompt_carries_excerpts_candidates_and_real_api(monkeypatch):
     """The oracle must see GROUND TRUTH (the explorer's real file bodies, candidate
     refs, and probed APIs) — not just a prose summary. This is the fix for the

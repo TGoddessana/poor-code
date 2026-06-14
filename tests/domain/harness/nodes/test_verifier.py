@@ -89,6 +89,15 @@ def test_observe_system_forbids_fixture_destruction_and_urges_scratch_tests():
     assert "throwaway test" in s or "small throwaway test" in s
 
 
+def test_observe_system_rejects_fabricated_output():
+    # sqlite frontier: structurally-valid but INVENTED output (placeholder rows) must not
+    # pass on structure alone — the verifier must trace output back to the real source.
+    s = _OBSERVE_SYSTEM.lower()
+    assert "fabricat" in s
+    assert "trace the output back to the source" in s or "trace" in s
+    assert "structure alone" in s or "structurally valid" in s
+
+
 @pytest.mark.asyncio
 async def test_advance_with_observation_evidence_marks_done():
     r = await _node(_VerifierLLM("advance", checks=_BACKED)).run(_ctx(_state()))
