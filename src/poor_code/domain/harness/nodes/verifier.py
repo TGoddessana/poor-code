@@ -86,6 +86,9 @@ _OBSERVE_SYSTEM = (
     "Do NOT modify the implementation's code (you only run, inspect, and write throwaway "
     "tests under $TMPDIR). When you have observed enough to judge every criterion, stop "
     "calling tools."
+    " You may be given ORACLE-AUTHORED TESTS as evidence; running them is a strong signal, "
+    "but a passing authored test is NOT sufficient on its own and a crashing one is NOT an "
+    "automatic failure — your own adversarial observation is the verdict."
 )
 
 _JUDGE_SYSTEM = (
@@ -311,8 +314,16 @@ class VerifierNode(AgentNode):
             header += f"ORIGINAL REQUEST:\n{state.request.raw_text}\n"
         header += f"OVERALL GOAL:\n{req.summary}\n"
         task_md = task_section(state.plan, task.id) if state.plan else task.title
+        authored = self._authored_tests(state)
+        evidence = (
+            f"\nORACLE-AUTHORED TESTS (strong EVIDENCE the oracle wrote and self-checked "
+            f"BEFORE the implementation existed — you SHOULD run these as a starting point, "
+            f"but they are NOT a binding floor; if one crashes, investigate rather than "
+            f"abandon, and still observe adversarially):\n{authored}\n"
+            if authored else "")
         return (
-            f"CRITERIA (the definition of done — verify EACH by observation):\n{criteria}\n\n"
+            f"CRITERIA (the definition of done — verify EACH by observation):\n{criteria}\n"
+            f"{evidence}\n"
             f"{header}\n"
             f"TASK UNDER VERIFICATION:\n{task_md}\n\n"
             f"COMPLETED WORK (ledger):\n{render_build_ledger(state)}\n\n"
@@ -336,6 +347,13 @@ class VerifierNode(AgentNode):
         req = effective_requirement(state)
         return ("\n".join(f"  - {a}" for a in req.acceptance)
                 or "  (no explicit criteria — judge against the REQUEST and the task PURPOSE)")
+
+    @staticmethod
+    def _authored_tests(state: SessionState) -> str:
+        checks = state.acceptance.checks if state.acceptance else ()
+        rows = [f"  - ({c.criterion}) -> {c.command}"
+                for c in checks if c.command.strip()]
+        return "\n".join(rows)
 
     # stage ② — verdict envelope
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:

@@ -274,3 +274,16 @@ async def test_fully_paraphrased_unmatched_criteria_still_gate_on_all_checks():
     checks2 = [{"criterion": "something totally different", "observed": "", "satisfied": False}]
     r2 = await _node(_VerifierLLM("advance", checks=checks2)).run(_ctx(_state_with_unknown()))
     assert r2.verdict is not None and r2.verdict.kind.name == "REPAIR"
+
+
+@pytest.mark.asyncio
+async def test_oracle_authored_test_is_surfaced_as_evidence():
+    s = _state()
+    s = replace(s, acceptance=AcceptanceSpec(checks=(
+        AcceptanceCheck(criterion="avg is exact",
+                        command="test \"$(cat avg_temp.txt)\" = 11.429",
+                        status="verified"),)))
+    prompt = _node(_VerifierLLM("advance"))._observe_prompt(s, s.plan.tasks[0])
+    # the oracle's authored test appears as runnable evidence (not as a binding floor)
+    assert "11.429" in prompt
+    assert "evidence" in prompt.lower()
