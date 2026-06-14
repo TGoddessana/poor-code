@@ -230,3 +230,19 @@ async def test_unknown_criterion_is_surfaced_in_observe_prompt():
     s = _state_with_unknown()
     prompt = node._observe_prompt(s, s.plan.tasks[0])
     assert "advisory" in prompt.lower() or "unknown" in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_unknown_criterion_does_not_block_advance_even_when_emitted_unsatisfied():
+    # DISCRIMINATION TEST: the LLM reports BOTH criteria in its checks — the binding one
+    # satisfied+observed, and the advisory "unknown" one unsatisfied/unobserved.
+    # Old _observation_backed scanned all checks and would block on the unsatisfied advisory
+    # one. New code filters to binding-only, so advance must still reach branch=="done".
+    checks = [
+        {"criterion": "core behaviour works",
+         "observed": "ran prog, saw correct output", "satisfied": True},
+        {"criterion": "hard value is exact",   # the "unknown" (advisory) criterion
+         "observed": "", "satisfied": False},   # unobserved and unsatisfied
+    ]
+    r = await _node(_VerifierLLM("advance", checks=checks)).run(_ctx(_state_with_unknown()))
+    assert r.branch == "done"
