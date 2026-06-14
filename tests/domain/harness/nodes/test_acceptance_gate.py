@@ -63,3 +63,37 @@ async def test_escalates_after_budget():
     s = SessionState(acceptance=AcceptanceSpec(), history=_bounces(ACCEPTANCE_REPAIR_BUDGET))
     res = await AcceptanceGate().run(_ctx(s))
     assert res.verdict.kind is VerdictKind.ESCALATE
+
+
+# --- unknown-status abstention tests ---
+
+def test_gate_allows_unknown_check_with_empty_command():
+    """A spec with a verified check plus an unknown-status empty-command check must PASS."""
+    spec = AcceptanceSpec(checks=(
+        AcceptanceCheck(criterion="core works", command="pytest -q", status="verified"),
+        AcceptanceCheck(criterion="hard value exact", command="", status="unknown"),
+    ))
+    assert AcceptanceGate()._invalid_hint(spec) is None
+
+
+def test_gate_allows_spec_with_only_unknown_checks():
+    """A spec whose sole check is an unknown-status empty-command check must PASS
+    (oracle abstained on all criteria; at least one check is present)."""
+    spec = AcceptanceSpec(checks=(
+        AcceptanceCheck(criterion="some criterion", command="", status="unknown"),
+    ))
+    assert AcceptanceGate()._invalid_hint(spec) is None
+
+
+def test_gate_still_rejects_verified_check_with_empty_command():
+    """Regression guard: a verified-status check with no command must still be REJECTED."""
+    spec = AcceptanceSpec(checks=(
+        AcceptanceCheck(criterion="core works", command="", status="verified"),
+    ))
+    assert AcceptanceGate()._invalid_hint(spec) is not None
+
+
+def test_gate_still_rejects_empty_spec():
+    """A spec with no checks at all must still be REJECTED."""
+    assert AcceptanceGate()._invalid_hint(AcceptanceSpec()) is not None
+    assert AcceptanceGate()._invalid_hint(None) is not None
