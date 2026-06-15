@@ -9,7 +9,7 @@ from typing import Any
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.nodes.global_validator import build_changeset
 from poor_code.domain.session.models import (
-    ChangeSet, Phase, Report, ReportOutcome, SessionState, TaskReport, TaskStatus,
+    ChangeSet, Phase, Plan, Report, ReportOutcome, SessionState, TaskReport, TaskStatus,
 )
 
 
@@ -85,6 +85,8 @@ def report_from_dict(d: dict[str, Any]) -> Report:
 class Reporter:
     name = "reporter"
     phase = Phase.FINALIZING
+    requires = (Plan,)
+    produces = (Report,)
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         return NodeResult(output=build_report(ctx.state, ReportOutcome.SUCCEEDED))

@@ -21,7 +21,8 @@ from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.domain.session.models import (
-    AnsweredQuery, CodeRef, GroundingStatus, Phase, Query, QueryKind, Requirement, SessionState,
+    AnsweredQuery, CodeContext, CodeRef, GroundingStatus, Phase, Query, QueryKind,
+    Request, Requirement, SessionState,
 )
 
 _TOOL_NAME = "interview_step"
@@ -112,6 +113,8 @@ class InterviewStepCompletion:
 class Interviewer(AgentNode):
     name = "interviewer"
     phase = Phase.INTERVIEWING
+    requires = (Request, CodeContext)
+    produces = (Requirement,)
 
     def __init__(self, llm: _LLMClientLike, project_map: ProjectMap,
                  tools: "ToolRegistry | None" = None) -> None:

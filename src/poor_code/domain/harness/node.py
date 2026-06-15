@@ -290,6 +290,8 @@ class GateNode(ABC):
     REPAIR(layer, hint), 예산 초과면 ESCALATE. repair 바운스 횟수는 history 에서 센다.
     개별 게이트가 카운트 규칙이 다르면 _repair_count 를 오버라이드한다."""
     name: str
+    requires: tuple[type, ...] = ()
+    produces: tuple[type, ...] = ()
     layer: Layer
     repair_budget: int
     phase: Phase  # every gate declares its cursor phase (read by the Driver)
@@ -351,6 +353,8 @@ class AgentNode:
     the tool schema, and parse(args_json) -> output object."""
 
     name: str
+    requires: tuple[type, ...] = ()
+    produces: tuple[type, ...] = ()
 
     def __init__(self, llm: _LLMClientLike) -> None:
         self._llm = llm

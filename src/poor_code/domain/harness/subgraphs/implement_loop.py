@@ -13,7 +13,9 @@ from poor_code.domain.harness.nodes.composer import Composer
 from poor_code.domain.harness.nodes.execution import TaskSelector, EngGate
 from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.harness.nodes.verifier import VerifierNode
-from poor_code.domain.session.models import Cursor, Layer, Phase
+from poor_code.domain.session.models import (
+    AcceptanceSpec, CodeContext, Cursor, Layer, Phase, Plan, Requirement,
+)
 from poor_code.domain.tool.bash import BashTool
 from poor_code.domain.tool.edit import EditTool
 from poor_code.domain.tool.write import WriteTool
@@ -89,6 +91,11 @@ def build_implement_loop(*, llm, cwd) -> CompiledGraph:
         # (every other node forwards onward); signal 'done' to the outer graph.
         return "done"
 
-    return CompiledGraph(graph, name="implement_loop",
-                         fork=fork, merge=merge, exit_branch=exit_branch,
-                         phase=Phase.IMPLEMENTING)
+    compiled = CompiledGraph(graph, name="implement_loop",
+                             fork=fork, merge=merge, exit_branch=exit_branch,
+                             phase=Phase.IMPLEMENTING)
+    # Node I/O contract for the top-level coverage check: the loop cannot start without
+    # a Plan (task_selector), and its implementer/verifier consume the binding spec.
+    compiled.requires = (Plan, Requirement, CodeContext, AcceptanceSpec)
+    compiled.produces = ()
+    return compiled

@@ -9,13 +9,15 @@ from __future__ import annotations
 
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.steering import driver_feedback_block, steering_block
-from poor_code.domain.session.models import Phase
+from poor_code.domain.session.models import Phase, Request
 from poor_code.messages import SendPrompt
 
 
 class FastPathNode:
     name = "fast_path"
     phase = Phase.ROUTING
+    requires = (Request,)
+    produces = ()
 
     def __init__(self, agent) -> None:
         self._agent = agent

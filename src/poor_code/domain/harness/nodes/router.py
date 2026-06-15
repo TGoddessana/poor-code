@@ -38,6 +38,8 @@ class _ClassificationOut(BaseModel):
 class Router(AgentNode):
     name = "router"
     phase = Phase.ROUTING
+    requires = (Request,)
+    produces = (Request,)
 
     def __init__(self, llm: _LLMClientLike) -> None:
         super().__init__(llm)

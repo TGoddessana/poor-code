@@ -17,8 +17,8 @@ from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.harness.node import validate_output
 from poor_code.domain.session.models import (
-    AttemptStatus, ChangeSet, Layer, Phase, SessionState, TaskReopened, TaskStatus,
-    Verdict, VerdictKind)
+    AcceptanceSpec, AttemptStatus, ChangeSet, Layer, Phase, Plan, SessionState,
+    TaskReopened, TaskStatus, Verdict, VerdictKind)
 
 MAX_FIXUPS = 2          # full re-plan fixups (the heavy fallback) before escalate
 MAX_SCOPED_FIXUPS = 2   # scoped (single-task) repairs before falling back to re-plan
@@ -56,6 +56,8 @@ def build_changeset(state: SessionState) -> ChangeSet:
 class GlobalValidator(AgentNode):
     name = "global_validator"
     phase = Phase.FINALIZING
+    requires = (Plan, AcceptanceSpec)
+    produces = ()
 
     def __init__(self, llm: _LLMClientLike, cwd: Path) -> None:
         super().__init__(llm)

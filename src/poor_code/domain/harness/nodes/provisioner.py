@@ -26,7 +26,7 @@ from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLik
 from poor_code.domain.harness.nodes.execution import run_shell
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.steering import driver_feedback_block, steering_block
-from poor_code.domain.session.models import EnvReport, Phase
+from poor_code.domain.session.models import EnvReport, Phase, Request
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.usage import tag
@@ -94,6 +94,8 @@ _PROVISION_SYSTEM = (
 class Provisioner:
     name = "provisioner"
     phase = Phase.PLANNING
+    requires = (Request,)
+    produces = (EnvReport,)
 
     def __init__(self, llm: _LLMClientLike, cwd: Path, tools: ToolRegistry) -> None:
         self._llm = llm

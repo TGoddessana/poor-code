@@ -13,6 +13,7 @@ from poor_code.domain.session.models import (
     AttemptStatus,
     Layer,
     Phase,
+    Plan,
     SelectedTask,
     TaskCompleted,
     TaskStatus,
@@ -38,6 +39,8 @@ class TaskSelector:
 
     name = "task_selector"
     phase = Phase.IMPLEMENTING
+    requires = (Plan,)
+    produces = ()
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         plan = ctx.state.plan
