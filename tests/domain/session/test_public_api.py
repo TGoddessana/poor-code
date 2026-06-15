@@ -46,6 +46,7 @@ def test_public_surface_locked_to_all():
         "Attempt",
         "Dependency",
         "EditScope",
+        "MissingInput",
         "Plan",
         "WorkItemPolicies",
         "Session",
@@ -58,6 +59,9 @@ def test_public_surface_locked_to_all():
         "WorkItem",
         "WorkItemState",
         "WorkItemStatus",
+        "register_artifact",
+        "artifact_name",
+        "artifact_class",
     }
     assert set(session_pkg.__all__) == expected
 

@@ -8,8 +8,10 @@ import warnings
 
 from poor_code.domain.harness.contracts import contract_warnings
 from poor_code.domain.harness.driver import Driver, DriverRuntime
-from poor_code.domain.harness.graph import EdgeTable, Graph
-from poor_code.domain.harness.node import Node, NodeContext, NodeResult
+from poor_code.domain.harness.graph import CompiledGraph, EdgeTable, Graph
+from poor_code.domain.harness.node import (
+    AgentNode, Completion, Node, NodeContext, NodeResult, StructuredCompletion,
+)
 from poor_code.domain.harness.nodes.acceptance_critic import AcceptanceCritic
 from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
 from poor_code.domain.harness.nodes.confirm_gates import PlanConfirmGate, SpecConfirmGate
@@ -34,6 +36,7 @@ from poor_code.domain.tool.read import ReadTool
 from poor_code.domain.tool.registry import ToolRegistry
 
 __all__ = [
+    "AgentNode", "Completion", "StructuredCompletion", "CompiledGraph",
     "Driver", "DriverRuntime", "Node", "NodeContext", "NodeResult", "NodeRegistry",
     "Router", "ExploringNode", "Interviewer", "Planner", "PlanGate", "FastPathNode",
     "AcceptanceOracle", "AcceptanceGate", "AcceptanceCritic",
