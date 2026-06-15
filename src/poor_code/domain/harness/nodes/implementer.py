@@ -85,7 +85,8 @@ class Implementer:
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         state = ctx.state
-        assert state.plan is not None and state.cursor is not None
+        state.require(Plan)
+        assert state.cursor is not None
         task = next((t for t in state.plan.tasks if t.id == state.cursor.task_id), None)
         assert task is not None, f"cursor task_id {state.cursor.task_id!r} not in plan"
 

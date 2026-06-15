@@ -44,7 +44,7 @@ class TaskSelector:
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         plan = ctx.state.plan
-        assert plan is not None, "task_selector requires a plan"
+        ctx.state.require(Plan)
         done = {t.id for t in plan.tasks if t.status is TaskStatus.DONE}
         deps: dict[str, list[str]] = {}
         for d in plan.deps:

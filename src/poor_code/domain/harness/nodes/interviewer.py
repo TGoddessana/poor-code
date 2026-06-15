@@ -134,7 +134,7 @@ class Interviewer(AgentNode):
     # completion, so the node no longer overrides AgentNode.output_model().
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
-        assert state.request is not None, "Interviewer requires state.request"
+        state.require(Request)
         system = _SYSTEM + (_FINALIZE if len(state.interview) >= MAX_ROUNDS else "")
         return [
             {"role": "system", "content": system},

@@ -124,7 +124,7 @@ class ExploringNode(AgentNode):
     # stage ① — the read/grep tool loop
     async def _explore(self, ctx: NodeContext, environment: str = "") -> tuple[list[dict[str, Any]], tuple[FileExcerpt, ...]]:
         state = ctx.state
-        assert state.request is not None, "ExploringNode requires state.request"
+        state.require(Request)
         hint = ""
         if state.repair_hint:
             hint = f"\n\nRE-SEARCH: previous exploration failed — {state.repair_hint}. Widen the search."

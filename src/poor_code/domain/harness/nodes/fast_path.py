@@ -23,7 +23,7 @@ class FastPathNode:
         self._agent = agent
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        assert ctx.state.request is not None, "FastPathNode requires state.request"
+        ctx.state.require(Request)
         cmd = SendPrompt(
             ctx.state.request.raw_text
             + steering_block(ctx.state.steering_notes)

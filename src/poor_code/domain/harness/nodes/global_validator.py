@@ -67,7 +67,7 @@ class GlobalValidator(AgentNode):
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         plan = ctx.state.plan
-        assert plan is not None, "global_validator requires a plan"
+        ctx.state.require(Plan)
         # Verification v2: the per-task Verifier now owns verification by OBSERVATION, so
         # there is no model-authored bash acceptance command to re-run here (re-running it
         # was the last bash floor that could false-abandon a correct build on its own
