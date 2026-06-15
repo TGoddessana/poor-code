@@ -55,7 +55,9 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
         llm, project_map=project_map,
         tools=ToolRegistry([ListTool(), GlobTool(), ReadTool(), GrepTool()])))
     reg.register(UnderstandingGate())
-    reg.register(Interviewer(llm, project_map=project_map))
+    reg.register(Interviewer(
+        llm, project_map=project_map,
+        tools=ToolRegistry([ReadTool(), GrepTool(), GlobTool(), ListTool()])))
     reg.register(AcceptanceOracle(
         llm, cwd=project_map.cwd,
         tools=ToolRegistry([BashTool(), ReadTool(), GrepTool(), GlobTool(), ListTool()])))

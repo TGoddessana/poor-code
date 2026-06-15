@@ -25,6 +25,11 @@ from poor_code.provider.events import (
 )
 from poor_code.provider.usage import tag
 
+from pathlib import Path
+
+from poor_code.domain.harness.tool_output import clamp_tool_output
+from poor_code.domain.tool.base import ToolContext, allow_all
+
 
 _M = TypeVar("_M", bound=BaseModel)
 
@@ -61,6 +66,17 @@ def strip_code_fence(text: str) -> str:
     if start != -1 and end > start:
         return s[start:end + 1]
     return s
+
+
+def _safe_args(args_json: str) -> dict:
+    """Best-effort parse of a tool call's argument JSON into a dict for sink display.
+    A non-dict payload is wrapped as {"_": v}; malformed JSON yields {} — never raises,
+    since this only feeds the UI's tool_started event, not execution."""
+    try:
+        v = json.loads(args_json or "{}")
+        return v if isinstance(v, dict) else {"_": v}
+    except (ValueError, TypeError):
+        return {}
 
 
 def _list_item_type(annotation: Any) -> type | None:
@@ -144,6 +160,7 @@ def validate_output(model_cls: type[_M], raw: str, *, node: str) -> _M:
 
 
 MAX_DISPATCH_ATTEMPTS = 3
+READ_LOOP_MAX_ITERATIONS = 6
 
 
 def _stub_for(schema: dict[str, Any]) -> Any:
@@ -418,3 +435,88 @@ class AgentNode:
         raise StructuredOutputError(
             self.name, text,
             "model produced no tool call (replied with prose or nothing)")
+
+    async def _stream_tools(
+        self, ctx: NodeContext, messages: list[dict], tools_schemas: list[dict],
+    ) -> tuple[str, list[tuple[str, str, str]]]:
+        """One streamed round that MAY call working tools. Returns (text, calls) with
+        calls = [(call_id, name, args_json)]. Mirrors the explorer/implementer round so
+        any AgentNode can run a read/act loop before its structured decision. Reasoning
+        text streams to the sink as node_thinking_delta (same as _stream_once)."""
+        tag(self._llm, self.name)
+        text_parts: list[str] = []
+        pending: dict[str, dict[str, str]] = {}
+        order: list[str] = []
+        async for ev in self._llm.stream(
+            messages=messages, tools=tools_schemas, response_format=None,
+        ):
+            if ctx.cancel.is_set():
+                raise asyncio.CancelledError(f"{self.name} cancelled")
+            match ev:
+                case TextDelta(text=t):
+                    text_parts.append(t)
+                    if ctx.sink is not None:
+                        ctx.sink.node_thinking_delta(self.name, t)
+                case ToolCallStarted(call_id=cid, name=name):
+                    pending[cid] = {"name": name, "args": ""}
+                    order.append(cid)
+                case ToolCallInputDelta(call_id=cid, json_delta=d):
+                    if cid in pending:
+                        pending[cid]["args"] += d
+                    # Tool-arg deltas are NOT streamed to the sink here (unlike
+                    # _stream_once, where the call args ARE the structured output): the
+                    # surrounding loop surfaces the parsed args via tool_started, matching
+                    # the explorer/implementer rounds. Only reasoning text is streamed.
+                case ToolCallEnded() | FinishedReason():
+                    pass
+        return "".join(text_parts), [
+            (cid, pending[cid]["name"], pending[cid]["args"]) for cid in order]
+
+    async def _run_tool(self, tools: Any, name: str, args_json: str, tool_ctx: Any) -> str:
+        tool = tools.get(name)
+        if tool is None:
+            return f"ERROR: unknown tool {name}"
+        try:
+            parsed = tool.params.model_validate_json(args_json or "{}")
+            result = await tool.execute(parsed, tool_ctx)
+            return result.output
+        except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
+            return f"ERROR: {type(e).__name__}: {e}"
+
+    async def _read_loop(
+        self, ctx: NodeContext, tools: Any, seed_messages: list[dict],
+        *, max_iterations: int = READ_LOOP_MAX_ITERATIONS,
+    ) -> list[dict]:
+        """Bounded read/act loop. Streams rounds that may call `tools`, runs them, and
+        feeds results back. Returns the transcript to hand to _dispatch as extra_messages
+        (seed system dropped, mirrors ExploringNode handing messages[1:] to its emit
+        stage). Stops when the model makes no tool call or the cap hits."""
+        messages = list(seed_messages)
+        tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel,
+                               cwd=Path.cwd(), ask=allow_all)
+        schemas = tools.schemas()
+        for _ in range(max_iterations):
+            if ctx.cancel.is_set():
+                raise asyncio.CancelledError(f"{self.name} cancelled")
+            text, calls = await self._stream_tools(ctx, messages, schemas)
+            assistant: dict[str, Any] = {"role": "assistant", "content": text}
+            if calls:
+                assistant["tool_calls"] = [
+                    {"id": cid, "type": "function",
+                     "function": {"name": name, "arguments": args or "{}"}}
+                    for cid, name, args in calls]
+            messages.append(assistant)
+            if not calls:
+                break
+            for cid, name, args in calls:
+                if ctx.sink is not None:
+                    ctx.sink.tool_started(cid, name, _safe_args(args))
+                output = await self._run_tool(tools, name, args, tool_ctx)
+                if ctx.sink is not None:
+                    if output.startswith("ERROR:"):
+                        ctx.sink.tool_failed(cid, output)
+                    else:
+                        ctx.sink.tool_finished(cid, output)
+                messages.append({"role": "tool", "tool_call_id": cid,
+                                 "content": clamp_tool_output(output)})
+        return messages[1:]   # drop the read-loop system prompt; keep user+rounds
