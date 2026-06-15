@@ -68,11 +68,12 @@ class _DummyLLM:
 class _ReadThenDecideLLM:
     """Round 1 (read loop): call read. Round 2: no tool call -> loop ends.
     Round 3 (decision dispatch): emit interview_step done."""
-    def __init__(self): self.round = 0
+    def __init__(self): self.round = 0; self.decision_messages = None
     async def stream(self, messages, tools, response_format=None):
         self.round += 1
         names = [t["function"]["name"] for t in tools]
         if "interview_step" in names:               # decision dispatch
+            self.decision_messages = messages        # capture to prove transcript wiring
             yield ToolCallStarted(call_id="d1", name="interview_step")
             yield ToolCallInputDelta(call_id="d1",
                 json_delta='{"action":"done","requirement":{"summary":"grounded by read"}}')
@@ -101,14 +102,17 @@ class _Sink:
 @pytest.mark.asyncio
 async def test_interviewer_reads_files_before_deciding():
     read = _ReadStub()
-    node = Interviewer(_ReadThenDecideLLM(), project_map=_map(),
-                       tools=ToolRegistry([read]))
+    llm = _ReadThenDecideLLM()
+    node = Interviewer(llm, project_map=_map(), tools=ToolRegistry([read]))
     sink = _Sink()
     res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event(), sink=sink))
     assert read.calls == ["src/auth.py"]          # the file was actually read
     assert "read" in sink.tools                    # surfaced through the sink
     assert isinstance(res.output, Requirement)
     assert res.output.summary == "grounded by read"
+    # the read result is actually WIRED into the decision dispatch (not just sequenced)
+    tool_msgs = [m for m in llm.decision_messages if m.get("role") == "tool"]
+    assert any("on_input_changed" in m["content"] for m in tool_msgs)
 
 
 @pytest.mark.asyncio

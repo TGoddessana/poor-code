@@ -25,6 +25,11 @@ from poor_code.provider.events import (
 )
 from poor_code.provider.usage import tag
 
+from pathlib import Path
+
+from poor_code.domain.harness.tool_output import clamp_tool_output
+from poor_code.domain.tool.base import ToolContext, allow_all
+
 
 _M = TypeVar("_M", bound=BaseModel)
 
@@ -486,9 +491,6 @@ class AgentNode:
         feeds results back. Returns the transcript to hand to _dispatch as extra_messages
         (seed system dropped, mirrors ExploringNode handing messages[1:] to its emit
         stage). Stops when the model makes no tool call or the cap hits."""
-        from pathlib import Path
-        from poor_code.domain.harness.tool_output import clamp_tool_output
-        from poor_code.domain.tool.base import ToolContext, allow_all
         messages = list(seed_messages)
         tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel,
                                cwd=Path.cwd(), ask=allow_all)
