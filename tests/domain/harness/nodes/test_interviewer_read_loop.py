@@ -63,3 +63,57 @@ class _DummyLLM:
         yield ToolCallInputDelta(call_id="c1", json_delta='{"action":"done","requirement":{"summary":"x"}}')
         yield ToolCallEnded(call_id="c1")
         yield FinishedReason(reason="tool_calls")
+
+
+class _ReadThenDecideLLM:
+    """Round 1 (read loop): call read. Round 2: no tool call -> loop ends.
+    Round 3 (decision dispatch): emit interview_step done."""
+    def __init__(self): self.round = 0
+    async def stream(self, messages, tools, response_format=None):
+        self.round += 1
+        names = [t["function"]["name"] for t in tools]
+        if "interview_step" in names:               # decision dispatch
+            yield ToolCallStarted(call_id="d1", name="interview_step")
+            yield ToolCallInputDelta(call_id="d1",
+                json_delta='{"action":"done","requirement":{"summary":"grounded by read"}}')
+            yield ToolCallEnded(call_id="d1")
+            yield FinishedReason(reason="tool_calls")
+        elif self.round == 1:                        # read-loop round 1
+            yield ToolCallStarted(call_id="r1", name="read")
+            yield ToolCallInputDelta(call_id="r1", json_delta='{"path":"src/auth.py"}')
+            yield ToolCallEnded(call_id="r1")
+            yield FinishedReason(reason="tool_calls")
+        else:                                        # read-loop round 2: stop
+            yield TextDelta(text="enough context")
+            yield FinishedReason(reason="stop")
+
+
+class _Sink:
+    def __init__(self): self.tools = []
+    def node_context(self, n, p, m): pass
+    def node_raw_output(self, n, r): pass
+    def node_thinking_delta(self, n, t): pass
+    def tool_started(self, cid, name, args): self.tools.append(name)
+    def tool_finished(self, cid, result): pass
+    def tool_failed(self, cid, err): pass
+
+
+@pytest.mark.asyncio
+async def test_interviewer_reads_files_before_deciding():
+    read = _ReadStub()
+    node = Interviewer(_ReadThenDecideLLM(), project_map=_map(),
+                       tools=ToolRegistry([read]))
+    sink = _Sink()
+    res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event(), sink=sink))
+    assert read.calls == ["src/auth.py"]          # the file was actually read
+    assert "read" in sink.tools                    # surfaced through the sink
+    assert isinstance(res.output, Requirement)
+    assert res.output.summary == "grounded by read"
+
+
+@pytest.mark.asyncio
+async def test_interviewer_without_tools_skips_read_loop():
+    # tools=None -> no read loop; single decision dispatch (original behavior).
+    node = Interviewer(_DummyLLM(), project_map=_map())   # no tools
+    res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert isinstance(res.output, Requirement)

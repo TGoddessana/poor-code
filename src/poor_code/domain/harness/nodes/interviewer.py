@@ -87,17 +87,17 @@ class Interviewer(AgentNode):
     async def run(self, ctx: NodeContext) -> NodeResult:
         state = ctx.state
         at_cap = len(state.interview) >= MAX_ROUNDS
+        read_msgs: list[dict] = []
+        if self._tools is not None:
+            read_msgs = await self._read_loop(ctx, self._tools, self._read_seed(state))
         prev_raw = ""
         for attempt in range(MAX_DISPATCH_ATTEMPTS):
-            extras: list[dict] | None = None
+            extras: list[dict] = list(read_msgs)
             if prev_raw:
-                extras = [
-                    {"role": "user", "content": (
-                        f"Your previous reply was rejected. Re-emit a corrected "
-                        f"interview_step call.\n\nprevious raw payload:\n{prev_raw}"
-                    )},
-                ]
-            raw = await self._dispatch(ctx, extra_messages=extras)
+                extras.append({"role": "user", "content": (
+                    f"Your previous reply was rejected. Re-emit a corrected "
+                    f"interview_step call.\n\nprevious raw payload:\n{prev_raw}")})
+            raw = await self._dispatch(ctx, extra_messages=extras or None)
             try:
                 step = validate_output(_InterviewStepOut, raw, node=self.name)
                 if step.action == "done" or at_cap:
@@ -130,6 +130,21 @@ class Interviewer(AgentNode):
                 f"REQUEST:\n{state.request.raw_text}\n\n"
                 f"CODE CONTEXT:\n{self._context_digest(state)}\n\n"
                 f"INTERVIEW SO FAR:\n{self._interview_digest(state.interview)}"},
+        ]
+
+    def _read_seed(self, state: SessionState) -> list[dict]:
+        """Seed for the pre-decision read loop: instruct the model to ground itself by
+        reading files, then return. The transcript feeds the interview decision."""
+        return [
+            {"role": "system", "content": (
+                "You are about to vet a spec. BEFORE asking the user anything, ground "
+                "yourself in the actual code: use read/grep/glob/list to confirm "
+                "signatures, event/handler wiring, and submit paths relevant to the "
+                "REQUEST. Read what the CODE CONTEXT summary leaves unresolved. When you "
+                "have read enough, STOP calling tools — do not answer or ask anything here.")},
+            {"role": "user", "content":
+                f"REQUEST:\n{state.request.raw_text}\n\n"
+                f"CODE CONTEXT:\n{self._context_digest(state)}"},
         ]
 
     def output_tool(self) -> dict[str, Any]:

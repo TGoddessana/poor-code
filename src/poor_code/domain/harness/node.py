@@ -155,6 +155,7 @@ def validate_output(model_cls: type[_M], raw: str, *, node: str) -> _M:
 
 
 MAX_DISPATCH_ATTEMPTS = 3
+READ_LOOP_MAX_ITERATIONS = 6
 
 
 def _stub_for(schema: dict[str, Any]) -> Any:
@@ -476,3 +477,44 @@ class AgentNode:
             return result.output
         except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
             return f"ERROR: {type(e).__name__}: {e}"
+
+    async def _read_loop(
+        self, ctx: NodeContext, tools: Any, seed_messages: list[dict],
+        *, max_iterations: int = READ_LOOP_MAX_ITERATIONS,
+    ) -> list[dict]:
+        """Bounded read/act loop. Streams rounds that may call `tools`, runs them, and
+        feeds results back. Returns the transcript to hand to _dispatch as extra_messages
+        (seed system dropped, mirrors ExploringNode handing messages[1:] to its emit
+        stage). Stops when the model makes no tool call or the cap hits."""
+        from pathlib import Path
+        from poor_code.domain.harness.tool_output import clamp_tool_output
+        from poor_code.domain.tool.base import ToolContext, allow_all
+        messages = list(seed_messages)
+        tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel,
+                               cwd=Path.cwd(), ask=allow_all)
+        schemas = tools.schemas()
+        for _ in range(max_iterations):
+            if ctx.cancel.is_set():
+                raise asyncio.CancelledError(f"{self.name} cancelled")
+            text, calls = await self._stream_tools(ctx, messages, schemas)
+            assistant: dict[str, Any] = {"role": "assistant", "content": text}
+            if calls:
+                assistant["tool_calls"] = [
+                    {"id": cid, "type": "function",
+                     "function": {"name": name, "arguments": args or "{}"}}
+                    for cid, name, args in calls]
+            messages.append(assistant)
+            if not calls:
+                break
+            for cid, name, args in calls:
+                if ctx.sink is not None:
+                    ctx.sink.tool_started(cid, name, _safe_args(args))
+                output = await self._run_tool(tools, name, args, tool_ctx)
+                if ctx.sink is not None:
+                    if output.startswith("ERROR:"):
+                        ctx.sink.tool_failed(cid, output)
+                    else:
+                        ctx.sink.tool_finished(cid, output)
+                messages.append({"role": "tool", "tool_call_id": cid,
+                                 "content": clamp_tool_output(output)})
+        return messages[1:]   # drop the read-loop system prompt; keep user+rounds
