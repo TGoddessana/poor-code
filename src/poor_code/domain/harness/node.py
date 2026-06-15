@@ -398,8 +398,9 @@ class AgentNode:
     async def _stream_once(
         self, ctx: NodeContext, messages: list[dict],
         response_format: dict[str, Any] | None = None,
+        tool: dict[str, Any] | None = None,
     ) -> str:
-        tools = [self.output_tool()]
+        tools = [tool if tool is not None else self.output_tool()]
         tag(self._llm, self.name)   # attribute this call's tokens to this node
         args_by_call: dict[str, str] = {}
         order: list[str] = []
