@@ -226,6 +226,34 @@ class NodeResult:
     branch: str | None = None
 
 
+@runtime_checkable
+class Completion(Protocol):
+    """How an AgentNode finishes: the terminal tool the model calls to signal done,
+    the schema to validate its args, and how to turn the validated raw payload into a
+    NodeResult. extract() MAY raise StructuredOutputError to reject a schema-valid but
+    semantically-incomplete output → the engine (AgentNode._terminal) re-rolls."""
+    def terminal_tool(self) -> dict[str, Any]: ...
+    def output_model(self) -> type[BaseModel] | None: ...
+    def extract(self, raw: str, ctx: "NodeContext | None") -> "NodeResult": ...
+
+
+class StructuredCompletion:
+    """Reproduces today's single-shot terminal behavior: validate against `model`
+    (done by the engine), then NodeResult(output=parse(raw))."""
+    def __init__(self, *, tool: dict[str, Any], model: type[BaseModel] | None,
+                 parse) -> None:
+        self._tool, self._model, self._parse = tool, model, parse
+
+    def terminal_tool(self) -> dict[str, Any]:
+        return self._tool
+
+    def output_model(self) -> type[BaseModel] | None:
+        return self._model
+
+    def extract(self, raw: str, ctx) -> "NodeResult":
+        return NodeResult(output=self._parse(raw))
+
+
 @dataclass
 class NodeContext:
     state: SessionState
@@ -395,11 +423,57 @@ class AgentNode:
         assert last_err is not None
         raise last_err
 
+    async def _terminal(
+        self, ctx: NodeContext, completion: "Completion",
+        extra_messages: list[dict] | None = None,
+    ) -> "NodeResult":
+        """Single-output terminal stage that delegates 'what is the result' to a
+        Completion. Re-rolls (up to MAX_DISPATCH_ATTEMPTS) on either schema-invalid
+        output OR completion.extract() raising StructuredOutputError. Mirrors _dispatch's
+        message assembly so existing single-shot behavior is reproduced when the
+        completion is a StructuredCompletion built from a node's output hooks."""
+        base = self.build_messages(ctx.state)
+        _sm = steering_message(getattr(ctx.state, "steering_notes", None) or ())
+        _fm = driver_feedback_message(ctx.state, self.name)
+        steer_msgs: list[dict] = [m for m in (_sm, _fm) if m is not None]
+        if ctx.sink is not None:
+            phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
+            ctx.sink.node_context(self.name, phase, base)
+        tool = completion.terminal_tool()
+        model_cls = completion.output_model()
+        response_format = {"type": "json_schema", "json_schema": {
+            "name": tool["function"]["name"],
+            "schema": tool["function"].get("parameters", {})}}
+        _schema = tool.get("function", {}).get("parameters")
+        _example = _example_from_schema(_schema) if _schema else None
+        corrections: list[dict] = []
+        last_err: StructuredOutputError | None = None
+        for _ in range(MAX_DISPATCH_ATTEMPTS):
+            extras = [*steer_msgs, *(extra_messages or []), *corrections]
+            messages = [base[0], *extras, *base[1:]] if extras else base
+            try:
+                raw = strip_code_fence(
+                    await self._stream_once(ctx, messages, response_format, tool=tool,
+                                            accept_text_output=model_cls is not None))
+                if model_cls is not None:
+                    validate_output(model_cls, raw, node=self.name)
+                if ctx.sink is not None:
+                    ctx.sink.node_raw_output(self.name, raw)
+                return completion.extract(raw, ctx)
+            except StructuredOutputError as e:
+                last_err = e
+                corrections = [{"role": "user",
+                                "content": _retry_nudge(e, schema=_schema, example=_example)}]
+        assert last_err is not None
+        raise last_err
+
     async def _stream_once(
         self, ctx: NodeContext, messages: list[dict],
         response_format: dict[str, Any] | None = None,
+        tool: dict[str, Any] | None = None,
+        accept_text_output: bool | None = None,
     ) -> str:
-        tools = [self.output_tool()]
+        tools = [tool if tool is not None else self.output_tool()]
         tag(self._llm, self.name)   # attribute this call's tokens to this node
         args_by_call: dict[str, str] = {}
         order: list[str] = []
@@ -427,10 +501,14 @@ class AgentNode:
         if order:
             return args_by_call[order[0]] or "{}"
         # No tool call: under response_format the structured object arrives as
-        # content. Accept it only when there is an output_model to validate it
-        # against (the caller validates) — otherwise prose could slip through.
+        # content. Accept it only when there is a model to validate it against (the
+        # caller validates) — otherwise prose could slip through. The effective model
+        # is the caller's (a Completion via _terminal supplies its own via
+        # accept_text_output); default falls back to the node's output_model().
         text = "".join(content)
-        if text.strip() and self.output_model() is not None:
+        accept = (self.output_model() is not None
+                  if accept_text_output is None else accept_text_output)
+        if text.strip() and accept:
             return text
         raise StructuredOutputError(
             self.name, text,
