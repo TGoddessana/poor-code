@@ -3,7 +3,7 @@ import pytest
 from poor_code.domain.harness.node import AgentNode, NodeContext
 from poor_code.domain.session.models import SessionState
 from poor_code.provider.events import (
-    ToolCallStarted, ToolCallInputDelta, ToolCallEnded, FinishedReason,
+    TextDelta, ToolCallStarted, ToolCallInputDelta, ToolCallEnded, FinishedReason,
 )
 
 
@@ -116,3 +116,55 @@ async def test_terminal_rerolls_until_extract_accepts():
     res = await node._terminal(ctx, _PickyCompletion())
     assert res.output == "accepted"
     assert llm.round == 2   # re-rolled once on the semantic rejection
+
+
+class _GoodFirstTryLLM:
+    def __init__(self): self.round = 0
+    async def stream(self, messages, tools, response_format=None):
+        self.round += 1
+        yield ToolCallStarted(call_id="c", name=tools[0]["function"]["name"])
+        yield ToolCallInputDelta(call_id="c", json_delta='{"value": "good"}')
+        yield ToolCallEnded(call_id="c")
+        yield FinishedReason(reason="tool_calls")
+
+
+@pytest.mark.asyncio
+async def test_terminal_happy_path_single_attempt():
+    llm = _GoodFirstTryLLM()
+    node = _TerminalProbe(llm)
+    ctx = NodeContext(state=SessionState(), cancel=asyncio.Event())
+    res = await node._terminal(ctx, _PickyCompletion())
+    assert res.output == "accepted"
+    assert llm.round == 1   # accepted on the first attempt, no re-roll
+
+
+class _ContentOnlyLLM:
+    """Returns the structured object as CONTENT (no tool call), as happens under
+    response_format on some providers."""
+    async def stream(self, messages, tools, response_format=None):
+        yield TextDelta(text='{"value": "good"}')
+        yield FinishedReason(reason="stop")
+
+
+class _ModelCompletion:
+    """Has an output_model — so content-only output must be accepted via the
+    completion's model even when the node itself defines no output_model."""
+    def terminal_tool(self):
+        return {"type": "function", "function": {"name": "emit",
+                "parameters": {"type": "object",
+                               "properties": {"value": {"type": "string"}}}}}
+    def output_model(self): return _Out
+    def extract(self, raw, ctx):
+        import json
+        return NodeResult(output=json.loads(raw)["value"])
+
+
+@pytest.mark.asyncio
+async def test_terminal_accepts_content_via_completion_model():
+    # _TerminalProbe.output_model() is the base default (None); the COMPLETION supplies
+    # the model. Content-only output must still be accepted (regression: _stream_once
+    # used to check self.output_model(), wrongly rejecting this).
+    node = _TerminalProbe(_ContentOnlyLLM())
+    ctx = NodeContext(state=SessionState(), cancel=asyncio.Event())
+    res = await node._terminal(ctx, _ModelCompletion())
+    assert res.output == "good"

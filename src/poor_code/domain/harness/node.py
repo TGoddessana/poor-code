@@ -453,7 +453,8 @@ class AgentNode:
             messages = [base[0], *extras, *base[1:]] if extras else base
             try:
                 raw = strip_code_fence(
-                    await self._stream_once(ctx, messages, response_format, tool=tool))
+                    await self._stream_once(ctx, messages, response_format, tool=tool,
+                                            accept_text_output=model_cls is not None))
                 if model_cls is not None:
                     validate_output(model_cls, raw, node=self.name)
                 if ctx.sink is not None:
@@ -470,6 +471,7 @@ class AgentNode:
         self, ctx: NodeContext, messages: list[dict],
         response_format: dict[str, Any] | None = None,
         tool: dict[str, Any] | None = None,
+        accept_text_output: bool | None = None,
     ) -> str:
         tools = [tool if tool is not None else self.output_tool()]
         tag(self._llm, self.name)   # attribute this call's tokens to this node
@@ -499,10 +501,14 @@ class AgentNode:
         if order:
             return args_by_call[order[0]] or "{}"
         # No tool call: under response_format the structured object arrives as
-        # content. Accept it only when there is an output_model to validate it
-        # against (the caller validates) — otherwise prose could slip through.
+        # content. Accept it only when there is a model to validate it against (the
+        # caller validates) — otherwise prose could slip through. The effective model
+        # is the caller's (a Completion via _terminal supplies its own via
+        # accept_text_output); default falls back to the node's output_model().
         text = "".join(content)
-        if text.strip() and self.output_model() is not None:
+        accept = (self.output_model() is not None
+                  if accept_text_output is None else accept_text_output)
+        if text.strip() and accept:
             return text
         raise StructuredOutputError(
             self.name, text,
