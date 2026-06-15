@@ -6,6 +6,7 @@ from poor_code.domain.session.models import (
     Attempt,
     Dependency,
     EditScope,
+    MissingInput,
     Plan,
     WorkItemPolicies,
     Session,
@@ -18,6 +19,9 @@ from poor_code.domain.session.models import (
     WorkItemState,
     WorkItemStatus,
 )
+from poor_code.domain.session.artifacts import (
+    artifact_class, artifact_name, register_artifact,
+)
 from poor_code.domain.session.service import SessionService
 
 __all__ = [
@@ -25,6 +29,7 @@ __all__ = [
     "Attempt",
     "Dependency",
     "EditScope",
+    "MissingInput",
     "Plan",
     "Session",
     "SessionService",
@@ -36,4 +41,7 @@ __all__ = [
     "WorkItem",
     "WorkItemState",
     "WorkItemStatus",
+    "register_artifact",
+    "artifact_name",
+    "artifact_class",
 ]
