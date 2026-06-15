@@ -391,12 +391,15 @@ class AgentNode:
         return {"type": "json_schema",
                 "json_schema": {"name": fn["name"], "schema": fn.get("parameters", {})}}
 
-    async def _dispatch(self, ctx: NodeContext, extra_messages: list[dict] | None = None) -> str:
-        """Stream one forced structured output, retrying up to MAX_DISPATCH_ATTEMPTS
-        times. The output may arrive as a tool call OR (under response_format) as
-        JSON content; either way it is validated when output_model is set. Each
-        failure (no output, or schema-invalid) is fed back as a corrective message
-        and re-rolled. After the budget is exhausted the last error propagates."""
+    async def _roll_structured(
+        self, ctx: NodeContext, *, tool: dict[str, Any],
+        model_cls: "type[BaseModel] | None", extra_messages: list[dict] | None = None,
+    ) -> str:
+        """Shared structured-output roll: assemble messages (steering + driver feedback +
+        caller extras + correction re-rolls), stream one forced tool/JSON output, validate
+        against `model_cls` when given, and re-roll up to MAX_DISPATCH_ATTEMPTS on schema
+        failure. Returns the accepted raw payload. This is the single reliability core that
+        both _dispatch (returns raw) and _terminal (then completion.extract) delegate to."""
         base = self.build_messages(ctx.state)
         _sm = steering_message(getattr(ctx.state, "steering_notes", None) or ())
         _fm = driver_feedback_message(ctx.state, self.name)
@@ -404,47 +407,6 @@ class AgentNode:
         if ctx.sink is not None:
             phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
             ctx.sink.node_context(self.name, phase, base)
-        model_cls = self.output_model()
-        response_format = self._response_format()
-        _schema = self.output_tool().get("function", {}).get("parameters")
-        _example = _example_from_schema(_schema) if _schema else None
-        corrections: list[dict] = []
-        last_err: StructuredOutputError | None = None
-        for _ in range(MAX_DISPATCH_ATTEMPTS):
-            extras = [*steer_msgs, *(extra_messages or []), *corrections]
-            messages = [base[0], *extras, *base[1:]] if extras else base
-            try:
-                raw = strip_code_fence(await self._stream_once(ctx, messages, response_format))
-                if model_cls is not None:
-                    validate_output(model_cls, raw, node=self.name)
-                if ctx.sink is not None:
-                    ctx.sink.node_raw_output(self.name, raw)
-                return raw
-            except StructuredOutputError as e:
-                last_err = e
-                corrections = [{"role": "user",
-                                "content": _retry_nudge(e, schema=_schema, example=_example)}]
-        assert last_err is not None
-        raise last_err
-
-    async def _terminal(
-        self, ctx: NodeContext, completion: "Completion",
-        extra_messages: list[dict] | None = None,
-    ) -> "NodeResult":
-        """Single-output terminal stage that delegates 'what is the result' to a
-        Completion. Re-rolls (up to MAX_DISPATCH_ATTEMPTS) on either schema-invalid
-        output OR completion.extract() raising StructuredOutputError. Mirrors _dispatch's
-        message assembly so existing single-shot behavior is reproduced when the
-        completion is a StructuredCompletion built from a node's output hooks."""
-        base = self.build_messages(ctx.state)
-        _sm = steering_message(getattr(ctx.state, "steering_notes", None) or ())
-        _fm = driver_feedback_message(ctx.state, self.name)
-        steer_msgs: list[dict] = [m for m in (_sm, _fm) if m is not None]
-        if ctx.sink is not None:
-            phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
-            ctx.sink.node_context(self.name, phase, base)
-        tool = completion.terminal_tool()
-        model_cls = completion.output_model()
         response_format = {"type": "json_schema", "json_schema": {
             "name": tool["function"]["name"],
             "schema": tool["function"].get("parameters", {})}}
@@ -463,11 +425,44 @@ class AgentNode:
                     validate_output(model_cls, raw, node=self.name)
                 if ctx.sink is not None:
                     ctx.sink.node_raw_output(self.name, raw)
-                return completion.extract(raw, ctx)
+                return raw
             except StructuredOutputError as e:
                 last_err = e
                 corrections = [{"role": "user",
                                 "content": _retry_nudge(e, schema=_schema, example=_example)}]
+        assert last_err is not None
+        raise last_err
+
+    async def _dispatch(self, ctx: NodeContext, extra_messages: list[dict] | None = None) -> str:
+        """Stream one forced structured output (tool call or, under response_format, JSON
+        content), validated when output_model is set, re-rolling on failure. Thin wrapper
+        over the shared _roll_structured using this node's own output hooks."""
+        return await self._roll_structured(
+            ctx, tool=self.output_tool(), model_cls=self.output_model(),
+            extra_messages=extra_messages)
+
+    async def _terminal(
+        self, ctx: NodeContext, completion: "Completion",
+        extra_messages: list[dict] | None = None,
+    ) -> "NodeResult":
+        """Single-output terminal stage: roll a structured output via the shared core using
+        the Completion's terminal tool/model, then delegate result extraction to it. Re-rolls
+        on schema-invalid output (inside _roll_structured) OR a semantic rejection where
+        completion.extract() raises StructuredOutputError."""
+        last_err: StructuredOutputError | None = None
+        nudge: list[dict] = []
+        for _ in range(MAX_DISPATCH_ATTEMPTS):
+            raw = await self._roll_structured(
+                ctx, tool=completion.terminal_tool(), model_cls=completion.output_model(),
+                extra_messages=[*(extra_messages or []), *nudge])
+            try:
+                return completion.extract(raw, ctx)
+            except StructuredOutputError as e:
+                last_err = e
+                _schema = completion.terminal_tool().get("function", {}).get("parameters")
+                _example = _example_from_schema(_schema) if _schema else None
+                nudge = [{"role": "user",
+                          "content": _retry_nudge(e, schema=_schema, example=_example)}]
         assert last_err is not None
         raise last_err
 
