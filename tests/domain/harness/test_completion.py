@@ -71,3 +71,48 @@ def test_structured_completion_is_a_completion():
     comp = StructuredCompletion(tool={"function": {"name": "e"}}, model=None,
                                 parse=lambda raw: raw)
     assert isinstance(comp, Completion)
+
+
+from poor_code.domain.harness.node import StructuredOutputError
+
+
+class _SemanticRerollLLM:
+    """Round 1: emits a payload extract() will reject. Round 2: a good one."""
+    def __init__(self): self.round = 0
+    async def stream(self, messages, tools, response_format=None):
+        self.round += 1
+        payload = '{"value": "bad"}' if self.round == 1 else '{"value": "good"}'
+        yield ToolCallStarted(call_id="c", name=tools[0]["function"]["name"])
+        yield ToolCallInputDelta(call_id="c", json_delta=payload)
+        yield ToolCallEnded(call_id="c")
+        yield FinishedReason(reason="tool_calls")
+
+
+class _PickyCompletion:
+    """Accepts only value=='good'; rejects others to force a re-roll."""
+    def terminal_tool(self):
+        return {"type": "function", "function": {"name": "emit",
+                "parameters": {"type": "object",
+                               "properties": {"value": {"type": "string"}}}}}
+    def output_model(self): return None
+    def extract(self, raw, ctx):
+        import json
+        if json.loads(raw)["value"] != "good":
+            raise StructuredOutputError("probe", raw, "value must be 'good'")
+        return NodeResult(output="accepted")
+
+
+class _TerminalProbe(AgentNode):
+    name = "probe"
+    def build_messages(self, state):
+        return [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+
+
+@pytest.mark.asyncio
+async def test_terminal_rerolls_until_extract_accepts():
+    llm = _SemanticRerollLLM()
+    node = _TerminalProbe(llm)
+    ctx = NodeContext(state=SessionState(), cancel=asyncio.Event())
+    res = await node._terminal(ctx, _PickyCompletion())
+    assert res.output == "accepted"
+    assert llm.round == 2   # re-rolled once on the semantic rejection
