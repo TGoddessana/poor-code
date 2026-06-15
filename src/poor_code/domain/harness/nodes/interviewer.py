@@ -19,6 +19,7 @@ from poor_code.domain.harness.node import (
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
+from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.domain.session.models import (
     AnsweredQuery, CodeRef, GroundingStatus, Phase, Query, QueryKind, Requirement, SessionState,
 )
@@ -77,9 +78,11 @@ class Interviewer(AgentNode):
     name = "interviewer"
     phase = Phase.INTERVIEWING
 
-    def __init__(self, llm: _LLMClientLike, project_map: ProjectMap) -> None:
+    def __init__(self, llm: _LLMClientLike, project_map: ProjectMap,
+                 tools: "ToolRegistry | None" = None) -> None:
         super().__init__(llm)
         self._map = project_map
+        self._tools = tools
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         state = ctx.state
