@@ -90,7 +90,7 @@ class InterviewStepCompletion:
     def terminal_tool(self) -> dict[str, Any]:
         return self._node.output_tool()
 
-    def output_model(self):
+    def output_model(self) -> type[BaseModel] | None:
         return _InterviewStepOut
 
     def extract(self, raw: str, ctx) -> NodeResult:
