@@ -198,4 +198,6 @@ def test_interviewer_has_only_its_output_tool():
     node = Interviewer(ScriptedLLM([]), project_map=pmap)
     tool = node.output_tool()
     assert tool["function"]["name"] == "interview_step"
-    assert not hasattr(node, "_tools")
+    # constructed without a tools arg → no working-tool registry (its only tool is
+    # the output tool). The read-only registry is injected by build_default_registry.
+    assert node._tools is None
