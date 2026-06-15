@@ -64,6 +64,9 @@ def strip_code_fence(text: str) -> str:
 
 
 def _safe_args(args_json: str) -> dict:
+    """Best-effort parse of a tool call's argument JSON into a dict for sink display.
+    A non-dict payload is wrapped as {"_": v}; malformed JSON yields {} — never raises,
+    since this only feeds the UI's tool_started event, not execution."""
     try:
         v = json.loads(args_json or "{}")
         return v if isinstance(v, dict) else {"_": v}
@@ -454,6 +457,10 @@ class AgentNode:
                 case ToolCallInputDelta(call_id=cid, json_delta=d):
                     if cid in pending:
                         pending[cid]["args"] += d
+                    # Tool-arg deltas are NOT streamed to the sink here (unlike
+                    # _stream_once, where the call args ARE the structured output): the
+                    # surrounding loop surfaces the parsed args via tool_started, matching
+                    # the explorer/implementer rounds. Only reasoning text is streamed.
                 case ToolCallEnded() | FinishedReason():
                     pass
         return "".join(text_parts), [

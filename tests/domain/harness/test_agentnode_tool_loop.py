@@ -67,3 +67,4 @@ async def test_run_tool_executes_and_errors_gracefully():
 def test_safe_args_parses_or_empties():
     assert _safe_args('{"path":"a.py"}') == {"path": "a.py"}
     assert _safe_args("not json") == {}
+    assert _safe_args("[1, 2]") == {"_": [1, 2]}   # non-dict JSON is wrapped
