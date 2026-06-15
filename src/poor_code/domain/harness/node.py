@@ -63,6 +63,14 @@ def strip_code_fence(text: str) -> str:
     return s
 
 
+def _safe_args(args_json: str) -> dict:
+    try:
+        v = json.loads(args_json or "{}")
+        return v if isinstance(v, dict) else {"_": v}
+    except (ValueError, TypeError):
+        return {}
+
+
 def _list_item_type(annotation: Any) -> type | None:
     """If `annotation` denotes a list (incl. Optional[list[...]]), return its item
     type (the inner pydantic model, when it is one), else None for non-list fields."""
@@ -418,3 +426,46 @@ class AgentNode:
         raise StructuredOutputError(
             self.name, text,
             "model produced no tool call (replied with prose or nothing)")
+
+    async def _stream_tools(
+        self, ctx: NodeContext, messages: list[dict], tools_schemas: list[dict],
+    ) -> tuple[str, list[tuple[str, str, str]]]:
+        """One streamed round that MAY call working tools. Returns (text, calls) with
+        calls = [(call_id, name, args_json)]. Mirrors the explorer/implementer round so
+        any AgentNode can run a read/act loop before its structured decision. Reasoning
+        text streams to the sink as node_thinking_delta (same as _stream_once)."""
+        tag(self._llm, self.name)
+        text_parts: list[str] = []
+        pending: dict[str, dict[str, str]] = {}
+        order: list[str] = []
+        async for ev in self._llm.stream(
+            messages=messages, tools=tools_schemas, response_format=None,
+        ):
+            if ctx.cancel.is_set():
+                raise asyncio.CancelledError(f"{self.name} cancelled")
+            match ev:
+                case TextDelta(text=t):
+                    text_parts.append(t)
+                    if ctx.sink is not None:
+                        ctx.sink.node_thinking_delta(self.name, t)
+                case ToolCallStarted(call_id=cid, name=name):
+                    pending[cid] = {"name": name, "args": ""}
+                    order.append(cid)
+                case ToolCallInputDelta(call_id=cid, json_delta=d):
+                    if cid in pending:
+                        pending[cid]["args"] += d
+                case ToolCallEnded() | FinishedReason():
+                    pass
+        return "".join(text_parts), [
+            (cid, pending[cid]["name"], pending[cid]["args"]) for cid in order]
+
+    async def _run_tool(self, tools: Any, name: str, args_json: str, tool_ctx: Any) -> str:
+        tool = tools.get(name)
+        if tool is None:
+            return f"ERROR: unknown tool {name}"
+        try:
+            parsed = tool.params.model_validate_json(args_json or "{}")
+            result = await tool.execute(parsed, tool_ctx)
+            return result.output
+        except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
+            return f"ERROR: {type(e).__name__}: {e}"
