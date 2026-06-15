@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, StructuredOutputError, _LLMClientLike,
-    MAX_DISPATCH_ATTEMPTS, validate_output,
+    validate_output,
 )
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.llm_schema import inline_refs
@@ -127,8 +127,8 @@ class Interviewer(AgentNode):
         completion = InterviewStepCompletion(self, state)
         return await self._terminal(ctx, completion, extra_messages=read_msgs or None)
 
-    def output_model(self) -> type[BaseModel]:
-        return _InterviewStepOut
+    # output_model lives on InterviewStepCompletion now; _terminal reads it from the
+    # completion, so the node no longer overrides AgentNode.output_model().
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         assert state.request is not None, "Interviewer requires state.request"
