@@ -226,6 +226,34 @@ class NodeResult:
     branch: str | None = None
 
 
+@runtime_checkable
+class Completion(Protocol):
+    """How an AgentNode finishes: the terminal tool the model calls to signal done,
+    the schema to validate its args, and how to turn the validated raw payload into a
+    NodeResult. extract() MAY raise StructuredOutputError to reject a schema-valid but
+    semantically-incomplete output → the engine (AgentNode._terminal) re-rolls."""
+    def terminal_tool(self) -> dict[str, Any]: ...
+    def output_model(self) -> type[BaseModel] | None: ...
+    def extract(self, raw: str, ctx: "NodeContext | None") -> "NodeResult": ...
+
+
+class StructuredCompletion:
+    """Reproduces today's single-shot terminal behavior: validate against `model`
+    (done by the engine), then NodeResult(output=parse(raw))."""
+    def __init__(self, *, tool: dict[str, Any], model: type[BaseModel] | None,
+                 parse) -> None:
+        self._tool, self._model, self._parse = tool, model, parse
+
+    def terminal_tool(self) -> dict[str, Any]:
+        return self._tool
+
+    def output_model(self) -> type[BaseModel] | None:
+        return self._model
+
+    def extract(self, raw: str, ctx) -> "NodeResult":
+        return NodeResult(output=self._parse(raw))
+
+
 @dataclass
 class NodeContext:
     state: SessionState

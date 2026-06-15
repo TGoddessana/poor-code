@@ -44,3 +44,30 @@ async def test_stream_once_uses_explicit_tool_when_given():
               "function": {"name": "custom_tool", "parameters": {"type": "object"}}}
     raw = await node._stream_once(ctx, [{"role": "user", "content": "x"}], None, tool=custom)
     assert llm.seen_tool_names == ["custom_tool"]
+
+
+from poor_code.domain.harness.node import Completion, StructuredCompletion, NodeResult
+from pydantic import BaseModel
+
+
+class _Out(BaseModel):
+    value: str
+
+
+def test_structured_completion_extracts_via_parse():
+    tool = {"type": "function",
+            "function": {"name": "emit", "parameters": _Out.model_json_schema()}}
+    comp = StructuredCompletion(
+        tool=tool, model=_Out, parse=lambda raw: {"parsed": raw})
+    assert comp.terminal_tool() is tool
+    assert comp.output_model() is _Out
+    res = comp.extract('{"value": "hi"}', ctx=None)
+    assert isinstance(res, NodeResult)
+    assert res.output == {"parsed": '{"value": "hi"}'}
+
+
+def test_structured_completion_is_a_completion():
+    # Protocol conformance: the three methods exist with the right shapes.
+    comp = StructuredCompletion(tool={"function": {"name": "e"}}, model=None,
+                                parse=lambda raw: raw)
+    assert isinstance(comp, Completion)
