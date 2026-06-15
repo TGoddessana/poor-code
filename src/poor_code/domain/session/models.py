@@ -1,6 +1,7 @@
 """Domain models for session/task lifecycle. See CONTRACT.md."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
@@ -134,6 +135,10 @@ class SessionState:
     env_report: "EnvReport | None" = None
     steering_notes: tuple[str, ...] = ()
     driver_control: DriverControl = field(default_factory=DriverControl)
+    # Open data plane (§5): custom artifact TYPE -> value. Core slots above stay concrete
+    # (gradual migration). hash=False keeps SessionState safe to hash (a dict field would
+    # otherwise break the frozen-dataclass __hash__); equality still considers it.
+    _data: "Mapping[type, object]" = field(default_factory=dict, hash=False)
 
     def with_request(self, request: Request) -> "SessionState":
         return replace(self, request=request)
@@ -336,14 +341,20 @@ class SessionState:
 
     def require(self, t: "type[_RequireT]") -> "_RequireT":
         """Fail-loud typed input accessor — the INPUT side of the node I/O contract
-        (the output side is apply_to). Returns the data-plane value keyed by type `t`,
-        or raises MissingInput when it is absent (or `t` is not a known data-plane
-        type). Used by nodes in place of blind `assert state.<field> is not None`."""
+        (the output side is apply_to). Resolves a core data-plane slot via
+        _REQUIRE_FIELD_MAP, else the open _data map; raises MissingInput when absent."""
         field_name = _REQUIRE_FIELD_MAP.get(t)
-        value = getattr(self, field_name) if field_name is not None else None
+        value = getattr(self, field_name) if field_name is not None else self._data.get(t)
         if value is None:
             raise MissingInput(t)
         return value
+
+    def put(self, value: object) -> "SessionState":
+        """Store a data-plane artifact keyed by its own type into the open _data map
+        (immutably). For CUSTOM artifact types outside the core slots — retrieve with
+        require(type). Core slots still use their with_X / apply_to. A custom artifact's
+        apply_to is therefore just `return s.put(self)`, needing no SessionState edit."""
+        return replace(self, _data={**self._data, type(value): value})
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from poor_code.domain.session import paths
+from poor_code.domain.session.artifacts import (
+    artifact_class, artifact_name, dump_artifact, load_artifact,
+)
 from poor_code.domain.session.models import (
     AnsweredQuery,
     AcceptanceCheck,
@@ -495,11 +500,26 @@ def _dict_to_answered(d: dict[str, Any]) -> AnsweredQuery:
                                                chosen_option=r.get("chosen_option")))
 
 
+def _extensions_to_dict(st: SessionState) -> dict[str, Any]:
+    """Serialize the open _data map to {artifact_name: payload}. Unregistered types are
+    dropped with a warning (they cannot be named stably, so they are not persisted)."""
+    data = getattr(st, "_data", None) or {}
+    out: dict[str, Any] = {}
+    for t, value in data.items():
+        name = artifact_name(t)
+        if name is None:
+            warnings.warn(f"unregistered artifact type {t!r} not persisted "
+                          f"(call register_artifact)")
+            continue
+        out[name] = dump_artifact(value)
+    return out
+
+
 def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
     # lazy import: avoids the harness→session→harness import cycle at module load
     from poor_code.domain.harness.nodes.reporter import report_to_dict
     cc = st.understanding
-    return {
+    out = {
         "status": st.status.value,
         "active_task_id": st.active_task_id,
         "cursor": (
@@ -545,6 +565,10 @@ def _session_state_to_dict(st: SessionState) -> dict[str, Any]:
         "driver_control": _driver_control_to_dict(st.driver_control),
         "report": (None if st.report is None else report_to_dict(st.report)),
     }
+    ext = _extensions_to_dict(st)
+    if ext:
+        out["extensions"] = ext
+    return out
 
 
 def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
@@ -554,7 +578,7 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
         cur = d.get("cursor")
         req = d.get("request")
         cc = d.get("understanding")
-        return SessionState(
+        state = SessionState(
             status=SessionStatus(d["status"]),
             active_task_id=d.get("active_task_id"),
             cursor=(None if cur is None else _dict_to_cursor(cur)),
@@ -596,6 +620,15 @@ def _dict_to_session_state(d: dict[str, Any], src: Path) -> SessionState:
             driver_control=_dict_to_driver_control(d.get("driver_control")),
             report=(None if d.get("report") is None else report_from_dict(d["report"])),
         )
+        ext = d.get("extensions") or {}
+        data: dict[type, object] = {}
+        for name, payload in ext.items():
+            cls = artifact_class(name)
+            if cls is None:
+                warnings.warn(f"unknown artifact {name!r} in session file — skipping")
+                continue
+            data[cls] = load_artifact(cls, payload)
+        return replace(state, _data=data) if data else state
     except (KeyError, ValueError) as e:
         raise ValueError(f"corrupt session file at {src}: {e}") from e
 
