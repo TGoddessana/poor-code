@@ -21,7 +21,7 @@ from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import FileEntry, ProjectMap
 from poor_code.domain.session.models import (
-    CodeContext, CodeRef, FileExcerpt, GroundingStatus, Phase, SessionState)
+    CodeContext, CodeRef, FileExcerpt, GroundingStatus, Phase, Request, SessionState)
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
@@ -106,6 +106,8 @@ class _CodeContextOut(BaseModel):
 class ExploringNode(AgentNode):
     name = "explorer"
     phase = Phase.LOCATING
+    requires = (Request,)
+    produces = (CodeContext,)
 
     def __init__(self, llm: _LLMClientLike, project_map: ProjectMap, tools: ToolRegistry) -> None:
         super().__init__(llm)
@@ -122,7 +124,7 @@ class ExploringNode(AgentNode):
     # stage ① — the read/grep tool loop
     async def _explore(self, ctx: NodeContext, environment: str = "") -> tuple[list[dict[str, Any]], tuple[FileExcerpt, ...]]:
         state = ctx.state
-        assert state.request is not None, "ExploringNode requires state.request"
+        state.require(Request)
         hint = ""
         if state.repair_hint:
             hint = f"\n\nRE-SEARCH: previous exploration failed — {state.repair_hint}. Widen the search."

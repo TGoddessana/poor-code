@@ -8,7 +8,7 @@ record; the implementer renders `snippet`."""
 from __future__ import annotations
 
 from poor_code.domain.harness.node import NodeContext, NodeResult
-from poor_code.domain.session.models import CodeContext, Phase, Task, TaskContext
+from poor_code.domain.session.models import CodeContext, Phase, Plan, Task, TaskContext
 
 # Per-file body slice handed to the implementer as ground truth. Mirrors
 # acceptance_oracle._MAX_EXCERPT_IN_PROMPT so the two nodes clip identically.
@@ -18,10 +18,13 @@ _MAX_EXCERPT_IN_PROMPT = 1800
 class Composer:
     name = "composer"
     phase = Phase.IMPLEMENTING
+    requires = (Plan, CodeContext)
+    produces = ()
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         state = ctx.state
-        assert state.plan is not None and state.cursor is not None
+        state.require(Plan)
+        assert state.cursor is not None
         task = next((t for t in state.plan.tasks if t.id == state.cursor.task_id), None)
         assert task is not None, f"cursor task_id {state.cursor.task_id!r} not in plan"
         cc = state.understanding or CodeContext()

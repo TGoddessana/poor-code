@@ -8,7 +8,7 @@ from poor_code.domain.harness.grounding import validation_floor_hint
 from poor_code.domain.harness.ledger import has_section
 from poor_code.domain.harness.node import GateNode
 from poor_code.domain.session.models import (
-    CodeContext, GroundingStatus, Layer, Phase, TriggerKind,
+    AcceptanceSpec, CodeContext, GroundingStatus, Layer, Phase, Plan, TriggerKind,
 )
 
 
@@ -21,6 +21,8 @@ class UnderstandingGate(GateNode):
     layer = Layer.UNDERSTANDING
     repair_budget = 1
     phase = Phase.LOCATING
+    requires = (CodeContext,)
+    produces = ()
 
     def check(self, state) -> str | None:
         cc = state.understanding or CodeContext()
@@ -42,6 +44,8 @@ class PlanGate(GateNode):
     repair_budget = 2
     phase = Phase.PLANNING
     advisable = True   # POOR_CODE_ADVISORY_GATES → don't bounce; let the plan flow on
+    requires = (Plan,)
+    produces = ()
 
     _MAX_EDITABLE = 3
 
@@ -138,6 +142,8 @@ class AcceptanceGate(GateNode):
     layer = Layer.ACCEPTANCE
     repair_budget = ACCEPTANCE_REPAIR_BUDGET
     phase = Phase.PLANNING
+    requires = (AcceptanceSpec,)
+    produces = ()
 
     def check(self, state) -> str | None:
         return self._invalid_hint(state.acceptance)

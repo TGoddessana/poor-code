@@ -4,6 +4,9 @@ folded into the `implement_loop` subgraph node; global_validator and the plannin
 understanding nodes are registered at the top level. The full graph runs to 'reporter'."""
 from __future__ import annotations
 
+import warnings
+
+from poor_code.domain.harness.contracts import contract_warnings
 from poor_code.domain.harness.driver import Driver, DriverRuntime
 from poor_code.domain.harness.graph import EdgeTable, Graph
 from poor_code.domain.harness.node import Node, NodeContext, NodeResult
@@ -80,6 +83,8 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     reg.register(Reporter())
     if agent is not None:
         reg.register(FastPathNode(agent))
+    for _w in contract_warnings(reg):
+        warnings.warn(_w, stacklevel=2)
     return reg
 
 

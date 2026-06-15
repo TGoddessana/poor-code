@@ -25,8 +25,8 @@ from __future__ import annotations
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.render_md import render_plan_md, render_spec_md
 from poor_code.domain.session.models import (
-    Layer, Phase, Policy, Query, QueryKind, TriggerKind, Verdict, VerdictKind,
-    effective_requirement,
+    AcceptanceSpec, Layer, Phase, Plan, Policy, Query, QueryKind, Requirement,
+    TriggerKind, Verdict, VerdictKind, effective_requirement,
 )
 
 # The discrete "approve" action the widget offers as a selectable option. Approval is
@@ -122,6 +122,8 @@ class SpecConfirmGate(_ConfirmGate):
     phase = Phase.INTERVIEWING
     query_id = "confirm_spec"
     layer = Layer.ACCEPTANCE
+    requires = (Requirement, AcceptanceSpec)
+    produces = ()
 
     def _render(self, state) -> str:
         return render_spec_md(effective_requirement(state), state.acceptance)
@@ -132,6 +134,8 @@ class PlanConfirmGate(_ConfirmGate):
     phase = Phase.PLANNING
     query_id = "confirm_plan"
     layer = Layer.PLAN
+    requires = (Plan,)
+    produces = ()
 
     def _render(self, state) -> str:
         return render_plan_md(state.plan)

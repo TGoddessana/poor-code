@@ -38,13 +38,14 @@ class _ClassificationOut(BaseModel):
 class Router(AgentNode):
     name = "router"
     phase = Phase.ROUTING
+    requires = (Request,)
+    produces = (Request,)
 
     def __init__(self, llm: _LLMClientLike) -> None:
         super().__init__(llm)
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        req = ctx.state.request
-        assert req is not None, "Router requires state.request"
+        req = ctx.state.require(Request)
         kind = await self._classify_via_llm(ctx)
         if kind is None:  # model gave no usable output → deterministic fallback
             kind = self._classify_seed(req.raw_text)
@@ -59,7 +60,7 @@ class Router(AgentNode):
         return RequestKind(kind)
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
-        assert state.request is not None, "Router requires state.request"
+        state.require(Request)
         return [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": f"REQUEST:\n{state.request.raw_text}"},

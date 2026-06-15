@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import TypeVar
 
 
 class SessionStatus(str, Enum):
@@ -93,6 +94,24 @@ class DriverControl:
     feedback_packets: tuple[NodeFeedbackPacket, ...] = ()
     subgraph_cursors: tuple[SubgraphCursor, ...] = ()
     last_decision: DriverDecisionRecord | None = None
+
+
+_RequireT = TypeVar("_RequireT")
+
+
+class MissingInput(Exception):
+    """A node read a required input TYPE from SessionState that was not present.
+    Raised by SessionState.require() so a missing upstream artifact fails loudly with
+    a clear message instead of surfacing as a deep NoneType crash several calls later.
+    `required_type` is the data-plane type that was absent."""
+
+    def __init__(self, required_type: type) -> None:
+        self.required_type = required_type
+        name = getattr(required_type, "__name__", str(required_type))
+        super().__init__(
+            f"SessionState has no {name} available yet. A node that produces {name} "
+            f"must run before this one (check node ordering / `requires`)."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,6 +333,17 @@ class SessionState:
                           task_id=cur_task_id, attempt_id=cur_attempt_id),
             history=self.history + (tr,),
         )
+
+    def require(self, t: "type[_RequireT]") -> "_RequireT":
+        """Fail-loud typed input accessor — the INPUT side of the node I/O contract
+        (the output side is apply_to). Returns the data-plane value keyed by type `t`,
+        or raises MissingInput when it is absent (or `t` is not a known data-plane
+        type). Used by nodes in place of blind `assert state.<field> is not None`."""
+        field_name = _REQUIRE_FIELD_MAP.get(t)
+        value = getattr(self, field_name) if field_name is not None else None
+        if value is None:
+            raise MissingInput(t)
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -758,3 +788,19 @@ class Verdict:
     layer: Layer | None = None
     hint: str | None = None
     query: str | None = None
+
+
+# Data-plane TYPE -> SessionState field name. The input side of the node I/O contract;
+# SessionState.require(T) resolves a type to its slot through this map. Control-plane
+# slots (cursor, history, pending_query, driver_control, ...) are intentionally absent —
+# they are framework-owned, not node-produced artifacts. (P3 generalizes this to an open
+# type-keyed map; for now it indirects the existing concrete fields.)
+_REQUIRE_FIELD_MAP: dict[type, str] = {
+    Request: "request",
+    CodeContext: "understanding",
+    Requirement: "requirement",
+    Plan: "plan",
+    AcceptanceSpec: "acceptance",
+    EnvReport: "env_report",
+    Report: "report",
+}

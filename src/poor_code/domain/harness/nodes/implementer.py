@@ -18,7 +18,8 @@ from poor_code.domain.harness.snapshot import GitSnapshot, default_git_dir
 from poor_code.domain.harness.steering import driver_feedback_block, steering_block
 from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.session.models import (
-    Attempt, ChangeRecord, GroundingStatus, Phase, SessionState)
+    Attempt, ChangeRecord, CodeContext, GroundingStatus, Phase, Plan, Requirement,
+    SessionState)
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.provider.events import (
@@ -68,6 +69,8 @@ _SYSTEM = (
 class Implementer:
     name = "implementer"
     phase = Phase.IMPLEMENTING
+    requires = (Plan, Requirement, CodeContext)
+    produces = ()
 
     def __init__(self, llm: _LLMClientLike, cwd: Path, tools: ToolRegistry) -> None:
         self._llm = llm
@@ -82,7 +85,8 @@ class Implementer:
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         state = ctx.state
-        assert state.plan is not None and state.cursor is not None
+        state.require(Plan)
+        assert state.cursor is not None
         task = next((t for t in state.plan.tasks if t.id == state.cursor.task_id), None)
         assert task is not None, f"cursor task_id {state.cursor.task_id!r} not in plan"
 

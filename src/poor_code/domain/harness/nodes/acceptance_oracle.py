@@ -16,8 +16,8 @@ from poor_code.domain.harness.node import (
 from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
-    AcceptanceCheck, AcceptanceSpec, GroundingStatus, Phase, SessionState,
-    effective_requirement,
+    AcceptanceCheck, AcceptanceSpec, CodeContext, GroundingStatus, Phase, Requirement,
+    SessionState, effective_requirement,
 )
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
@@ -133,6 +133,8 @@ class _AcceptanceSpecOut(BaseModel):
 class AcceptanceOracle(AgentNode):
     name = "acceptance_oracle"
     phase = Phase.PLANNING
+    requires = (Requirement, CodeContext)
+    produces = (AcceptanceSpec,)
 
     def __init__(self, llm: _LLMClientLike, cwd: Path = Path("."),
                  tools: ToolRegistry | None = None) -> None:
