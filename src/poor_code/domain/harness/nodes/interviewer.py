@@ -78,6 +78,37 @@ class _InterviewStepOut(BaseModel):
     requirement: _RequirementOut | None = None
 
 
+class InterviewStepCompletion:
+    """Terminal completion for the interviewer: validate interview_step, then map
+    action→NodeResult (ask→query, done→requirement). Raises StructuredOutputError on a
+    semantically-incomplete step so _terminal re-rolls — this replaces the interviewer's
+    old hand-rolled second retry loop."""
+    def __init__(self, node: "Interviewer", state: SessionState) -> None:
+        self._node, self._state = node, state
+        self._at_cap = len(state.interview) >= MAX_ROUNDS
+
+    def terminal_tool(self) -> dict[str, Any]:
+        return self._node.output_tool()
+
+    def output_model(self):
+        return _InterviewStepOut
+
+    def extract(self, raw: str, ctx) -> NodeResult:
+        step = validate_output(_InterviewStepOut, raw, node=self._node.name)
+        if step.action == "done" or self._at_cap:
+            if step.requirement is None:
+                raise StructuredOutputError(
+                    self._node.name, raw,
+                    "action='done' but requirement is None — supply a requirement object")
+            return NodeResult(output=self._node._to_requirement(step.requirement))
+        if step.query is None:
+            raise StructuredOutputError(
+                self._node.name, raw,
+                "action='ask' but query is None — supply a query object with kind/prompt")
+        qid = f"q{len(self._state.interview) + 1}"
+        return NodeResult(query=self._node._to_query(qid, step.query))
+
+
 class Interviewer(AgentNode):
     name = "interviewer"
     phase = Phase.INTERVIEWING
@@ -90,36 +121,11 @@ class Interviewer(AgentNode):
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         state = ctx.state
-        at_cap = len(state.interview) >= MAX_ROUNDS
         read_msgs: list[dict] = []
         if self._tools is not None:
             read_msgs = await self._read_loop(ctx, self._tools, self._read_seed(state))
-        prev_raw = ""
-        for attempt in range(MAX_DISPATCH_ATTEMPTS):
-            extras: list[dict] = list(read_msgs)
-            if prev_raw:
-                extras.append({"role": "user", "content": (
-                    f"Your previous reply was rejected. Re-emit a corrected "
-                    f"interview_step call.\n\nprevious raw payload:\n{prev_raw}")})
-            raw = await self._dispatch(ctx, extra_messages=extras or None)
-            try:
-                step = validate_output(_InterviewStepOut, raw, node=self.name)
-                if step.action == "done" or at_cap:
-                    if step.requirement is None:
-                        raise StructuredOutputError(
-                            self.name, raw,
-                            "action='done' but requirement is None — supply a requirement object")
-                    return NodeResult(output=self._to_requirement(step.requirement))
-                if step.query is None:
-                    raise StructuredOutputError(
-                        self.name, raw,
-                        "action='ask' but query is None — supply a query object with kind/prompt")
-                qid = f"q{len(state.interview) + 1}"
-                return NodeResult(query=self._to_query(qid, step.query))
-            except StructuredOutputError as e:
-                prev_raw = e.raw
-                if attempt == MAX_DISPATCH_ATTEMPTS - 1:
-                    raise
+        completion = InterviewStepCompletion(self, state)
+        return await self._terminal(ctx, completion, extra_messages=read_msgs or None)
 
     def output_model(self) -> type[BaseModel]:
         return _InterviewStepOut

@@ -130,3 +130,20 @@ def test_interviewer_system_prompt_forbids_asking_code_checkable_facts():
     assert "read/grep" in system
     # 코드로 확인 가능한 사실은 사용자에게 묻지 말라는 규율이 명시돼야 함
     assert "do NOT ask the user" in system
+
+
+@pytest.mark.asyncio
+async def test_interviewer_engine_path_still_asks_query():
+    # ask 분기가 _terminal 경유 후에도 NodeResult.query를 내는지 (회귀 가드)
+    class _AskLLM:
+        async def stream(self, messages, tools, response_format=None):
+            yield ToolCallStarted(call_id="c1", name=tools[0]["function"]["name"])
+            yield ToolCallInputDelta(call_id="c1", json_delta=json.dumps(
+                {"action": "ask",
+                 "query": {"kind": "clarify", "prompt": "p?", "rationale": "r"}}))
+            yield ToolCallEnded(call_id="c1")
+            yield FinishedReason(reason="tool_calls")
+    node = Interviewer(_AskLLM(), project_map=_map())   # tools=None → no read loop
+    res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert res.output is None
+    assert res.query is not None and res.query.id == "q1"
