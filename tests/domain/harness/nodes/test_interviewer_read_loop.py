@@ -121,3 +121,12 @@ async def test_interviewer_without_tools_skips_read_loop():
     node = Interviewer(_DummyLLM(), project_map=_map())   # no tools
     res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event()))
     assert isinstance(res.output, Requirement)
+
+
+def test_interviewer_system_prompt_forbids_asking_code_checkable_facts():
+    node = Interviewer(_DummyLLM(), project_map=_map(),
+                       tools=ToolRegistry([_ReadStub()]))
+    system = node.build_messages(_state())[0]["content"]
+    assert "read/grep" in system
+    # 코드로 확인 가능한 사실은 사용자에게 묻지 말라는 규율이 명시돼야 함
+    assert "do NOT ask the user" in system

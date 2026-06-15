@@ -41,6 +41,10 @@ _SYSTEM = (
     "Ground every question in CODE CONTEXT: cite the summary and file excerpts; if "
     "a needed file is not shown, do NOT invent its contents — record the gap in "
     "open_questions instead of guessing acceptance criteria. "
+    "FACTS YOU CAN CHECK IN CODE — signatures, event/handler wiring, which method "
+    "is bound, how submit is dispatched — you MUST confirm yourself with read/grep; "
+    "do NOT ask the user about them. Reserve questions for product/intent ambiguity "
+    "that reading the code cannot resolve. "
     "Ask in the user's language. Call interview_step exactly once."
 )
 
