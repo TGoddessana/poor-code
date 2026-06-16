@@ -47,11 +47,12 @@ def test_query_raised_includes_context_rationale_and_resolves():
         resolves="requirement.summary",
     )
     TurnSink("T", dispatch).query_raised(q)
-    prompt = out[0].prompt
-    assert "Context: The interviewer is narrowing the request." in prompt
-    assert "which behavior should change?" in prompt
-    assert "Why: Needed before planning." in prompt
-    assert "Resolves: requirement.summary" in prompt
+    ev = out[0]
+    # prompt is now JUST the question — no "Context:"/"Why:"/"Resolves:" prefixes
+    assert ev.prompt == "which behavior should change?"
+    assert ev.context == "The interviewer is narrowing the request."
+    assert ev.rationale == "Needed before planning."
+    assert ev.resolves == "requirement.summary"
 
 
 def test_plan_ready_formats_lines():

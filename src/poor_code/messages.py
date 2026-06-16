@@ -173,6 +173,9 @@ class QueryRaised(Event):
     kind: str
     prompt: str
     options: tuple[str, ...] = ()
+    context: str | None = None
+    rationale: str | None = None
+    resolves: str | None = None
 
 
 @dataclass(frozen=True)
