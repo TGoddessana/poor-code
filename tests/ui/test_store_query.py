@@ -27,3 +27,21 @@ def test_answer_submitted_clears_awaiting():
     assert isinstance(state.turns[0].segments[-1], UserAnswerSegment)
     assert state.turns[0].segments[-1].text == "because"
     assert state.turns[0].segments[-1].kind == "answer"
+
+
+def test_query_raised_carries_structured_fields():
+    state = reduce(_running(), QueryRaised(
+        turn_id="T", query_id="q1", kind="clarify", prompt="which?",
+        context="ctx text", rationale="why text", resolves="req.slot"))
+    seg = state.turns[0].segments[-1]
+    assert isinstance(seg, QuerySegment)
+    assert seg.context == "ctx text"
+    assert seg.rationale == "why text"
+    assert seg.resolves == "req.slot"
+
+
+def test_query_raised_structured_fields_default_none():
+    state = reduce(_running(), QueryRaised(
+        turn_id="T", query_id="q1", kind="clarify", prompt="why?"))
+    seg = state.turns[0].segments[-1]
+    assert seg.context is None and seg.rationale is None and seg.resolves is None

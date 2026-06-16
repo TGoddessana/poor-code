@@ -111,6 +111,9 @@ class QuerySegment:
     prompt: str
     options: tuple[str, ...]
     kind: str
+    context: str | None = None
+    rationale: str | None = None
+    resolves: str | None = None
 
 
 @dataclass(frozen=True)
@@ -477,12 +480,15 @@ def reduce(state: AppState, action: Action) -> AppState:
             return _append_segment(
                 state, tid, NodeResultSegment(node=node, phase=phase, headline=headline, detail=detail))
 
-        case QueryRaised(turn_id=tid, kind=kind, prompt=prompt, options=options):
+        case QueryRaised(turn_id=tid, kind=kind, prompt=prompt, options=options,
+                         context=context, rationale=rationale, resolves=resolves):
             i = _find_turn_by_id(state, tid)
             if i is None:
                 return state
             with_seg = _append_segment(
-                state, tid, QuerySegment(prompt=prompt, options=options, kind=kind))
+                state, tid, QuerySegment(prompt=prompt, options=options, kind=kind,
+                                         context=context, rationale=rationale,
+                                         resolves=resolves))
             return replace(with_seg, awaiting_input=True)
 
         case AnswerSubmitted(turn_id=tid, answer=answer):
