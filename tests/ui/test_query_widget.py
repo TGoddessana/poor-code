@@ -85,3 +85,37 @@ async def test_focus_returns_to_prompt_input_on_unmount():
         await widget.remove()
         await pilot.pause()
         assert app.focused is app.query_one("#prompt-input", Input)
+
+
+@pytest.mark.asyncio
+async def test_context_and_rationale_render_as_separate_regions():
+    seg = QuerySegment(prompt="which path?", options=("A", "B"), kind="choose",
+                       context="only one entrypoint exists", rationale="decides build target")
+    app = _Harness(seg)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        ctx = app.query_one(".query-context", Static)
+        why = app.query_one(".query-rationale", Static)
+        assert "only one entrypoint exists" in str(ctx.render())
+        assert "decides build target" in str(why.render())
+
+
+@pytest.mark.asyncio
+async def test_absent_context_and_rationale_render_no_region():
+    seg = QuerySegment(prompt="which path?", options=("A", "B"), kind="choose")
+    app = _Harness(seg)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert len(app.query(".query-context")) == 0
+        assert len(app.query(".query-rationale")) == 0
+
+
+@pytest.mark.asyncio
+async def test_chip_uses_kind_and_resolves_as_border_title():
+    seg = QuerySegment(prompt="which?", options=("A",), kind="clarify", resolves="req.summary")
+    app = _Harness(seg)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        widget = app.query_one(QueryWidget)
+        assert "clarify" in str(widget.border_title)
+        assert "req.summary" in str(widget.border_title)

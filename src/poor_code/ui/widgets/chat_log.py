@@ -70,7 +70,12 @@ def _render_segment(seg) -> str:
         label = "Steering" if getattr(seg, "kind", "answer") == "steering" else "Answer"
         return f"↳ {label}: {seg.text}"
     if isinstance(seg, QuerySegment):
-        lines = [f"❓ {seg.prompt}"]
+        chip = seg.kind + (f" · {seg.resolves}" if seg.resolves else "")
+        lines = [f"❓ [{chip}] {seg.prompt}"]
+        if seg.context:
+            lines.append(f"   맥락  {seg.context}")
+        if seg.rationale:
+            lines.append(f"   왜    {seg.rationale}")
         for i, opt in enumerate(seg.options, start=1):
             lines.append(f"   [{i}] {opt}")
         return "\n".join(lines)

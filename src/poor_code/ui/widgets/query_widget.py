@@ -49,18 +49,36 @@ class _PickList(OptionList):
 
 
 class QueryWidget(Static):
-    DEFAULT_CSS = "QueryWidget { height: auto; }"
+    DEFAULT_CSS = "QueryWidget { height: auto; border: round $warning; padding: 0 1; }"
 
     def __init__(self, seg: QuerySegment) -> None:
         super().__init__(classes="query-widget")
         self._seg = seg
 
+    def _chip(self) -> str:
+        chip = self._seg.kind
+        if self._seg.resolves:
+            chip += f" · {self._seg.resolves}"
+        return chip
+
     def compose(self) -> ComposeResult:
         yield Static(
-            f"[b $warning]❓  Question[/]  [b]{self._seg.prompt}[/]",
+            f"[b]❓  {self._seg.prompt}[/]",
             classes="query-prompt",
             markup=True,
         )
+        if self._seg.context:
+            yield Static(
+                f"[dim]맥락[/]  {self._seg.context}",
+                classes="query-context",
+                markup=True,
+            )
+        if self._seg.rationale:
+            yield Static(
+                f"[dim]왜[/]  {self._seg.rationale}",
+                classes="query-rationale",
+                markup=True,
+            )
         if self._seg.options:
             yield _PickList(*[Option(o) for o in self._seg.options], id="query-options")
             yield Static(
@@ -78,6 +96,7 @@ class QueryWidget(Static):
             )
 
     def on_mount(self) -> None:
+        self.border_title = self._chip()
         if self._seg.options:
             ol = self.query_one("#query-options", OptionList)
             ol.highlighted = 0
