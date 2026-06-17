@@ -66,27 +66,24 @@ class _DummyLLM:
 
 
 class _ReadThenDecideLLM:
-    """Round 1 (read loop): call read. Round 2: no tool call -> loop ends.
-    Round 3 (decision dispatch): emit interview_step done."""
+    """Unified loop: interview_step is offered alongside the working tools every round.
+    Round 1: read to ground (the model chooses to read though it COULD decide).
+    Round 2: emit interview_step done — its messages must carry round 1's read result."""
     def __init__(self): self.round = 0; self.decision_messages = None
     async def stream(self, messages, tools, response_format=None):
         self.round += 1
-        names = [t["function"]["name"] for t in tools]
-        if "interview_step" in names:               # decision dispatch
+        if self.round == 1:                          # ground first
+            yield ToolCallStarted(call_id="r1", name="read")
+            yield ToolCallInputDelta(call_id="r1", json_delta='{"path":"src/auth.py"}')
+            yield ToolCallEnded(call_id="r1")
+            yield FinishedReason(reason="tool_calls")
+        else:                                        # decide
             self.decision_messages = messages        # capture to prove transcript wiring
             yield ToolCallStarted(call_id="d1", name="interview_step")
             yield ToolCallInputDelta(call_id="d1",
                 json_delta='{"action":"done","requirement":{"summary":"grounded by read"}}')
             yield ToolCallEnded(call_id="d1")
             yield FinishedReason(reason="tool_calls")
-        elif self.round == 1:                        # read-loop round 1
-            yield ToolCallStarted(call_id="r1", name="read")
-            yield ToolCallInputDelta(call_id="r1", json_delta='{"path":"src/auth.py"}')
-            yield ToolCallEnded(call_id="r1")
-            yield FinishedReason(reason="tool_calls")
-        else:                                        # read-loop round 2: stop
-            yield TextDelta(text="enough context")
-            yield FinishedReason(reason="stop")
 
 
 class _Sink:
@@ -97,6 +94,62 @@ class _Sink:
     def tool_started(self, cid, name, args): self.tools.append(name)
     def tool_finished(self, cid, result): pass
     def tool_failed(self, cid, err): pass
+
+
+class _GrepStub:
+    id = "grep"
+    description = "stub grep"
+    params = _ReadArgs   # args are ignored by the stub; extra fields tolerated
+    def __init__(self): self.calls = 0
+    async def execute(self, args, ctx):
+        self.calls += 1
+        class R:
+            output = "   1\tmax-height: 10;\n"
+        return R()
+
+
+class _GrepThenDecideUnifiedLLM:
+    """Unified-loop expectation: working tools AND interview_step are offered in the
+    SAME tool set every round. The model greps once, then emits interview_step done in
+    a later round of the same loop. Under the old two-phase design grep and
+    interview_step were never offered together, so a model still wanting to grep at the
+    decision dispatch produced an invalid step and ESCALATED ('node user not registered')."""
+    def __init__(self):
+        self.offered: list[set] = []
+        self.grepped = False
+    async def stream(self, messages, tools, response_format=None):
+        names = {t["function"]["name"] for t in tools}
+        self.offered.append(names)
+        if not self.grepped and "grep" in names:
+            self.grepped = True
+            yield ToolCallStarted(call_id="g1", name="grep")
+            yield ToolCallInputDelta(call_id="g1",
+                json_delta='{"pattern":"max-height","path_glob":"src/**/*.tcss"}')
+            yield ToolCallEnded(call_id="g1")
+            yield FinishedReason(reason="tool_calls")
+            return
+        decide = "interview_step" if "interview_step" in names else next(iter(names))
+        yield ToolCallStarted(call_id="d1", name=decide)
+        yield ToolCallInputDelta(call_id="d1",
+            json_delta='{"action":"done","requirement":{"summary":"grounded by grep"}}')
+        yield ToolCallEnded(call_id="d1")
+        yield FinishedReason(reason="tool_calls")
+
+
+@pytest.mark.asyncio
+async def test_interviewer_unified_loop_executes_tool_then_decides():
+    grep = _GrepStub()
+    llm = _GrepThenDecideUnifiedLLM()
+    node = Interviewer(llm, project_map=_map(), tools=ToolRegistry([grep]))
+    res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event(), sink=_Sink()))
+    # the grep was executed exactly once and the loop terminated on interview_step —
+    # NOT escalated, NOT re-rolled into oblivion.
+    assert grep.calls == 1
+    assert isinstance(res.output, Requirement)
+    assert res.output.summary == "grounded by grep"
+    # the unified contract: working tools and the terminal interview_step live in ONE
+    # tool set offered to the model every round.
+    assert any({"grep", "interview_step"} <= r for r in llm.offered)
 
 
 @pytest.mark.asyncio

@@ -123,15 +123,16 @@ class Interviewer(AgentNode):
         self._tools = tools
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        state = ctx.state
-        read_msgs: list[dict] = []
-        if self._tools is not None:
-            read_msgs = await self._read_loop(ctx, self._tools, self._read_seed(state))
-        completion = InterviewStepCompletion(self, state)
-        return await self._terminal(ctx, completion, extra_messages=read_msgs or None)
+        # Unified read-and-decide loop: working tools (read/grep/glob/list) and the
+        # interview_step terminal tool are offered together every round. The model reads
+        # to ground itself and calls interview_step when ready (ask→query, done→requirement).
+        # Replaces the old split read_loop + forced terminal, where a model that still
+        # wanted to grep at decision time emitted an invalid step and escalated to a park.
+        completion = InterviewStepCompletion(self, ctx.state)
+        return await self._decide_with_tools(ctx, completion, self._tools)
 
-    # output_model lives on InterviewStepCompletion now; _terminal reads it from the
-    # completion, so the node no longer overrides AgentNode.output_model().
+    # output_model lives on InterviewStepCompletion now; the loop reads the terminal
+    # tool/model from the completion, so the node no longer overrides output_model().
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         state.require(Request)
@@ -143,21 +144,6 @@ class Interviewer(AgentNode):
                 f"REQUEST:\n{state.request.raw_text}\n\n"
                 f"CODE CONTEXT:\n{self._context_digest(state)}\n\n"
                 f"INTERVIEW SO FAR:\n{self._interview_digest(state.interview)}"},
-        ]
-
-    def _read_seed(self, state: SessionState) -> list[dict]:
-        """Seed for the pre-decision read loop: instruct the model to ground itself by
-        reading files, then return. The transcript feeds the interview decision."""
-        return [
-            {"role": "system", "content": (
-                "You are about to vet a spec. BEFORE asking the user anything, ground "
-                "yourself in the actual code: use read/grep/glob/list to confirm "
-                "signatures, event/handler wiring, and submit paths relevant to the "
-                "REQUEST. Read what the CODE CONTEXT summary leaves unresolved. When you "
-                "have read enough, STOP calling tools — do not answer or ask anything here.")},
-            {"role": "user", "content":
-                f"REQUEST:\n{state.request.raw_text}\n\n"
-                f"CODE CONTEXT:\n{self._context_digest(state)}"},
         ]
 
     def output_tool(self) -> dict[str, Any]:

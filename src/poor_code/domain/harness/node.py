@@ -511,6 +511,90 @@ class AgentNode:
         assert last_err is not None
         raise last_err
 
+    async def _decide_with_tools(
+        self, ctx: NodeContext, completion: "Completion", tools: Any,
+        *, max_tool_rounds: int = READ_LOOP_MAX_ITERATIONS,
+        cwd: "Path | None" = None, leak_text: bool = True,
+    ) -> "NodeResult":
+        """Unified read-and-decide loop: offer the node's working `tools` AND the
+        completion's terminal tool in ONE tool set every round. A working-tool call is
+        executed and fed back (the model grounds itself); a call to the terminal tool ends
+        the loop via completion.extract → NodeResult. A schema-invalid or semantically
+        incomplete terminal call is nudged and the loop continues, bounded by
+        MAX_DISPATCH_ATTEMPTS. This replaces the split read-loop + forced-terminal: a model
+        that still wants to read at decision time simply reads, instead of emitting an
+        invalid structured output (e.g. a stray grep call) that escalated to a parked turn.
+        `tools` may be None (terminal-only — equivalent to a single forced dispatch)."""
+        base = self.build_messages(ctx.state)
+        _sm = steering_message(getattr(ctx.state, "steering_notes", None) or ())
+        _fm = driver_feedback_message(ctx.state, self.name)
+        steer = [m for m in (_sm, _fm) if m is not None]
+        if ctx.sink is not None:
+            phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
+            ctx.sink.node_context(self.name, phase, base)
+        terminal = completion.terminal_tool()
+        terminal_name = terminal["function"]["name"]
+        _schema = terminal.get("function", {}).get("parameters")
+        _example = _example_from_schema(_schema) if _schema else None
+        schemas = [*(tools.schemas() if tools is not None else []), terminal]
+        messages = [base[0], *steer, *base[1:]]
+        tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel,
+                               cwd=cwd if cwd is not None else Path.cwd(), ask=allow_all)
+        last_err: StructuredOutputError | None = None
+        attempts = 0   # invalid terminal calls / empty rounds — bounded re-roll budget
+        for _ in range(max_tool_rounds + MAX_DISPATCH_ATTEMPTS):
+            if ctx.cancel.is_set():
+                raise asyncio.CancelledError(f"{self.name} cancelled")
+            # pass a copy: the stream may capture the list (test fakes do) while this loop
+            # keeps mutating `messages` (appending the assistant turn + tool results).
+            text, calls = await self._stream_llm_round(
+                ctx, list(messages), schemas, leak_text=leak_text)
+            assistant: dict[str, Any] = {"role": "assistant", "content": text}
+            if calls:
+                assistant["tool_calls"] = [
+                    {"id": cid, "type": "function",
+                     "function": {"name": name, "arguments": args or "{}"}}
+                    for cid, name, args in calls]
+            messages.append(assistant)
+            if not calls:
+                attempts += 1
+                if attempts >= MAX_DISPATCH_ATTEMPTS:
+                    raise last_err or StructuredOutputError(
+                        self.name, text,
+                        f"model produced no tool call; expected {terminal_name}")
+                messages.append({"role": "user", "content":
+                    f"You must call a tool. Read more with a working tool, or call "
+                    f"{terminal_name} to finish. Output only the tool call."})
+                continue
+            for cid, name, args in calls:
+                if name == terminal_name:
+                    if ctx.sink is not None:
+                        ctx.sink.node_raw_output(self.name, args)
+                    try:
+                        return completion.extract(args, ctx)
+                    except StructuredOutputError as e:
+                        last_err = e
+                        attempts += 1
+                        messages.append({"role": "tool", "tool_call_id": cid,
+                            "content": _retry_nudge(e, schema=_schema, example=_example)})
+                        continue
+                if ctx.sink is not None:
+                    ctx.sink.tool_started(cid, name, _safe_args(args))
+                output = await self._run_tool(tools, name, args, tool_ctx)
+                if ctx.sink is not None:
+                    if output.startswith("ERROR:"):
+                        ctx.sink.tool_failed(cid, output)
+                    else:
+                        ctx.sink.tool_finished(cid, output)
+                messages.append({"role": "tool", "tool_call_id": cid,
+                                 "content": clamp_tool_output(output)})
+            if attempts >= MAX_DISPATCH_ATTEMPTS:
+                assert last_err is not None
+                raise last_err
+        raise last_err or StructuredOutputError(
+            self.name, "",
+            f"did not call {terminal_name} within the round budget")
+
     async def _stream_once(
         self, ctx: NodeContext, messages: list[dict],
         response_format: dict[str, Any] | None = None,

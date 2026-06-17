@@ -34,9 +34,13 @@ class FakeLLMClient:
         }
 
     async def stream(self, messages, tools, response_format=None):
-        name = tools[0]["function"]["name"]
-        if name not in self._by_tool:
-            # ExploringNode stage ① exploration round: stop without read/grep
+        # Route by the known structured tool among those offered — nodes now offer working
+        # tools (read/grep/…) ALONGSIDE their terminal tool (the unified interviewer loop),
+        # so the terminal tool is not necessarily tools[0].
+        name = next((t["function"]["name"] for t in tools
+                     if t["function"]["name"] in self._by_tool), None)
+        if name is None:
+            # pure read round (no structured tool offered): stop without read/grep
             yield TextDelta(text="enough")
             yield FinishedReason(reason="stop")
             return
@@ -131,7 +135,12 @@ class ScriptedLLM:
             "checks": [{"criterion": "auth", "command": "pytest tests/test_auth.py"}]}
 
     async def stream(self, messages, tools, response_format=None):
-        name = tools[0]["function"]["name"]
+        # Route by the known structured tool among those offered (it may not be tools[0]
+        # now that nodes offer working tools alongside their terminal tool).
+        _known = {"classify_request", "emit_code_context", "interview_step",
+                  "emit_acceptance", "emit_critique", "emit_plan", "emit_plan_review"}
+        name = next((t["function"]["name"] for t in tools
+                     if t["function"]["name"] in _known), None)
         if name == "classify_request":
             args = {"kind": self._kind, "reason": "t"}
         elif name == "emit_code_context":
@@ -147,7 +156,7 @@ class ScriptedLLM:
         elif name == "emit_plan_review":
             args = {"ok": True}
         else:
-            # ExploringNode stage ① exploration round: stop without read/grep
+            # pure read round (no structured tool offered): stop without read/grep
             yield TextDelta(text="enough")
             yield FinishedReason(reason="stop")
             return
