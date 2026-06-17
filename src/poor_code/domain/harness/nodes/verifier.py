@@ -17,7 +17,6 @@ diff's appearance. Two stages mirror the Explorer: ① a tool loop to drive+obse
 ② a forced structured verdict over that observation history."""
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Any, Literal
@@ -34,11 +33,7 @@ from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
     AcceptanceSpec, Layer, Phase, Plan, Requirement, SessionState, TaskCompleted,
     Verdict, VerdictKind, effective_requirement)
-from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
-from poor_code.provider.events import (
-    FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted)
-from poor_code.provider.usage import tag
 
 _TOOL_NAME = "judge"
 MAX_ITERATIONS = 20
@@ -239,72 +234,16 @@ class VerifierNode(AgentNode):
     # stage ① — drive + observe tool loop (mirrors ExploringNode._explore)
     async def _observe(self, ctx: NodeContext, task) -> list[dict[str, Any]]:
         state = ctx.state
-        messages: list[dict[str, Any]] = [
+        seed: list[dict[str, Any]] = [
             {"role": "system", "content": _OBSERVE_SYSTEM},
             {"role": "user", "content": self._observe_prompt(state, task)},
         ]
-        # Diagnostic: surface the verifier's observe prompt through the dump sink (the
-        # rich criteria prompt lives here, not in build_messages' judge envelope).
         if ctx.sink is not None and hasattr(ctx.sink, "node_context"):
             phase = state.cursor.phase.value if state.cursor else ""
-            ctx.sink.node_context(self.name, phase, messages)
-        tool_ctx = ToolContext(turn_id="verify", cancel=ctx.cancel,
-                               cwd=self._cwd, ask=allow_all)
-        for _ in range(MAX_ITERATIONS):
-            if ctx.cancel.is_set():
-                raise asyncio.CancelledError(f"{self.name} cancelled")
-            text, calls = await self._stream_round(messages, ctx.sink)
-            assistant: dict[str, Any] = {"role": "assistant", "content": text}
-            if calls:
-                assistant["tool_calls"] = [
-                    {"id": cid, "type": "function",
-                     "function": {"name": name, "arguments": args or "{}"}}
-                    for cid, name, args in calls]
-            messages.append(assistant)
-            if not calls:
-                break
-            for cid, name, args in calls:
-                if ctx.sink is not None:
-                    ctx.sink.tool_started(cid, name, _safe_args(args))
-                output = await self._run_tool(name, args, tool_ctx)
-                if ctx.sink is not None:
-                    if output.startswith("ERROR:"):
-                        ctx.sink.tool_failed(cid, output)
-                    else:
-                        ctx.sink.tool_finished(cid, output)
-                messages.append({"role": "tool", "tool_call_id": cid,
-                                 "content": clamp_tool_output(output)})
-        return messages[1:]   # hand observation history (minus its system) to stage ②
-
-    async def _stream_round(self, messages, sink=None):
-        text = ""
-        pending: dict[str, dict[str, str]] = {}
-        order: list[str] = []
-        tag(self._llm, self.name)
-        async for ev in self._llm.stream(messages=messages, tools=self._tools.schemas()):
-            match ev:
-                case TextDelta(text=t):
-                    text += t
-                case ToolCallStarted(call_id=cid, name=name):
-                    pending[cid] = {"name": name, "args": ""}
-                    order.append(cid)
-                case ToolCallInputDelta(call_id=cid, json_delta=d):
-                    if cid in pending:
-                        pending[cid]["args"] += d
-                case ToolCallEnded() | FinishedReason():
-                    pass
-        return text, [(cid, pending[cid]["name"], pending[cid]["args"]) for cid in order]
-
-    async def _run_tool(self, name: str, args_json: str, tool_ctx: ToolContext) -> str:
-        tool = self._tools.get(name)
-        if tool is None:
-            return f"ERROR: unknown tool {name}"
-        try:
-            parsed = tool.params.model_validate_json(args_json or "{}")
-            result = await tool.execute(parsed, tool_ctx)
-            return result.output
-        except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
-            return f"ERROR: {type(e).__name__}: {e}"
+            ctx.sink.node_context(self.name, phase, seed)
+        return await self._tool_loop(
+            ctx, seed_messages=seed, tools=self._tools, cwd=self._cwd,
+            max_iterations=MAX_ITERATIONS, leak_text=False)
 
     def _observe_prompt(self, state: SessionState, task) -> str:
         criteria = self._criteria(state)
@@ -378,9 +317,3 @@ class VerifierNode(AgentNode):
         return validate_output(_VerdictOut, args_json, node=self.name)
 
 
-def _safe_args(args_json: str) -> dict:
-    try:
-        v = json.loads(args_json or "{}")
-        return v if isinstance(v, dict) else {"_": v}
-    except (ValueError, TypeError):
-        return {}

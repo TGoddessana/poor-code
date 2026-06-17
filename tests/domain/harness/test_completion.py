@@ -168,3 +168,17 @@ async def test_terminal_accepts_content_via_completion_model():
     ctx = NodeContext(state=SessionState(), cancel=asyncio.Event())
     res = await node._terminal(ctx, _ModelCompletion())
     assert res.output == "good"
+
+
+@pytest.mark.asyncio
+async def test_side_effect_completion_extracts_from_world():
+    from poor_code.domain.harness.node import SideEffectCompletion, NodeResult
+
+    async def _extract(ctx):
+        return NodeResult(output="snapshot-diff-result")
+
+    comp = SideEffectCompletion(extract=_extract)
+    assert comp.terminal_tool() == {}
+    assert comp.output_model() is None
+    res = await comp.extract_async(ctx=None)
+    assert res.output == "snapshot-diff-result"

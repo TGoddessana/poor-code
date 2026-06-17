@@ -5,7 +5,6 @@ AgentNode-style emit_code_context extraction over the whole exploration history.
 Empty result writes self-diagnosis into CodeContext.search_notes for repair."""
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Any, Literal
@@ -14,20 +13,15 @@ from pydantic import BaseModel
 
 from poor_code.domain.harness.env_probe import probe_environment
 from poor_code.domain.harness.node import (
-    AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output,
+    AgentNode, NodeContext, NodeResult, _DefaultHooks, _LLMClientLike, validate_output,
 )
 from poor_code.domain.harness.orientation import render_position
-from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import FileEntry, ProjectMap
 from poor_code.domain.session.models import (
     CodeContext, CodeRef, FileExcerpt, GroundingStatus, Phase, Request, SessionState)
 from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
-from poor_code.provider.events import (
-    FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted,
-)
-from poor_code.provider.usage import tag
 
 _TOOL_NAME = "emit_code_context"
 MAX_ITERATIONS = 20
@@ -129,80 +123,26 @@ class ExploringNode(AgentNode):
         if state.repair_hint:
             hint = f"\n\nRE-SEARCH: previous exploration failed — {state.repair_hint}. Widen the search."
         env_block = f"\n\nENVIRONMENT (available OS/runtimes/tools):\n{environment}" if environment else ""
-        messages: list[dict[str, Any]] = [
+        seed: list[dict[str, Any]] = [
             {"role": "system", "content": _EXPLORE_SYSTEM},
             {"role": "user", "content":
                 f"{render_position(self.name, state)}\n\n"
                 f"REQUEST:\n{state.request.raw_text}\n\nCODE MAP:\n{self._map_digest()}"
                 f"{env_block}{hint}"},
         ]
-        tool_ctx = ToolContext(
-            turn_id="explore", cancel=ctx.cancel, cwd=Path.cwd(), ask=allow_all)
         excerpts: dict[str, FileExcerpt] = {}
 
-        for _ in range(MAX_ITERATIONS):
-            if ctx.cancel.is_set():
-                raise asyncio.CancelledError(f"{self.name} cancelled")
-            text, calls = await self._stream_round(messages, ctx.sink)
-            assistant: dict[str, Any] = {"role": "assistant", "content": text}
-            if calls:
-                assistant["tool_calls"] = [
-                    {"id": cid, "type": "function",
-                     "function": {"name": name, "arguments": args or "{}"}}
-                    for cid, name, args in calls
-                ]
-            messages.append(assistant)
-            if not calls:
-                break
-            for cid, name, args in calls:
-                if ctx.sink is not None:
-                    ctx.sink.tool_started(cid, name, _safe_args(args))
-                output = await self._run_tool(name, args, tool_ctx)
-                self._maybe_record_excerpt(name, args, output, excerpts)
-                if ctx.sink is not None:
-                    if output.startswith("ERROR:"):
-                        ctx.sink.tool_failed(cid, output)
-                    else:
-                        ctx.sink.tool_finished(cid, output)
-                # Full output recorded as an excerpt + shown via the sink; the re-sent
-                # exploration transcript gets a clamped copy (FM4).
-                messages.append({
-                    "role": "tool", "tool_call_id": cid,
-                    "content": clamp_tool_output(output),
-                })
+        class _ExcerptHook(_DefaultHooks):
+            def record(_self, name, args_json, output):
+                ExploringNode._maybe_record_excerpt(name, args_json, output, excerpts)
+
+        history = await self._tool_loop(
+            ctx, seed_messages=seed, tools=self._tools, cwd=Path.cwd(),
+            max_iterations=MAX_ITERATIONS, leak_text=False, hooks=_ExcerptHook())
+        tool_ctx = ToolContext(turn_id="explore", cancel=ctx.cancel,
+                               cwd=Path.cwd(), ask=allow_all)
         await self._pull_receivers(excerpts, tool_ctx, ctx)
-        # hand the whole exploration (minus its own system prompt) to stage ②
-        return messages[1:], tuple(excerpts.values())
-
-    async def _stream_round(self, messages: list[dict[str, Any]], sink: object | None = None):
-        text = ""
-        pending: dict[str, dict[str, str]] = {}
-        order: list[str] = []
-        tag(self._llm, self.name)   # attribute this call's tokens to the explorer
-        async for ev in self._llm.stream(messages=messages, tools=self._tools.schemas()):
-            match ev:
-                case TextDelta(text=t):
-                    text += t   # keep accumulator for parsing; do NOT leak to UI
-                case ToolCallStarted(call_id=cid, name=name):
-                    pending[cid] = {"name": name, "args": ""}
-                    order.append(cid)
-                case ToolCallInputDelta(call_id=cid, json_delta=d):
-                    if cid in pending:
-                        pending[cid]["args"] += d
-                case ToolCallEnded() | FinishedReason():
-                    pass
-        return text, [(cid, pending[cid]["name"], pending[cid]["args"]) for cid in order]
-
-    async def _run_tool(self, name: str, args_json: str, tool_ctx: ToolContext) -> str:
-        tool = self._tools.get(name)
-        if tool is None:
-            return f"ERROR: unknown tool {name}"
-        try:
-            parsed = tool.params.model_validate_json(args_json or "{}")
-            result = await tool.execute(parsed, tool_ctx)
-            return result.output
-        except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
-            return f"ERROR: {type(e).__name__}: {e}"
+        return history, tuple(excerpts.values())
 
     @staticmethod
     def _maybe_record_excerpt(name: str, args_json: str, output: str,
@@ -251,7 +191,7 @@ class ExploringNode(AgentNode):
             args = json.dumps({"path": parent})
             if ctx.sink is not None:
                 ctx.sink.tool_started(cid, "read", {"path": parent})
-            output = await self._run_tool("read", args, tool_ctx)
+            output = await self._run_tool(self._tools, "read", args, tool_ctx)
             self._maybe_record_excerpt("read", args, output, excerpts)
             if ctx.sink is not None:
                 if output.startswith("ERROR:"):
@@ -310,11 +250,3 @@ class ExploringNode(AgentNode):
             if fe.imported_by:
                 lines.append(f"    ← used by: {', '.join(fe.imported_by)}")
         return "\n".join(lines)
-
-
-def _safe_args(args_json: str) -> dict:
-    try:
-        v = json.loads(args_json or "{}")
-        return v if isinstance(v, dict) else {"_": v}
-    except (ValueError, TypeError):
-        return {}

@@ -254,6 +254,25 @@ class StructuredCompletion:
         return NodeResult(output=self._parse(raw))
 
 
+class SideEffectCompletion:
+    """A Completion whose result is read from the outside world after a tool loop runs
+    (design §3.4): no forced output tool, no schema. `extract` is an async callable
+    (ctx) -> NodeResult that inspects side effects (e.g. a shadow-git snapshot diff).
+    Used by side-effect nodes (the implementer) that run _tool_loop then extract — it
+    does NOT flow through _terminal (which is the structured-output terminal stage)."""
+    def __init__(self, *, extract) -> None:
+        self._extract = extract
+
+    def terminal_tool(self) -> dict[str, Any]:
+        return {}
+
+    def output_model(self) -> type[BaseModel] | None:
+        return None
+
+    async def extract_async(self, ctx: "NodeContext | None") -> "NodeResult":
+        return await self._extract(ctx)
+
+
 @dataclass
 class NodeContext:
     state: SessionState
@@ -337,6 +356,43 @@ class GateNode(ABC):
                    if t.trigger is TriggerKind.GATE and t.to_node == target)
 
 
+@dataclass
+class _LoopRound:
+    """One completed tool round, handed to ToolLoopHooks.after_round so a node can
+    re-clamp prior rounds, append a nudge, or inspect side effects. `messages` is the
+    LIVE transcript (mutating it, e.g. appending a nudge, is intentional)."""
+    index: int
+    calls: list[tuple[str, str, str]]
+    tool_msgs: dict[str, dict]
+    full_output: dict[str, str]
+    messages: list[dict]
+
+
+@runtime_checkable
+class ToolLoopHooks(Protocol):
+    """Per-loop customization for AgentNode._tool_loop. All methods have no-op defaults
+    via _DefaultHooks; a node overrides only the axes it needs."""
+    def clamp(self, output: str) -> str: ...
+    def record(self, name: str, args_json: str, output: str) -> None: ...
+    async def before_loop(self) -> None: ...
+    async def after_round(self, rnd: "_LoopRound") -> None: ...
+
+
+class _DefaultHooks:
+    """Standard-clamp, no recording, no per-round logic — the explorer/verifier baseline."""
+    def clamp(self, output: str) -> str:
+        return clamp_tool_output(output)
+    def record(self, name: str, args_json: str, output: str) -> None:
+        pass
+    async def before_loop(self) -> None:
+        pass
+    async def after_round(self, rnd: "_LoopRound") -> None:
+        pass
+
+
+_DEFAULT_HOOKS = _DefaultHooks()
+
+
 @runtime_checkable
 class _LLMClientLike(Protocol):
     async def stream(
@@ -379,17 +435,6 @@ class AgentNode:
     async def run(self, ctx: NodeContext) -> NodeResult:
         args_json = await self._dispatch(ctx)
         return NodeResult(output=self.parse(args_json))
-
-    def _response_format(self) -> dict[str, Any]:
-        """Force schema-valid JSON output via response_format. The provider only
-        attaches it when the route declares the capability (e.g. ollama_cloud);
-        otherwise it is dropped and tool-calling remains the channel. The schema
-        is the output tool's already-inlined parameters, so a model that would
-        otherwise reply with prose is constrained to emit the structured object —
-        which then arrives as message content rather than a tool call."""
-        fn = self.output_tool()["function"]
-        return {"type": "json_schema",
-                "json_schema": {"name": fn["name"], "schema": fn.get("parameters", {})}}
 
     async def _roll_structured(
         self, ctx: NodeContext, *, tool: dict[str, Any],
@@ -513,13 +558,15 @@ class AgentNode:
             self.name, text,
             "model produced no tool call (replied with prose or nothing)")
 
-    async def _stream_tools(
+    async def _stream_llm_round(
         self, ctx: NodeContext, messages: list[dict], tools_schemas: list[dict],
+        *, leak_text: bool = False,
     ) -> tuple[str, list[tuple[str, str, str]]]:
-        """One streamed round that MAY call working tools. Returns (text, calls) with
-        calls = [(call_id, name, args_json)]. Mirrors the explorer/implementer round so
-        any AgentNode can run a read/act loop before its structured decision. Reasoning
-        text streams to the sink as node_thinking_delta (same as _stream_once)."""
+        """One streamed LLM round that MAY call working tools. Returns (text, calls) with
+        calls = [(call_id, name, args_json)]. Unifies the loop nodes' copy-pasted round.
+        leak_text=True streams reasoning TextDelta to the sink as node_thinking_delta
+        (the interviewer read loop / _stream_tools behavior); False accumulates text only
+        (the implementer/explorer/verifier behavior — locked by test_explorer_silent_text)."""
         tag(self._llm, self.name)
         text_parts: list[str] = []
         pending: dict[str, dict[str, str]] = {}
@@ -532,7 +579,7 @@ class AgentNode:
             match ev:
                 case TextDelta(text=t):
                     text_parts.append(t)
-                    if ctx.sink is not None:
+                    if leak_text and ctx.sink is not None:
                         ctx.sink.node_thinking_delta(self.name, t)
                 case ToolCallStarted(call_id=cid, name=name):
                     pending[cid] = {"name": name, "args": ""}
@@ -540,14 +587,17 @@ class AgentNode:
                 case ToolCallInputDelta(call_id=cid, json_delta=d):
                     if cid in pending:
                         pending[cid]["args"] += d
-                    # Tool-arg deltas are NOT streamed to the sink here (unlike
-                    # _stream_once, where the call args ARE the structured output): the
-                    # surrounding loop surfaces the parsed args via tool_started, matching
-                    # the explorer/implementer rounds. Only reasoning text is streamed.
                 case ToolCallEnded() | FinishedReason():
                     pass
         return "".join(text_parts), [
             (cid, pending[cid]["name"], pending[cid]["args"]) for cid in order]
+
+    async def _stream_tools(
+        self, ctx: NodeContext, messages: list[dict], tools_schemas: list[dict],
+    ) -> tuple[str, list[tuple[str, str, str]]]:
+        """Back-compat shim: a leaking round (interviewer read loop). Delegates to the
+        unified _stream_round(leak_text=True)."""
+        return await self._stream_llm_round(ctx, messages, tools_schemas, leak_text=True)
 
     async def _run_tool(self, tools: Any, name: str, args_json: str, tool_ctx: Any) -> str:
         tool = tools.get(name)
@@ -560,17 +610,68 @@ class AgentNode:
         except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
             return f"ERROR: {type(e).__name__}: {e}"
 
+    async def _tool_loop(
+        self, ctx: NodeContext, *, seed_messages: list[dict], tools: Any,
+        cwd: "Path", max_iterations: int, leak_text: bool = False,
+        hooks: "ToolLoopHooks" = _DEFAULT_HOOKS,
+    ) -> list[dict]:
+        """Unified bounded read/act loop for the loop nodes (implementer/explorer/verifier).
+        Streams rounds (text-leak per `leak_text`), runs each round's tool calls in `cwd`,
+        clamps each output via hooks.clamp for the model copy (the sink always gets the full
+        output), records side effects via hooks.record, and calls hooks.after_round after
+        each tool round (where a node re-clamps prior rounds / appends a nudge / checks the
+        tree). Returns the transcript minus the seed system prompt (mirrors _read_loop)."""
+        messages = list(seed_messages)
+        tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel, cwd=cwd, ask=allow_all)
+        schemas = tools.schemas()
+        await hooks.before_loop()
+        for i in range(max_iterations):
+            if ctx.cancel.is_set():
+                raise asyncio.CancelledError(f"{self.name} cancelled")
+            text, calls = await self._stream_llm_round(ctx, messages, schemas, leak_text=leak_text)
+            assistant: dict[str, Any] = {"role": "assistant", "content": text}
+            if calls:
+                assistant["tool_calls"] = [
+                    {"id": cid, "type": "function",
+                     "function": {"name": name, "arguments": args or "{}"}}
+                    for cid, name, args in calls]
+            messages.append(assistant)
+            if not calls:
+                break
+            rnd = _LoopRound(index=i, calls=calls, tool_msgs={}, full_output={},
+                             messages=messages)
+            for cid, name, args in calls:
+                if ctx.sink is not None:
+                    ctx.sink.tool_started(cid, name, _safe_args(args))
+                output = await self._run_tool(tools, name, args, tool_ctx)
+                hooks.record(name, args, output)
+                if ctx.sink is not None:
+                    if output.startswith("ERROR:"):
+                        ctx.sink.tool_failed(cid, output)
+                    else:
+                        ctx.sink.tool_finished(cid, output)
+                msg: dict[str, Any] = {"role": "tool", "tool_call_id": cid,
+                                       "content": hooks.clamp(output)}
+                messages.append(msg)
+                rnd.tool_msgs[cid] = msg
+                rnd.full_output[cid] = output
+            await hooks.after_round(rnd)
+        return messages[1:]
+
     async def _read_loop(
         self, ctx: NodeContext, tools: Any, seed_messages: list[dict],
         *, max_iterations: int = READ_LOOP_MAX_ITERATIONS,
+        cwd: "Path | None" = None,
     ) -> list[dict]:
         """Bounded read/act loop. Streams rounds that may call `tools`, runs them, and
         feeds results back. Returns the transcript to hand to _dispatch as extra_messages
         (seed system dropped, mirrors ExploringNode handing messages[1:] to its emit
-        stage). Stops when the model makes no tool call or the cap hits."""
+        stage). Stops when the model makes no tool call or the cap hits. `cwd` defaults
+        to the process cwd (the interviewer's behavior); loop nodes pass their own
+        work-tree."""
         messages = list(seed_messages)
         tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel,
-                               cwd=Path.cwd(), ask=allow_all)
+                               cwd=cwd if cwd is not None else Path.cwd(), ask=allow_all)
         schemas = tools.schemas()
         for _ in range(max_iterations):
             if ctx.cancel.is_set():
