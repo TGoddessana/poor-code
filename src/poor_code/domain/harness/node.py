@@ -563,14 +563,17 @@ class AgentNode:
     async def _read_loop(
         self, ctx: NodeContext, tools: Any, seed_messages: list[dict],
         *, max_iterations: int = READ_LOOP_MAX_ITERATIONS,
+        cwd: "Path | None" = None,
     ) -> list[dict]:
         """Bounded read/act loop. Streams rounds that may call `tools`, runs them, and
         feeds results back. Returns the transcript to hand to _dispatch as extra_messages
         (seed system dropped, mirrors ExploringNode handing messages[1:] to its emit
-        stage). Stops when the model makes no tool call or the cap hits."""
+        stage). Stops when the model makes no tool call or the cap hits. `cwd` defaults
+        to the process cwd (the interviewer's behavior); loop nodes pass their own
+        work-tree."""
         messages = list(seed_messages)
         tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel,
-                               cwd=Path.cwd(), ask=allow_all)
+                               cwd=cwd if cwd is not None else Path.cwd(), ask=allow_all)
         schemas = tools.schemas()
         for _ in range(max_iterations):
             if ctx.cancel.is_set():

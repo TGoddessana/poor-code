@@ -68,3 +68,36 @@ def test_safe_args_parses_or_empties():
     assert _safe_args('{"path":"a.py"}') == {"path": "a.py"}
     assert _safe_args("not json") == {}
     assert _safe_args("[1, 2]") == {"_": [1, 2]}   # non-dict JSON is wrapped
+
+
+@pytest.mark.asyncio
+async def test_read_loop_threads_cwd_into_tool_context(tmp_path):
+    """_read_loop must run tools in the cwd it is given, not Path.cwd()."""
+    seen = {}
+
+    class _CwdProbeTool:
+        id = "probe"; description = "stub"; params = _ReadArgs
+        async def execute(self, args, ctx):
+            seen["cwd"] = ctx.cwd
+            class R: output = "ok"
+            return R()
+
+    class _CallProbeThenStop:
+        def __init__(self): self.round = 0
+        async def stream(self, messages, tools, response_format=None):
+            self.round += 1
+            if self.round == 1:
+                yield ToolCallStarted(call_id="p1", name="probe")
+                yield ToolCallInputDelta(call_id="p1", json_delta="{}")
+                yield ToolCallEnded(call_id="p1")
+                yield FinishedReason(reason="tool_calls")
+            else:
+                yield FinishedReason(reason="stop")
+
+    node = _Probe(_CallProbeThenStop())
+    ctx = NodeContext(state=SessionState(), cancel=asyncio.Event())
+    await node._read_loop(ctx, ToolRegistry([_CwdProbeTool()]),
+                          [{"role": "system", "content": "s"},
+                           {"role": "user", "content": "u"}],
+                          cwd=tmp_path)
+    assert seen["cwd"] == tmp_path
