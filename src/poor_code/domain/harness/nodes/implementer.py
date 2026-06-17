@@ -5,14 +5,12 @@ in-place refine follows decision 1: refine the latest attempt while it has no
 run_result; start a fresh attempt after a real runner failure."""
 from __future__ import annotations
 
-import asyncio
-import json
 from pathlib import Path
-from typing import Any
 
 from poor_code.domain.harness.api_probe import focus_terms, probe_apis
 from poor_code.domain.harness.ledger import render_build_ledger, task_section, render_acceptance
-from poor_code.domain.harness.node import NodeContext, NodeResult, _LLMClientLike
+from poor_code.domain.harness.node import (
+    AgentNode, NodeContext, NodeResult, _DefaultHooks, _LoopRound, _LLMClientLike)
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.snapshot import GitSnapshot, default_git_dir
 from poor_code.domain.harness.steering import driver_feedback_block, steering_block
@@ -20,11 +18,7 @@ from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.session.models import (
     Attempt, ChangeRecord, CodeContext, GroundingStatus, Phase, Plan, Requirement,
     SessionState)
-from poor_code.domain.tool.base import ToolContext, allow_all
 from poor_code.domain.tool.registry import ToolRegistry
-from poor_code.provider.events import (
-    FinishedReason, TextDelta, ToolCallEnded, ToolCallInputDelta, ToolCallStarted)
-from poor_code.provider.usage import tag
 
 MAX_ITERATIONS = 50
 # The most recent tool round is the basis for the model's NEXT decision, so it gets a
@@ -66,14 +60,50 @@ _SYSTEM = (
 )
 
 
-class Implementer:
+class _ImplementerHooks(_DefaultHooks):
+    """Implementer-only per-round behavior: the LATEST round's tool outputs keep a big
+    budget while prior rounds are demoted to the standard clamp; and a no-op/repetition
+    nudge fires (once, non-consecutively) when the model repeats a call or a write changes
+    no file. Holds the cross-round state the old _loop kept in locals."""
+    def __init__(self, snapshot: GitSnapshot):
+        self._snapshot = snapshot
+        self._prev: _LoopRound | None = None
+        self._last_tree: str = ""
+        self._prev_sig: tuple[tuple[str, str], ...] | None = None
+        self._nudged_last = False
+
+    def clamp(self, output: str) -> str:
+        return clamp_tool_output(output, head=_LATEST_HEAD, tail=_LATEST_TAIL)
+
+    async def before_loop(self) -> None:
+        self._last_tree = await self._snapshot.baseline()
+
+    async def after_round(self, rnd: _LoopRound) -> None:
+        if self._prev is not None:
+            for cid, msg in self._prev.tool_msgs.items():
+                msg["content"] = clamp_tool_output(self._prev.full_output[cid])
+        self._prev = rnd
+        cur_tree = await self._snapshot.baseline()
+        sig = tuple((name, args) for _, name, args in rnd.calls)
+        wrote = any(name in ("write", "edit") for _, name, _ in rnd.calls)
+        stuck = sig == self._prev_sig or (wrote and cur_tree == self._last_tree)
+        if stuck and not self._nudged_last:
+            rnd.messages.append({"role": "user", "content": _NUDGE})
+            self._nudged_last = True
+        else:
+            self._nudged_last = False
+        self._prev_sig = sig
+        self._last_tree = cur_tree
+
+
+class Implementer(AgentNode):
     name = "implementer"
     phase = Phase.IMPLEMENTING
     requires = (Plan, Requirement, CodeContext)
     produces = ()
 
     def __init__(self, llm: _LLMClientLike, cwd: Path, tools: ToolRegistry) -> None:
-        self._llm = llm
+        super().__init__(llm)
         self._cwd = cwd
         self._tools = tools
         self._snapshot = GitSnapshot(git_dir=default_git_dir(cwd), work_tree=cwd)
@@ -121,104 +151,19 @@ class Implementer:
         return NodeResult(output=attempt)
 
     async def _loop(self, state: SessionState, task, ctx: NodeContext) -> None:
-        messages = [
+        seed = [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": self._prompt(state, task)},
         ]
         # Diagnostic hook: surface the implementer's initial prompt through the same
-        # node_context sink AgentNodes use (the implementer is a plain loop, not an
-        # AgentNode, so it would otherwise be invisible to a prompt dump).
+        # node_context sink AgentNodes use (so a prompt dump sees the seed).
         if ctx.sink is not None and hasattr(ctx.sink, "node_context"):
             phase = state.cursor.phase.value if state.cursor else ""
-            ctx.sink.node_context(self.name, phase, messages)
-        tool_ctx = ToolContext(turn_id="implement", cancel=ctx.cancel,
-                               cwd=self._cwd, ask=allow_all)
-        full_output: dict[str, str] = {}          # cid -> full tool output (for re-clamping)
-        tool_msg: dict[str, dict[str, Any]] = {}  # cid -> the tool message dict in `messages`
-        prev_round: list[str] = []                # cids appended in the previous round
-        last_tree = await self._snapshot.baseline()   # tree hash before this round
-        prev_sig: tuple[tuple[str, str], ...] | None = None
-        nudged_last = False
-        for _ in range(MAX_ITERATIONS):
-            if ctx.cancel.is_set():
-                raise asyncio.CancelledError(f"{self.name} cancelled")
-            text, calls = await self._stream_round(messages, ctx.sink)
-            assistant: dict[str, Any] = {"role": "assistant", "content": text}
-            if calls:
-                assistant["tool_calls"] = [
-                    {"id": cid, "type": "function",
-                     "function": {"name": name, "arguments": args or "{}"}}
-                    for cid, name, args in calls]
-            messages.append(assistant)
-            if not calls:
-                return
-            # A new round's results arrive → demote the previous round to the standard
-            # clamp so only the freshest results carry the large budget.
-            for cid in prev_round:
-                tool_msg[cid]["content"] = clamp_tool_output(full_output[cid])
-            round_cids: list[str] = []
-            for cid, name, args in calls:
-                if ctx.sink is not None:
-                    ctx.sink.tool_started(cid, name, _safe_args(args))
-                output = await self._run_tool(name, args, tool_ctx)
-                if ctx.sink is not None:
-                    if output.startswith("ERROR:"):
-                        ctx.sink.tool_failed(cid, output)
-                    else:
-                        ctx.sink.tool_finished(cid, output)
-                # The sink got the full output; the model gets a clamped copy. The latest
-                # round keeps the large budget (the next decision reads it); the demote
-                # loop above shrinks it once a newer round lands.
-                msg: dict[str, Any] = {"role": "tool", "tool_call_id": cid,
-                                       "content": clamp_tool_output(
-                                           output, head=_LATEST_HEAD, tail=_LATEST_TAIL)}
-                messages.append(msg)
-                full_output[cid] = output
-                tool_msg[cid] = msg
-                round_cids.append(cid)
-            prev_round = round_cids
-            # B: repetition / no-op guard — nudge (never break) when the model spins.
-            cur_tree = await self._snapshot.baseline()
-            sig = tuple((name, args) for _, name, args in calls)  # raw-arg identity; reformatted repeats may slip, the tree branch backstops writes
-            wrote = any(name in ("write", "edit") for _, name, _ in calls)
-            stuck = sig == prev_sig or (wrote and cur_tree == last_tree)
-            if stuck and not nudged_last:
-                messages.append({"role": "user", "content": _NUDGE})
-                nudged_last = True
-            else:
-                nudged_last = False
-            prev_sig = sig
-            last_tree = cur_tree
-
-    async def _stream_round(self, messages, sink=None):
-        text = ""
-        pending: dict[str, dict[str, str]] = {}
-        order: list[str] = []
-        tag(self._llm, self.name)   # attribute this call's tokens to the implementer
-        async for ev in self._llm.stream(messages=messages, tools=self._tools.schemas()):
-            match ev:
-                case TextDelta(text=t):
-                    text += t   # keep accumulator for parsing; do NOT leak to UI
-                case ToolCallStarted(call_id=cid, name=name):
-                    pending[cid] = {"name": name, "args": ""}
-                    order.append(cid)
-                case ToolCallInputDelta(call_id=cid, json_delta=d):
-                    if cid in pending:
-                        pending[cid]["args"] += d
-                case ToolCallEnded() | FinishedReason():
-                    pass
-        return text, [(cid, pending[cid]["name"], pending[cid]["args"]) for cid in order]
-
-    async def _run_tool(self, name: str, args_json: str, tool_ctx: ToolContext) -> str:
-        tool = self._tools.get(name)
-        if tool is None:
-            return f"ERROR: unknown tool {name}"
-        try:
-            parsed = tool.params.model_validate_json(args_json or "{}")
-            result = await tool.execute(parsed, tool_ctx)
-            return result.output
-        except Exception as e:  # noqa: BLE001 — tool errors feed back to the model
-            return f"ERROR: {type(e).__name__}: {e}"
+            ctx.sink.node_context(self.name, phase, seed)
+        await self._tool_loop(
+            ctx, seed_messages=seed, tools=self._tools, cwd=self._cwd,
+            max_iterations=MAX_ITERATIONS, leak_text=False,
+            hooks=_ImplementerHooks(self._snapshot))
 
     def _prompt(self, state: SessionState, task) -> str:
         scope = ", ".join(task.edit_scope.editable) or "(none)"
@@ -316,11 +261,3 @@ class Implementer:
             if s.run:
                 lines.append(f"    run: {s.run}    expected: {s.expected}")
         return "\n".join(lines)
-
-
-def _safe_args(args_json: str) -> dict:
-    try:
-        v = json.loads(args_json or "{}")
-        return v if isinstance(v, dict) else {"_": v}
-    except (ValueError, TypeError):
-        return {}

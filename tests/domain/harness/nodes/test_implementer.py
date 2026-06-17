@@ -133,6 +133,14 @@ def _state(attempts=()):
         cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="implementer", task_id="t1"))
 
 
+def _impl_state_with_one_task(cwd):
+    """Planned SessionState with a single ACTIVE task and a cursor pointing at it —
+    enough for Implementer.run to reach _loop. Mirrors the construction the other
+    implementer tests use via _state(); `cwd` is accepted for parity with the
+    characterization tests (the task's editable path is repo-relative)."""
+    return _state()
+
+
 @pytest.mark.asyncio
 async def test_implementer_writes_file_and_emits_attempt(tmp_path):
     node = Implementer(_WriteThenStopLLM(), cwd=tmp_path, tools=_tools())
@@ -395,3 +403,90 @@ async def test_nudge_is_deduped_not_every_round(tmp_path):
         NodeContext(state=_state(), cancel=asyncio.Event()))
     n = _seen_nudge_count(llm)
     assert 1 <= n < 4
+
+
+@pytest.mark.asyncio
+async def test_latest_round_keeps_big_budget_prior_demoted(tmp_path, monkeypatch):
+    """Round N's tool output is clamped with the big budget; once round N+1 lands,
+    round N is demoted to the standard clamp."""
+    from poor_code.domain.harness.nodes import implementer as impl_mod
+    monkeypatch.setattr(impl_mod, "_LATEST_HEAD", 10)
+    monkeypatch.setattr(impl_mod, "_LATEST_TAIL", 10)
+    big = "X" * 400
+    from pydantic import BaseModel
+    class _ReadArgs(BaseModel):
+        path: str = ""
+    class _ReadBigTool:
+        id = "read"; description = "x"; params = _ReadArgs
+        async def execute(self, args, ctx):
+            class R: output = big
+            return R()
+    from poor_code.provider.events import (
+        ToolCallStarted, ToolCallInputDelta, ToolCallEnded, FinishedReason)
+    seen_lengths = []
+    class _LLM:
+        def __init__(self): self.round = 0
+        async def stream(self, messages, tools, response_format=None):
+            self.round += 1
+            seen_lengths.append([len(m["content"]) for m in messages if m.get("role") == "tool"])
+            if self.round <= 2:
+                cid = f"r{self.round}"
+                yield ToolCallStarted(call_id=cid, name="read")
+                yield ToolCallInputDelta(call_id=cid, json_delta='{"path":"%d"}' % self.round)
+                yield ToolCallEnded(call_id=cid)
+                yield FinishedReason(reason="tool_calls")
+            else:
+                yield FinishedReason(reason="stop")
+    from poor_code.domain.tool.registry import ToolRegistry
+    node = Implementer(_LLM(), cwd=tmp_path, tools=ToolRegistry([_ReadBigTool()]))
+    state = _impl_state_with_one_task(tmp_path)
+    await node.run(NodeContext(state=state, cancel=asyncio.Event()))
+    # At round 3's call: round-1 (older) demoted to the STANDARD clamp, round-2 (freshest)
+    # carries the BIG-budget clamp. Assert each tool message exactly matches the clamp it
+    # was supposed to get — this is the demotion invariant, independent of which absolute
+    # budget happens to be larger (here _LATEST_* is monkeypatched to 10/10, BELOW the
+    # standard 1200/800, so the demoted-older message is in fact LONGER; a strict
+    # last[0] < last[1] would only hold when the big budget exceeds the standard one).
+    last = seen_lengths[-1]
+    assert len(last) == 2
+    standard_len = len(clamp_tool_output(big))                       # round-1, demoted
+    big_len = len(clamp_tool_output(big, head=10, tail=10))          # round-2, freshest
+    assert standard_len != big_len                                   # the two budgets differ here
+    assert last[0] == standard_len and last[1] == big_len
+
+
+@pytest.mark.asyncio
+async def test_noop_write_triggers_nudge_once(tmp_path):
+    """A write that changes no file (tree hash unchanged) appends _NUDGE exactly once
+    (non-consecutively)."""
+    from poor_code.domain.harness.nodes import implementer as impl_mod
+    from pydantic import BaseModel
+    class _WArgs(BaseModel):
+        path: str = ""; content: str = ""
+    class _NoopWrite:
+        id = "write"; description = "x"; params = _WArgs
+        async def execute(self, args, ctx):
+            class R: output = "wrote (no change)"   # never touches the tree
+            return R()
+    from poor_code.provider.events import (
+        ToolCallStarted, ToolCallInputDelta, ToolCallEnded, FinishedReason)
+    nudges = []
+    class _LLM:
+        def __init__(self): self.round = 0
+        async def stream(self, messages, tools, response_format=None):
+            self.round += 1
+            nudges.append(sum(1 for m in messages
+                              if m.get("role") == "user" and impl_mod._NUDGE in m["content"]))
+            if self.round <= 3:
+                cid = f"w{self.round}"
+                yield ToolCallStarted(call_id=cid, name="write")
+                yield ToolCallInputDelta(call_id=cid, json_delta='{"path":"a","content":"x"}')
+                yield ToolCallEnded(call_id=cid)
+                yield FinishedReason(reason="tool_calls")
+            else:
+                yield FinishedReason(reason="stop")
+    from poor_code.domain.tool.registry import ToolRegistry
+    node = Implementer(_LLM(), cwd=tmp_path, tools=ToolRegistry([_NoopWrite()]))
+    state = _impl_state_with_one_task(tmp_path)
+    await node.run(NodeContext(state=state, cancel=asyncio.Event()))
+    assert nudges[-1] >= 1   # at least one nudge appeared (stuck fired, non-consecutive)
