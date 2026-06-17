@@ -10,7 +10,7 @@ from pathlib import Path
 from poor_code.domain.harness.api_probe import focus_terms, probe_apis
 from poor_code.domain.harness.ledger import render_build_ledger, task_section, render_acceptance
 from poor_code.domain.harness.node import (
-    AgentNode, NodeContext, NodeResult, _DefaultHooks, _LoopRound, _LLMClientLike)
+    AgentNode, NodeContext, NodeResult, SideEffectCompletion, _DefaultHooks, _LoopRound, _LLMClientLike)
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.snapshot import GitSnapshot, default_git_dir
 from poor_code.domain.harness.steering import driver_feedback_block, steering_block
@@ -138,17 +138,22 @@ class Implementer(AgentNode):
 
         await self._loop(state, task, ctx)
 
-        files, diff = await self._snapshot.diff_since(self._baselines[task.id])
-        patch = ChangeRecord(files=files, diff=diff)
+        completion = SideEffectCompletion(extract=self._extract_attempt(task))
+        return await completion.extract_async(ctx)
 
-        latest = task.attempts[-1] if task.attempts else None
-        if latest is not None and latest.run_result is None:
-            attempt = Attempt(id=latest.id, patch=patch,
-                              adversarial_rounds=latest.adversarial_rounds + 1)
-        else:
-            attempt = Attempt(id=f"{task.id}-a{len(task.attempts) + 1}",
-                              patch=patch, adversarial_rounds=0)
-        return NodeResult(output=attempt)
+    def _extract_attempt(self, task):
+        async def _extract(ctx):
+            files, diff = await self._snapshot.diff_since(self._baselines[task.id])
+            patch = ChangeRecord(files=files, diff=diff)
+            latest = task.attempts[-1] if task.attempts else None
+            if latest is not None and latest.run_result is None:
+                attempt = Attempt(id=latest.id, patch=patch,
+                                  adversarial_rounds=latest.adversarial_rounds + 1)
+            else:
+                attempt = Attempt(id=f"{task.id}-a{len(task.attempts) + 1}",
+                                  patch=patch, adversarial_rounds=0)
+            return NodeResult(output=attempt)
+        return _extract
 
     async def _loop(self, state: SessionState, task, ctx: NodeContext) -> None:
         seed = [
