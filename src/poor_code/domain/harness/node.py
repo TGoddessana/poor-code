@@ -254,6 +254,25 @@ class StructuredCompletion:
         return NodeResult(output=self._parse(raw))
 
 
+class SideEffectCompletion:
+    """A Completion whose result is read from the outside world after a tool loop runs
+    (design §3.4): no forced output tool, no schema. `extract` is an async callable
+    (ctx) -> NodeResult that inspects side effects (e.g. a shadow-git snapshot diff).
+    Used by side-effect nodes (the implementer) that run _tool_loop then extract — it
+    does NOT flow through _terminal (which is the structured-output terminal stage)."""
+    def __init__(self, *, extract) -> None:
+        self._extract = extract
+
+    def terminal_tool(self) -> dict[str, Any]:
+        return {}
+
+    def output_model(self) -> type[BaseModel] | None:
+        return None
+
+    async def extract_async(self, ctx: "NodeContext | None") -> "NodeResult":
+        return await self._extract(ctx)
+
+
 @dataclass
 class NodeContext:
     state: SessionState
