@@ -1,32 +1,24 @@
+"""Routing after the acceptance oracle/gate/critic were removed (experiment).
+The interviewer now forwards straight to spec_confirm_gate, and a Layer.ACCEPTANCE
+repair (emitted only by spec_confirm_gate on a SUPERVISED rejection) bounces to the
+interviewer — the spec's author now that the oracle is gone."""
 from poor_code.domain.harness.node import NodeResult
 from poor_code.domain.harness.route import route
 from poor_code.domain.session.models import (
-    AcceptanceSpec, Layer, Requirement, SessionState, Verdict, VerdictKind,
+    Layer, Requirement, SessionState, Verdict, VerdictKind,
 )
 
 
-def test_interviewer_now_forwards_to_acceptance_oracle():
+def test_interviewer_forwards_to_spec_confirm_gate():
     res = NodeResult(output=Requirement(summary="x"))
-    assert route("interviewer", res, SessionState()) == "acceptance_oracle"
+    assert route("interviewer", res, SessionState()) == "spec_confirm_gate"
 
 
-def test_oracle_forwards_to_acceptance_gate():
-    res = NodeResult(output=AcceptanceSpec())
-    assert route("acceptance_oracle", res, SessionState()) == "acceptance_gate"
-
-
-def test_gate_advance_forwards_to_critic():
+def test_spec_confirm_gate_advance_forwards_to_planner():
     res = NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
-    assert route("acceptance_gate", res, SessionState()) == "acceptance_critic"
+    assert route("spec_confirm_gate", res, SessionState()) == "planner"
 
 
-def test_critic_advance_forwards_to_spec_confirm_gate():
-    # acceptance_critic now routes through spec_confirm_gate before planner
-    res = NodeResult(verdict=Verdict(kind=VerdictKind.ADVANCE))
-    assert route("acceptance_critic", res, SessionState()) == "spec_confirm_gate"
-
-
-def test_acceptance_repair_loops_back_to_oracle():
+def test_acceptance_repair_bounces_to_interviewer():
     res = NodeResult(verdict=Verdict(kind=VerdictKind.REPAIR, layer=Layer.ACCEPTANCE))
-    assert route("acceptance_gate", res, SessionState()) == "acceptance_oracle"
-    assert route("acceptance_critic", res, SessionState()) == "acceptance_oracle"
+    assert route("spec_confirm_gate", res, SessionState()) == "interviewer"

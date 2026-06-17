@@ -55,19 +55,19 @@ def test_router_branch_is_carried_on_result_not_inferred():
     assert route("router", r_branch, SessionState()) == "explorer"
 
 
-def test_interviewer_forwards_to_acceptance_oracle():
-    # acceptance_oracle now sits between interviewer and planner
+def test_interviewer_forwards_to_spec_confirm_gate():
+    # acceptance oracle/gate/critic removed → interviewer forwards straight to the gate
     from poor_code.domain.harness.route import route
     from poor_code.domain.harness.node import NodeResult
     from poor_code.domain.session.models import Requirement, SessionState
     res = NodeResult(output=Requirement(summary="done"))
     nxt = route("interviewer", res, SessionState())
-    assert nxt == "acceptance_oracle"
+    assert nxt == "spec_confirm_gate"
 
 
 def test_spec_and_plan_confirm_in_forward_chain():
     from poor_code.domain.harness.route import FORWARD
-    assert FORWARD[("acceptance_critic", None)] == "spec_confirm_gate"
+    assert FORWARD[("interviewer", None)] == "spec_confirm_gate"
     assert FORWARD[("spec_confirm_gate", None)] == "planner"
     assert FORWARD[("plan_gate", None)] == "plan_reviewer"
     assert FORWARD[("plan_reviewer", None)] == "plan_confirm_gate"

@@ -25,7 +25,7 @@ from __future__ import annotations
 from poor_code.domain.harness.node import NodeContext, NodeResult
 from poor_code.domain.harness.render_md import render_plan_md, render_spec_md
 from poor_code.domain.session.models import (
-    AcceptanceSpec, Layer, Phase, Plan, Policy, Query, QueryKind, Requirement,
+    Layer, Phase, Plan, Policy, Query, QueryKind, Requirement,
     TriggerKind, Verdict, VerdictKind, effective_requirement,
 )
 
@@ -122,7 +122,7 @@ class SpecConfirmGate(_ConfirmGate):
     phase = Phase.INTERVIEWING
     query_id = "confirm_spec"
     layer = Layer.ACCEPTANCE
-    requires = (Requirement, AcceptanceSpec)
+    requires = (Requirement,)
     produces = ()
 
     def _render(self, state) -> str:

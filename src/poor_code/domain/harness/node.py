@@ -68,6 +68,12 @@ def strip_code_fence(text: str) -> str:
     return s
 
 
+def _read_cache_of(ctx: "NodeContext"):
+    """The session-scoped ReadCache from the Driver runtime, or None when a node is run
+    without a runtime (direct unit tests) — in which case read dedup is simply off."""
+    return getattr(ctx.runtime, "read_cache", None) if ctx.runtime is not None else None
+
+
 def _safe_args(args_json: str) -> dict:
     """Best-effort parse of a tool call's argument JSON into a dict for sink display.
     A non-dict payload is wrapped as {"_": v}; malformed JSON yields {} — never raises,
@@ -300,7 +306,7 @@ _SHALLOWEST_FOR_COUNTING = {
     Layer.IMPLEMENTATION: "implementer",
     Layer.PLAN: "planner",
     Layer.UNDERSTANDING: "explorer",
-    Layer.ACCEPTANCE: "acceptance_oracle",
+    Layer.ACCEPTANCE: "interviewer",   # acceptance_oracle removed; spec rejection re-runs interviewer
 }
 
 
@@ -520,11 +526,18 @@ class AgentNode:
         completion's terminal tool in ONE tool set every round. A working-tool call is
         executed and fed back (the model grounds itself); a call to the terminal tool ends
         the loop via completion.extract → NodeResult. A schema-invalid or semantically
-        incomplete terminal call is nudged and the loop continues, bounded by
-        MAX_DISPATCH_ATTEMPTS. This replaces the split read-loop + forced-terminal: a model
-        that still wants to read at decision time simply reads, instead of emitting an
-        invalid structured output (e.g. a stray grep call) that escalated to a parked turn.
-        `tools` may be None (terminal-only — equivalent to a single forced dispatch)."""
+        incomplete terminal call is nudged and the loop continues. This replaces the split
+        read-loop + forced-terminal: a model that still wants to read at decision time
+        simply reads, instead of emitting an invalid structured output (e.g. a stray grep
+        call) that escalated to a parked turn.
+
+        Termination is model-driven: the model decides it is done either by calling the
+        terminal tool, or by emitting NO tool call (the 'done reading' signal) — both end
+        the read phase. `max_tool_rounds` is only a runaway backstop. When the read phase
+        ends without a valid terminal call, the decision is FORCED via _terminal (working
+        tools removed, terminal tool the only option), so the gathered read transcript
+        still grounds a guaranteed final decision rather than escalating. `tools` may be
+        None (terminal-only — a single forced dispatch)."""
         base = self.build_messages(ctx.state)
         _sm = steering_message(getattr(ctx.state, "steering_notes", None) or ())
         _fm = driver_feedback_message(ctx.state, self.name)
@@ -538,11 +551,11 @@ class AgentNode:
         _example = _example_from_schema(_schema) if _schema else None
         schemas = [*(tools.schemas() if tools is not None else []), terminal]
         messages = [base[0], *steer, *base[1:]]
+        seed_len = len(messages)
         tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel,
-                               cwd=cwd if cwd is not None else Path.cwd(), ask=allow_all)
-        last_err: StructuredOutputError | None = None
-        attempts = 0   # invalid terminal calls / empty rounds — bounded re-roll budget
-        for _ in range(max_tool_rounds + MAX_DISPATCH_ATTEMPTS):
+                               cwd=cwd if cwd is not None else Path.cwd(), ask=allow_all,
+                               read_cache=_read_cache_of(ctx))
+        for _ in range(max_tool_rounds):
             if ctx.cancel.is_set():
                 raise asyncio.CancelledError(f"{self.name} cancelled")
             # pass a copy: the stream may capture the list (test fakes do) while this loop
@@ -557,15 +570,7 @@ class AgentNode:
                     for cid, name, args in calls]
             messages.append(assistant)
             if not calls:
-                attempts += 1
-                if attempts >= MAX_DISPATCH_ATTEMPTS:
-                    raise last_err or StructuredOutputError(
-                        self.name, text,
-                        f"model produced no tool call; expected {terminal_name}")
-                messages.append({"role": "user", "content":
-                    f"You must call a tool. Read more with a working tool, or call "
-                    f"{terminal_name} to finish. Output only the tool call."})
-                continue
+                break   # model stopped calling tools → its "done reading" signal: decide now
             for cid, name, args in calls:
                 if name == terminal_name:
                     if ctx.sink is not None:
@@ -573,8 +578,6 @@ class AgentNode:
                     try:
                         return completion.extract(args, ctx)
                     except StructuredOutputError as e:
-                        last_err = e
-                        attempts += 1
                         messages.append({"role": "tool", "tool_call_id": cid,
                             "content": _retry_nudge(e, schema=_schema, example=_example)})
                         continue
@@ -588,12 +591,10 @@ class AgentNode:
                         ctx.sink.tool_finished(cid, output)
                 messages.append({"role": "tool", "tool_call_id": cid,
                                  "content": clamp_tool_output(output)})
-            if attempts >= MAX_DISPATCH_ATTEMPTS:
-                assert last_err is not None
-                raise last_err
-        raise last_err or StructuredOutputError(
-            self.name, "",
-            f"did not call {terminal_name} within the round budget")
+        # Free-exploration budget spent without a decision → FORCE it. _terminal offers
+        # only the terminal tool (response_format-constrained) and re-rolls on bad output,
+        # so the gathered read transcript still grounds a guaranteed final decision.
+        return await self._terminal(ctx, completion, extra_messages=messages[seed_len:])
 
     async def _stream_once(
         self, ctx: NodeContext, messages: list[dict],
@@ -706,7 +707,8 @@ class AgentNode:
         each tool round (where a node re-clamps prior rounds / appends a nudge / checks the
         tree). Returns the transcript minus the seed system prompt (mirrors _read_loop)."""
         messages = list(seed_messages)
-        tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel, cwd=cwd, ask=allow_all)
+        tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel, cwd=cwd, ask=allow_all,
+                               read_cache=_read_cache_of(ctx))
         schemas = tools.schemas()
         await hooks.before_loop()
         for i in range(max_iterations):
@@ -755,7 +757,8 @@ class AgentNode:
         work-tree."""
         messages = list(seed_messages)
         tool_ctx = ToolContext(turn_id=self.name, cancel=ctx.cancel,
-                               cwd=cwd if cwd is not None else Path.cwd(), ask=allow_all)
+                               cwd=cwd if cwd is not None else Path.cwd(), ask=allow_all,
+                               read_cache=_read_cache_of(ctx))
         schemas = tools.schemas()
         for _ in range(max_iterations):
             if ctx.cancel.is_set():

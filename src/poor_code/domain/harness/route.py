@@ -15,10 +15,7 @@ FORWARD: dict[tuple[str, str | None], str] = {
     ("router", "lightweight"): "fast_path",
     ("explorer", None): "understanding_gate",
     ("understanding_gate", None): "interviewer",  # gate ADVANCE falls through here
-    ("interviewer", None): "acceptance_oracle",
-    ("acceptance_oracle", None): "acceptance_gate",
-    ("acceptance_gate", None): "acceptance_critic",  # gate ADVANCE falls through here
-    ("acceptance_critic", None): "spec_confirm_gate",  # critic ADVANCE falls through here
+    ("interviewer", None): "spec_confirm_gate",  # acceptance oracle/gate/critic removed (experiment)
     ("spec_confirm_gate", None): "planner",
     ("planner", None): "plan_gate",
     ("plan_gate", None): "plan_reviewer",          # gate ADVANCE falls through here
@@ -33,24 +30,24 @@ FORWARD: dict[tuple[str, str | None], str] = {
 }
 
 # back-edge target per broken layer (fail-to-shallowest, design.md §6/§18).
+# Layer.ACCEPTANCE used to bounce to the acceptance_oracle (now removed). The only
+# remaining emitter is spec_confirm_gate: a SUPERVISED user rejecting the spec. The
+# spec is now just the Requirement, so a rejection bounces to the interviewer (its
+# author) to revise it, rather than escaping the whole run.
 _SHALLOWEST: dict[Layer, str] = {
     Layer.IMPLEMENTATION: "implement_loop",   # re-enter the execution subgraph (implementer lives inside)
     Layer.PLAN: "planner",
     Layer.UNDERSTANDING: "explorer",
-    Layer.ACCEPTANCE: "acceptance_oracle",
+    Layer.ACCEPTANCE: "interviewer",
 }
 
 # FULL_AUTO (headless): no human to answer the interviewer, so skip that node — it
-# would only auto-answer "use your best judgment" and burn round-trips. But KEEP a
-# lean acceptance: the acceptance_oracle grounds its global done-check on the issue
-# text (request.raw_text, which carries the reproduction), and that check is the
-# independent witness that defends "all per-task validations pass => issue resolved"
-# (the per-task how_to_validate is self-authored by the same model that writes the
-# fix, so it is self-confirming). We drop only the human-dialogue interviewer and the
-# expensive LLM adequacy critic; the oracle + deterministic gate stay, re-activating
-# the global_validator->planner corrective cycle. acceptance_oracle (like the planner)
-# synthesizes its requirement from the request when state.requirement is absent.
-# Mirrors the old inline route() special-case exactly.
+# would only auto-answer "use your best judgment" and burn round-trips. With the
+# acceptance oracle/gate/critic removed (experiment), the headless path runs straight
+# from understanding to the planner: interviewer is skipped (nodes downstream use
+# effective_requirement(state), which synthesizes the requirement from the request
+# text when state.requirement is absent), and spec_confirm_gate is skipped (no human
+# to confirm). The per-task Verifier grounds 'done' on req.acceptance + the request.
 # FULL_AUTO also skips the LLM plan_reviewer: a weak self-verifier diverges via
 # false-positive replans (2404.17140 weak-verifier-divergence — the report's load-
 # bearing finding) and each pass is a full LLM call against the latency wall. The
@@ -58,8 +55,7 @@ _SHALLOWEST: dict[Layer, str] = {
 # judgement is exactly where the weak critic hurts. SUPERVISED keeps it (human present).
 _FULL_AUTO_SKIP = Rewrite(
     when=lambda s: s.policy is Policy.FULL_AUTO,
-    remap={"interviewer": "acceptance_oracle", "acceptance_critic": "planner",
-           "spec_confirm_gate": "planner",
+    remap={"interviewer": "planner", "spec_confirm_gate": "planner",
            "plan_reviewer": "provisioner", "plan_confirm_gate": "provisioner"},
 )
 

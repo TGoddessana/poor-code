@@ -31,7 +31,7 @@ from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.session.models import (
-    AcceptanceSpec, Layer, Phase, Plan, Requirement, SessionState, TaskCompleted,
+    Layer, Phase, Plan, Requirement, SessionState, TaskCompleted,
     Verdict, VerdictKind, effective_requirement)
 from poor_code.domain.tool.registry import ToolRegistry
 
@@ -119,7 +119,7 @@ class _VerdictOut(BaseModel):
 class VerifierNode(AgentNode):
     name = "verifier"
     phase = Phase.IMPLEMENTING
-    requires = (Plan, Requirement, AcceptanceSpec)
+    requires = (Plan, Requirement)
     produces = ()
 
     def __init__(self, llm: _LLMClientLike, cwd: Path, tools: ToolRegistry) -> None:

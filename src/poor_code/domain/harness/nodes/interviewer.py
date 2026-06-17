@@ -27,6 +27,10 @@ from poor_code.domain.session.models import (
 
 _TOOL_NAME = "interview_step"
 MAX_ROUNDS = 6
+# Runaway backstop for the in-entry read phase, NOT a normal stopping point: the model
+# decides it is done by calling interview_step or by emitting no tool call. Set high so a
+# large repo can be explored freely; only a never-converging model ever hits it.
+MAX_READ_ROUNDS = 50
 
 _SYSTEM = (
     "You are the Interviewer — a senior freelance engineer vetting an "
@@ -129,7 +133,8 @@ class Interviewer(AgentNode):
         # Replaces the old split read_loop + forced terminal, where a model that still
         # wanted to grep at decision time emitted an invalid step and escalated to a park.
         completion = InterviewStepCompletion(self, ctx.state)
-        return await self._decide_with_tools(ctx, completion, self._tools)
+        return await self._decide_with_tools(
+            ctx, completion, self._tools, max_tool_rounds=MAX_READ_ROUNDS)
 
     # output_model lives on InterviewStepCompletion now; the loop reads the terminal
     # tool/model from the completion, so the node no longer overrides output_model().

@@ -136,6 +136,85 @@ class _GrepThenDecideUnifiedLLM:
         yield FinishedReason(reason="tool_calls")
 
 
+class _AlwaysGrepsLLM:
+    """Greedy SOTA-style model: greps every round it is OFFERED a working tool, never
+    volunteering interview_step. Only when the loop FORCES the decision (working tools
+    removed, interview_step the only option) does it finish. Guards that an exploratory
+    model still terminates instead of escalating to a parked turn."""
+    def __init__(self): self.grep_calls = 0; self.forced = False
+    async def stream(self, messages, tools, response_format=None):
+        names = {t["function"]["name"] for t in tools}
+        if "grep" in names:                      # free round: keep grepping
+            self.grep_calls += 1
+            # Distinct pattern each round so the loop's per-run dedup does NOT collapse
+            # them — this test exercises the runaway backstop, not the dedup path.
+            yield ToolCallStarted(call_id=f"g{self.grep_calls}", name="grep")
+            yield ToolCallInputDelta(call_id=f"g{self.grep_calls}",
+                                     json_delta=f'{{"pattern":"x{self.grep_calls}"}}')
+            yield ToolCallEnded(call_id=f"g{self.grep_calls}")
+            yield FinishedReason(reason="tool_calls")
+            return
+        self.forced = True                       # forced close: only interview_step offered
+        yield ToolCallStarted(call_id="d1", name="interview_step")
+        yield ToolCallInputDelta(call_id="d1",
+            json_delta='{"action":"done","requirement":{"summary":"forced finalize"}}')
+        yield ToolCallEnded(call_id="d1")
+        yield FinishedReason(reason="tool_calls")
+
+
+@pytest.mark.asyncio
+async def test_interviewer_forces_decision_when_model_never_stops_reading():
+    from poor_code.domain.harness.nodes.interviewer import MAX_READ_ROUNDS
+    grep = _GrepStub()
+    llm = _AlwaysGrepsLLM()
+    node = Interviewer(llm, project_map=_map(), tools=ToolRegistry([grep]))
+    res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event(), sink=_Sink()))
+    assert isinstance(res.output, Requirement)            # terminated, did NOT escalate
+    assert res.output.summary == "forced finalize"
+    assert llm.forced                                     # the forced close actually fired
+    assert grep.calls == MAX_READ_ROUNDS                  # explored up to the runaway backstop
+
+
+class _ReadThenStopLLM:
+    """Model-driven termination: reads once, then STOPS calling tools (emits prose with no
+    tool call) — the 'I'm done reading' signal. The loop must transition to the decision
+    immediately, NOT keep nudging until the runaway cap."""
+    def __init__(self): self.free_rounds = 0; self.grep_calls = 0
+    async def stream(self, messages, tools, response_format=None):
+        names = {t["function"]["name"] for t in tools}
+        if names == {"interview_step"}:              # forced/decision close
+            yield ToolCallStarted(call_id="d1", name="interview_step")
+            yield ToolCallInputDelta(call_id="d1",
+                json_delta='{"action":"done","requirement":{"summary":"decided after read"}}')
+            yield ToolCallEnded(call_id="d1")
+            yield FinishedReason(reason="tool_calls")
+            return
+        self.free_rounds += 1                        # a free round (tools + interview_step)
+        if self.grep_calls == 0:
+            self.grep_calls += 1
+            yield ToolCallStarted(call_id="g1", name="grep")
+            yield ToolCallInputDelta(call_id="g1", json_delta='{"pattern":"x"}')
+            yield ToolCallEnded(call_id="g1")
+            yield FinishedReason(reason="tool_calls")
+        else:                                        # stop calling tools → done reading
+            yield TextDelta(text="I have read enough; ready to decide.")
+            yield FinishedReason(reason="stop")
+
+
+@pytest.mark.asyncio
+async def test_interviewer_decides_when_model_stops_calling_tools():
+    grep = _GrepStub()
+    llm = _ReadThenStopLLM()
+    node = Interviewer(llm, project_map=_map(), tools=ToolRegistry([grep]))
+    res = await node.run(NodeContext(state=_state(), cancel=asyncio.Event(), sink=_Sink()))
+    assert isinstance(res.output, Requirement)
+    assert res.output.summary == "decided after read"
+    assert llm.grep_calls == 1
+    # model-driven: it read once, signalled done (no tool call), then decided — it did NOT
+    # burn extra free rounds nudging toward the runaway cap.
+    assert llm.free_rounds == 2
+
+
 @pytest.mark.asyncio
 async def test_interviewer_unified_loop_executes_tool_then_decides():
     grep = _GrepStub()

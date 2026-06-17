@@ -12,12 +12,10 @@ from poor_code.domain.harness.graph import CompiledGraph, EdgeTable, Graph
 from poor_code.domain.harness.node import (
     AgentNode, Completion, Node, NodeContext, NodeResult, StructuredCompletion,
 )
-from poor_code.domain.harness.nodes.acceptance_critic import AcceptanceCritic
-from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
 from poor_code.domain.harness.nodes.confirm_gates import PlanConfirmGate, SpecConfirmGate
 from poor_code.domain.harness.nodes.explorer import ExploringNode
 from poor_code.domain.harness.nodes.fast_path import FastPathNode
-from poor_code.domain.harness.nodes.gates import AcceptanceGate, PlanGate, UnderstandingGate
+from poor_code.domain.harness.nodes.gates import PlanGate, UnderstandingGate
 from poor_code.domain.harness.nodes.global_validator import GlobalValidator
 from poor_code.domain.harness.nodes.interviewer import Interviewer
 from poor_code.domain.harness.nodes.plan_reviewer import PlanReviewer
@@ -39,7 +37,6 @@ __all__ = [
     "AgentNode", "Completion", "StructuredCompletion", "CompiledGraph",
     "Driver", "DriverRuntime", "Node", "NodeContext", "NodeResult", "NodeRegistry",
     "Router", "ExploringNode", "Interviewer", "Planner", "PlanGate", "FastPathNode",
-    "AcceptanceOracle", "AcceptanceGate", "AcceptanceCritic",
     "SpecConfirmGate", "PlanConfirmGate",
     "GlobalValidator", "Reporter",
     "Provisioner",
@@ -50,7 +47,7 @@ __all__ = [
 
 def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeRegistry:
     """Assemble the full planning+execution-layer graph. Top-level agent nodes:
-    Router, ExploringNode, Interviewer, AcceptanceOracle/Critic, Planner, PlanReviewer,
+    Router, ExploringNode, Interviewer, Planner, PlanReviewer,
     Provisioner, GlobalValidator, plus the deterministic gates. The task-execution loop
     (TaskSelector, Composer, Implementer, Validator, FailureAnalyst, runners) is folded
     into the `implement_loop` subgraph node, not registered here. The graph runs to the
@@ -64,11 +61,6 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     reg.register(Interviewer(
         llm, project_map=project_map,
         tools=ToolRegistry([ReadTool(), GrepTool(), GlobTool(), ListTool()])))
-    reg.register(AcceptanceOracle(
-        llm, cwd=project_map.cwd,
-        tools=ToolRegistry([BashTool(), ReadTool(), GrepTool(), GlobTool(), ListTool()])))
-    reg.register(AcceptanceGate())
-    reg.register(AcceptanceCritic(llm))
     reg.register(SpecConfirmGate())
     reg.register(Planner(llm, project_map=project_map))
     reg.register(PlanGate())

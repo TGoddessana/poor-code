@@ -1,6 +1,4 @@
 from poor_code.domain.session.models import (
-    AcceptanceCheck,
-    AcceptanceSpec,
     ChecksObserved,
     CodeContext,
     CodeRef,
@@ -60,6 +58,32 @@ def test_summary_explorer_counts_codecontext():
     assert any("a.py" in d for d in detail)
 
 
+def test_summary_explorer_labels_symbols_and_dedups_and_hides_grounding():
+    n = StaticNarrator()
+    cc = CodeContext(
+        candidates=(
+            CodeRef(file="prompt_box.py", symbol="PromptBox"),
+            CodeRef(file="prompt_box.py", symbol="compose"),
+            CodeRef(file="prompt_box.py", symbol="PromptBox"),   # dup of the first label
+        ),
+        grounding=GroundingStatus.NOT_FOUND,
+    )
+    headline, detail = n.summary("explorer", NodeResult(output=cc))
+    # 1 unique file; grounding NOT shown because candidates exist (gate advanced on them)
+    assert "1 file" in headline
+    assert "grounding" not in headline
+    # labels are file::symbol and de-duped (no repeated "prompt_box.py" rows)
+    assert detail == ("prompt_box.py::PromptBox", "prompt_box.py::compose")
+
+
+def test_summary_explorer_shows_grounding_only_when_no_candidates():
+    n = StaticNarrator()
+    cc = CodeContext(candidates=(), grounding=GroundingStatus.NOT_FOUND)
+    headline, detail = n.summary("explorer", NodeResult(output=cc))
+    assert "grounding: not_found" in headline
+    assert detail == ()
+
+
 def test_activity_names_current_inner_task():
     n = StaticNarrator()
     state = SessionState(
@@ -67,17 +91,6 @@ def test_activity_names_current_inner_task():
         plan=Plan(tasks=(Task(id="t2", title="Wire TUI", purpose="p"),)),
     )
     assert n.activity("implementer", Phase.IMPLEMENTING, state) == "Writing code for t2: Wire TUI"
-
-
-def test_summary_acceptance_oracle_lists_checks():
-    n = StaticNarrator()
-    spec = AcceptanceSpec(checks=(AcceptanceCheck(
-        criterion="CLI exits cleanly",
-        command="pytest",
-    ),))
-    headline, detail = n.summary("acceptance_oracle", NodeResult(output=spec))
-    assert "1 acceptance check" in headline
-    assert detail == ("CLI exits cleanly: pytest",)
 
 
 def test_summary_validation_runner_surfaces_command_and_output():

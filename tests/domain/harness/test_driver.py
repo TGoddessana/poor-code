@@ -80,7 +80,7 @@ async def test_driver_suspends_on_query_and_keeps_cursor():
 
 
 @pytest.mark.asyncio
-async def test_driver_applies_requirement_and_routes_to_acceptance_oracle():
+async def test_driver_applies_requirement_and_routes_to_spec_confirm_gate():
     from poor_code.domain.harness.node import NodeResult
     from poor_code.domain.session.models import Requirement
 
@@ -90,14 +90,14 @@ async def test_driver_applies_requirement_and_routes_to_acceptance_oracle():
             return NodeResult(output=Requirement(summary="done"))
 
     reg = NodeRegistry()
-    reg.register(_DoneStub())   # acceptance_oracle unregistered → park
+    reg.register(_DoneStub())   # spec_confirm_gate unregistered → park
     driver = Driver(reg, route)
     start = SessionState(cursor=Cursor(phase=Phase.INTERVIEWING, current_node="interviewer"),
                          request=Request(raw_text="x", kind=RequestKind.ENGINEERING))
     final = await driver.run(start, asyncio.Event())
 
     assert final.requirement is not None and final.requirement.summary == "done"
-    assert final.cursor.current_node == "acceptance_oracle"   # forwarded, then parked
+    assert final.cursor.current_node == "spec_confirm_gate"   # forwarded, then parked
 
 
 from poor_code.domain.session.models import Verdict, VerdictKind, Layer

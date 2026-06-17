@@ -27,6 +27,7 @@ from poor_code.domain.session.models import (
     Verdict,
     VerdictKind,
 )
+from poor_code.domain.tool.read_cache import ReadCache
 from poor_code.provider.client import LLMCallTimeout
 
 # Recoverable INFERENCE failures: a weak model produced unusable output, or a call
@@ -52,6 +53,10 @@ class DriverRuntime:
     advisor: DriverAdvisor | None = None
     smart_enabled: bool = False
     cwd: object | None = None
+    # Session-scoped read dedup, shared across every node run of this Driver (the app
+    # keeps one Driver for the whole session, so this also dedups re-reads across
+    # interview re-entries and turns). Threaded into each tool loop's ToolContext.
+    read_cache: ReadCache = field(default_factory=ReadCache)
 
 
 class Driver:
@@ -349,7 +354,6 @@ _NODE_LAYER_FALLBACK = {
     "planner": Layer.PLAN,
     "plan_reviewer": Layer.PLAN,
     "explorer": Layer.UNDERSTANDING,
-    "acceptance_oracle": Layer.ACCEPTANCE,
 }
 
 

@@ -28,6 +28,11 @@ class GrepTool:
     async def execute(self, args: GrepParams, ctx: ToolContext) -> ExecuteResult:
         if ctx.cancel.is_set():
             raise asyncio.CancelledError
+        # Walking the tree and scanning files is blocking I/O; run it off the event loop
+        # so a broad glob never freezes the TUI (the harness drives nodes on Textual's loop).
+        return await asyncio.to_thread(self._search, args, ctx.cwd)
+
+    def _search(self, args: GrepParams, cwd: Path) -> ExecuteResult:
         try:
             rx = re.compile(args.pattern)
         except re.error as e:
@@ -35,7 +40,7 @@ class GrepTool:
         if args.path_glob:
             reject_escaping_glob(args.path_glob)
 
-        root = ctx.cwd.resolve()
+        root = cwd.resolve()
         results: list[str] = []
         for path in sorted(root.glob(args.path_glob or "**/*")):
             if not path.is_file():

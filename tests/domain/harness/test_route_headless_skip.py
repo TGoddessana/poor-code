@@ -1,16 +1,14 @@
-"""Headless (FULL_AUTO) skips the human-dialogue interviewer and the adequacy
-critic, but KEEPS a lean acceptance (oracle + gate) grounded in the issue text.
+"""Headless (FULL_AUTO) skips the human-dialogue interviewer and the LLM plan
+reviewer.
 
 Why this exists: the interviewer needs a human to answer; unattended it only burns
-round-trips, so FULL_AUTO skips it. But the acceptance_oracle does NOT need a human —
-it grounds its global done-check on the request/issue text (which headless HAS), and
-that check is the independent witness that defends "small tasks pass => issue
-resolved" (the per-task how_to_validate is self-authored and self-confirming). So in
-FULL_AUTO the understanding_gate ADVANCE routes to acceptance_oracle (not the
-interviewer), runs the deterministic gate, then skips the expensive LLM adequacy
-critic straight to the planner. This re-activates the global_validator->planner
-corrective cycle that the earlier skip-everything had killed. SUPERVISED (TUI) is
-unchanged: the human answers the interviewer and the full critic runs.
+round-trips, so FULL_AUTO skips it. With the acceptance oracle/gate/critic removed
+(experiment), there is no longer a lean-acceptance node to land on, so in FULL_AUTO
+the understanding_gate ADVANCE routes straight to the planner: interviewer is skipped
+(downstream nodes use effective_requirement(state), synthesizing the requirement from
+the request text) and spec_confirm_gate is skipped (no human to confirm). The plan
+reviewer and plan_confirm_gate are likewise skipped. SUPERVISED (TUI) is unchanged:
+the human answers the interviewer and confirms the spec.
 """
 from poor_code.domain.harness.node import NodeResult
 from poor_code.domain.harness.route import route
@@ -29,24 +27,19 @@ def test_supervised_understanding_gate_advances_to_interviewer():
     assert route("understanding_gate", _advance(), state) == "interviewer"
 
 
-def test_full_auto_understanding_gate_skips_interviewer_to_acceptance_oracle():
-    # Headless: skip the human-dialogue interviewer, but still run the oracle so the
-    # issue-grounded independent done-check exists.
+def test_full_auto_understanding_gate_skips_interviewer_to_planner():
+    # Headless: skip the human-dialogue interviewer; no acceptance node to land on, so
+    # go straight to the planner (which synthesizes the requirement from the request).
     state = SessionState(policy=Policy.FULL_AUTO)
-    assert route("understanding_gate", _advance(), state) == "acceptance_oracle"
+    assert route("understanding_gate", _advance(), state) == "planner"
 
 
-def test_supervised_acceptance_gate_advances_to_critic():
-    # TUI: the adversarial adequacy critic runs after the gate.
+def test_supervised_interviewer_forwards_to_spec_confirm_gate():
+    # TUI: the human confirms the spec after the interview.
+    from poor_code.domain.session.models import Requirement
     state = SessionState(policy=Policy.SUPERVISED)
-    assert route("acceptance_gate", _advance(), state) == "acceptance_critic"
-
-
-def test_full_auto_acceptance_gate_skips_critic_to_planner():
-    # Headless: keep oracle+gate (independent check + well-formedness floor) but skip
-    # the expensive LLM adequacy critic — grounding on the issue does the adequacy work.
-    state = SessionState(policy=Policy.FULL_AUTO)
-    assert route("acceptance_gate", _advance(), state) == "planner"
+    res = NodeResult(output=Requirement(summary="x"))
+    assert route("interviewer", res, state) == "spec_confirm_gate"
 
 
 def test_supervised_plan_gate_advances_to_plan_reviewer():
@@ -58,17 +51,16 @@ def test_supervised_plan_gate_advances_to_plan_reviewer():
 def test_full_auto_plan_gate_skips_reviewer_to_provisioner():
     # Headless: the weak LLM plan critic diverges (false-positive replans → burns the
     # latency budget — weak-verifier-divergence, 2404.17140). Skip it; the deterministic
-    # PlanGate (the strong verifier) already passed. Mirrors the acceptance_critic skip.
+    # PlanGate (the strong verifier) already passed.
     state = SessionState(policy=Policy.FULL_AUTO)
     assert route("plan_gate", _advance(), state) == "provisioner"
 
 
 def test_full_auto_does_not_alter_unrelated_edges():
-    # The redirects are surgical: interviewer entry, the acceptance critic, and the
-    # plan reviewer move; nothing else.
+    # The redirects are surgical: interviewer entry, spec_confirm_gate, and the plan
+    # reviewer/plan_confirm_gate move; nothing else.
     state = SessionState(policy=Policy.FULL_AUTO)
     assert route("plan_reviewer", _advance(), state) == "provisioner"
-    assert route("acceptance_oracle", _advance(), state) == "acceptance_gate"
     assert route("provisioner", _advance(), state) == "implement_loop"
 
 
@@ -80,13 +72,6 @@ def test_full_auto_understanding_repair_still_loops_to_explorer():
     assert route("understanding_gate", res, state) == "explorer"
 
 
-def test_full_auto_skips_spec_confirm_gate_to_planner():
-    # In FULL_AUTO, acceptance_critic (when reached under SUPERVISED) would normally
-    # forward to spec_confirm_gate; the remap skips it straight to planner.
-    state = SessionState(policy=Policy.FULL_AUTO)
-    assert route("acceptance_critic", _advance(), state) == "planner"
-
-
 def test_full_auto_skips_plan_confirm_gate_to_provisioner():
     # In FULL_AUTO, plan_reviewer (when reached under SUPERVISED) would normally
     # forward to plan_confirm_gate; the remap skips it straight to provisioner.
@@ -94,8 +79,9 @@ def test_full_auto_skips_plan_confirm_gate_to_provisioner():
     assert route("plan_reviewer", _advance(), state) == "provisioner"
 
 
-def test_full_auto_skips_confirm_gates():
-    # Direct remap entries exist in _FULL_AUTO_SKIP for both confirm gates.
+def test_full_auto_skips_interviewer_and_confirm_gates():
+    # Direct remap entries exist in _FULL_AUTO_SKIP.
     from poor_code.domain.harness.route import _FULL_AUTO_SKIP
+    assert _FULL_AUTO_SKIP.remap["interviewer"] == "planner"
     assert _FULL_AUTO_SKIP.remap["spec_confirm_gate"] == "planner"
     assert _FULL_AUTO_SKIP.remap["plan_confirm_gate"] == "provisioner"

@@ -4,11 +4,10 @@ The Verdict is what makes the graph *cycle*: route() turns repair(layer) into a
 back-edge to that layer's shallowest producer (design.md §6/§16/§18)."""
 from __future__ import annotations
 
-from poor_code.domain.harness.grounding import validation_floor_hint
 from poor_code.domain.harness.ledger import has_section
 from poor_code.domain.harness.node import GateNode
 from poor_code.domain.session.models import (
-    AcceptanceSpec, CodeContext, GroundingStatus, Layer, Phase, Plan, TriggerKind,
+    CodeContext, GroundingStatus, Layer, Phase, Plan, TriggerKind,
 )
 
 
@@ -111,62 +110,3 @@ class PlanGate(GateNode):
             return False
 
         return any(visit(node) for node in ids)
-
-
-# Shared by AcceptanceGate (ill-formed floor) and AcceptanceCritic (adequacy). The
-# acceptance layer is allowed to iterate a lot: the oracle↔critic loop is the harness
-# *refusing to build against a gameable spec*, which is the behaviour we want. We only
-# escalate to a human once it is clearly not converging, so the bound is deliberately
-# loose — it is a non-termination backstop, not a quality knob.
-ACCEPTANCE_REPAIR_BUDGET = 100
-
-
-def _acceptance_repair_count(state) -> int:
-    """Bounces back to acceptance_oracle from either the gate or the critic."""
-    return sum(1 for t in state.history
-               if t.trigger is TriggerKind.GATE and t.to_node == "acceptance_oracle")
-
-
-class AcceptanceGate(GateNode):
-    """Deterministic floor on the AcceptanceSpec: it must have at least one check and
-    each check must be a runnable command (not prose). Task-DEPENDENT adequacy is the
-    acceptance_critic's job, NOT this gate's.
-
-    Exception: 'unknown'-status checks are honest abstentions with no authored test.
-    The oracle emits them with an empty command when it cannot establish the expected
-    behaviour. The verifier treats them as advisory only; requiring a runnable command
-    here would force a guessed test and defeat abstention. The command floor is skipped
-    for 'unknown'-status checks."""
-
-    name = "acceptance_gate"
-    layer = Layer.ACCEPTANCE
-    repair_budget = ACCEPTANCE_REPAIR_BUDGET
-    phase = Phase.PLANNING
-    requires = (AcceptanceSpec,)
-    produces = ()
-
-    def check(self, state) -> str | None:
-        return self._invalid_hint(state.acceptance)
-
-    def escalate_query(self, hint: str) -> str:
-        return f"Acceptance check still ill-formed after redesign: {hint}"
-
-    def _repair_count(self, state) -> int:
-        return _acceptance_repair_count(state)
-
-    @staticmethod
-    def _invalid_hint(spec) -> str | None:
-        if spec is None or not spec.checks:
-            return "Acceptance spec has no checks; design at least one runnable check."
-        for i, chk in enumerate(spec.checks, start=1):
-            if chk.status == "unknown":
-                # Honest abstention: the oracle could not establish the expected behaviour,
-                # so it emits no authored test (empty command) and marks the criterion
-                # 'unknown'. Such criteria are advisory (the verifier excludes them from
-                # the pass/fail gate); requiring a runnable command here would force a
-                # guessed test and defeat abstention. Skip the command floor for them.
-                continue
-            floor = validation_floor_hint(chk.command)
-            if floor is not None:
-                return f"Acceptance check {i} ({chk.criterion!r}) command {floor}"
-        return None

@@ -172,9 +172,7 @@ def _planning_registry(llm, pm):
     from poor_code.domain.harness.nodes.router import Router
     from poor_code.domain.harness.nodes.explorer import ExploringNode
     from poor_code.domain.harness.nodes.gates import (
-        AcceptanceGate, UnderstandingGate, PlanGate)
-    from poor_code.domain.harness.nodes.acceptance_oracle import AcceptanceOracle
-    from poor_code.domain.harness.nodes.acceptance_critic import AcceptanceCritic
+        UnderstandingGate, PlanGate)
     from poor_code.domain.harness.nodes.interviewer import Interviewer
     from poor_code.domain.harness.nodes.planner import Planner
     from poor_code.domain.harness.nodes.plan_reviewer import PlanReviewer
@@ -189,9 +187,6 @@ def _planning_registry(llm, pm):
     reg.register(ExploringNode(llm, project_map=pm, tools=ToolRegistry([ReadTool(), GrepTool()])))
     reg.register(UnderstandingGate())
     reg.register(Interviewer(llm, project_map=pm))
-    reg.register(AcceptanceOracle(llm))
-    reg.register(AcceptanceGate())
-    reg.register(AcceptanceCritic(llm))
     reg.register(SpecConfirmGate())
     reg.register(Planner(llm, project_map=pm))
     reg.register(PlanGate())

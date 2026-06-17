@@ -14,7 +14,7 @@ from poor_code.domain.harness.nodes.execution import TaskSelector, EngGate
 from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.harness.nodes.verifier import VerifierNode
 from poor_code.domain.session.models import (
-    AcceptanceSpec, CodeContext, Cursor, Layer, Phase, Plan, Requirement,
+    CodeContext, Cursor, Layer, Phase, Plan, Requirement,
 )
 from poor_code.domain.tool.bash import BashTool
 from poor_code.domain.tool.edit import EditTool
@@ -95,7 +95,8 @@ def build_implement_loop(*, llm, cwd) -> CompiledGraph:
                              fork=fork, merge=merge, exit_branch=exit_branch,
                              phase=Phase.IMPLEMENTING)
     # Node I/O contract for the top-level coverage check: the loop cannot start without
-    # a Plan (task_selector), and its implementer/verifier consume the binding spec.
-    compiled.requires = (Plan, Requirement, CodeContext, AcceptanceSpec)
+    # a Plan (task_selector); the implementer/verifier ground 'done' on the Requirement
+    # (the acceptance oracle/spec was removed — verifier falls back to req.acceptance).
+    compiled.requires = (Plan, Requirement, CodeContext)
     compiled.produces = ()
     return compiled

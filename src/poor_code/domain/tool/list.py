@@ -29,8 +29,12 @@ class ListTool:
     async def execute(self, args: ListParams, ctx: ToolContext) -> ExecuteResult:
         if ctx.cancel.is_set():
             raise asyncio.CancelledError
+        # Directory I/O off the event loop so it never freezes the TUI (the harness
+        # drives nodes on Textual's loop).
+        return await asyncio.to_thread(self._list, args, ctx.cwd)
 
-        target = resolve_within_cwd(ctx.cwd, args.path)
+    def _list(self, args: ListParams, cwd) -> ExecuteResult:
+        target = resolve_within_cwd(cwd, args.path)
         if not target.is_dir():
             raise NotADirectoryError(args.path)
 

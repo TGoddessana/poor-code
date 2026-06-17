@@ -58,3 +58,53 @@ async def test_read_honors_cancel(tmp_path):
     ctx.cancel.set()
     with pytest.raises(asyncio.CancelledError):
         await tool.execute(ReadParams(path="x.txt"), ctx)
+
+
+# --- read dedup against a session ReadCache (Claude Code's readFileState) ---
+from poor_code.domain.tool.read import FILE_UNCHANGED_STUB
+from poor_code.domain.tool.read_cache import ReadCache
+
+
+def _ctx_cached(cwd: Path, cache: ReadCache) -> ToolContext:
+    return ToolContext(turn_id="T", cancel=asyncio.Event(), cwd=cwd, ask=allow_all,
+                       read_cache=cache)
+
+
+@pytest.mark.asyncio
+async def test_read_dedups_unchanged_file(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("line one\nline two\n")
+    tool = ReadTool()
+    cache = ReadCache()
+    first = await tool.execute(ReadParams(path="a.txt"), _ctx_cached(tmp_path, cache))
+    assert first.output == "     1\tline one\n     2\tline two\n"
+    # identical re-read of the unchanged file → stub, not the body again
+    second = await tool.execute(ReadParams(path="a.txt"), _ctx_cached(tmp_path, cache))
+    assert second.output == FILE_UNCHANGED_STUB
+
+
+@pytest.mark.asyncio
+async def test_read_rereads_when_file_changed(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("old\n")
+    tool = ReadTool()
+    cache = ReadCache()
+    await tool.execute(ReadParams(path="a.txt"), _ctx_cached(tmp_path, cache))
+    # mutate the file → mtime changes → the cache entry is stale → full re-read
+    import os, time
+    f.write_text("new content\n")
+    os.utime(f, ns=(time.time_ns(), time.time_ns() + 1_000_000))  # force a distinct mtime
+    again = await tool.execute(ReadParams(path="a.txt"), _ctx_cached(tmp_path, cache))
+    assert again.output == "     1\tnew content\n"
+
+
+@pytest.mark.asyncio
+async def test_read_different_range_is_not_a_hit(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("\n".join(f"L{i}" for i in range(1, 6)) + "\n")
+    tool = ReadTool()
+    cache = ReadCache()
+    await tool.execute(ReadParams(path="a.txt", start=1, limit=2), _ctx_cached(tmp_path, cache))
+    # a different slice of the same file must read for real, not return the stub
+    other = await tool.execute(ReadParams(path="a.txt", start=3, limit=2), _ctx_cached(tmp_path, cache))
+    assert other.output == "     3\tL3\n     4\tL4\n"

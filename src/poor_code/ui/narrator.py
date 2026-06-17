@@ -11,7 +11,6 @@ fills NodeEntered.activity / NodeProduced.headline directly, in any language
 from __future__ import annotations
 
 from poor_code.domain.session.models import (
-    AcceptanceSpec,
     Attempt,
     ChecksObserved,
     EnvReport,
@@ -35,9 +34,6 @@ _ACTIVITY = {
     "spec_confirm_gate": "Confirming the spec with you",
     "planner": "Drafting the implementation plan",
     "plan_reviewer": "Reviewing the plan",
-    "acceptance_oracle": "Designing acceptance criteria",
-    "acceptance_critic": "Critiquing the acceptance criteria",
-    "acceptance_gate": "Checking the acceptance criteria",
     "plan_gate": "Checking the plan",
     "plan_confirm_gate": "Confirming the plan with you",
     "provisioner": "Preparing the environment",
@@ -98,23 +94,33 @@ class StaticNarrator:
         if node in ("explorer", "locator") and isinstance(out, CodeContext):
             n_files = len({r.file for r in out.candidates})
             n_tests = len(out.related_tests)
-            ground = out.grounding.value if out.grounding else "?"
             files_w = "file" if n_files == 1 else "files"
             tests_w = "test" if n_tests == 1 else "tests"
-            headline = f"Found {n_files} {files_w} · {n_tests} {tests_w} (grounding: {ground})"
-            detail = tuple(r.file for r in out.candidates[:8])
-            return headline, detail
+            headline = f"Found {n_files} {files_w} · {n_tests} {tests_w}"
+            # grounding is only meaningful when NOTHING was found — showing
+            # "(grounding: not_found)" alongside real candidates reads as a failure when
+            # the gate in fact advanced on those candidates (see gates.UnderstandingGate).
+            if not out.candidates:
+                ground = out.grounding.value if out.grounding else "?"
+                headline += f" (grounding: {ground})"
+            # Label each ref as file::symbol (not bare file) and de-dup, so many symbols of
+            # one file don't render as the same line repeated.
+            seen: set[str] = set()
+            detail: list[str] = []
+            for r in out.candidates:
+                label = r.file if r.symbol is None else f"{r.file}::{r.symbol}"
+                if label in seen:
+                    continue
+                seen.add(label)
+                detail.append(label)
+                if len(detail) >= 8:
+                    break
+            return headline, tuple(detail)
         if node == "planner" and isinstance(out, Plan):
             tasks_w = "task" if len(out.tasks) == 1 else "tasks"
             headline = f"{len(out.tasks)} {tasks_w} planned"
             detail = tuple(f"{i}. {t.title}" for i, t in enumerate(out.tasks, 1))
             return headline, detail
-        if node == "acceptance_oracle" and isinstance(out, AcceptanceSpec):
-            checks_w = "check" if len(out.checks) == 1 else "checks"
-            return (
-                f"{len(out.checks)} acceptance {checks_w} designed",
-                tuple(f"{c.criterion}: {c.command}" for c in out.checks[:5]),
-            )
         if node == "validation_runner" and isinstance(out, ValidationResult):
             status = "passed" if out.passed else "failed"
             detail = [out.command]

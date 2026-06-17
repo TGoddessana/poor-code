@@ -27,6 +27,14 @@ def test_planner_position_marks_current_and_done():
     assert "PlanGate checks your plan" in out
 
 
+def test_interviewer_after_points_to_planner_not_removed_oracle():
+    # acceptance_oracle was removed from this harness; the orientation block must not
+    # advertise it as the next stage. After the interviewer comes the planner.
+    out = render_position("interviewer", _planning_state())
+    assert "Acceptance Oracle" not in out
+    assert "Planner" in out
+
+
 def test_explorer_position_nothing_done_yet():
     state = SessionState(request=Request(raw_text="x", kind=RequestKind.ENGINEERING))
     out = render_position("explorer", state)

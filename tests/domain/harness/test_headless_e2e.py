@@ -45,11 +45,12 @@ async def test_run_headless_over_real_registry_reaches_succeeded_report(tmp_path
     assert final.report.outcome is ReportOutcome.SUCCEEDED
     # the implementer actually created the file in the work tree
     assert (tmp_path / "out.txt").read_text() == "ok"
-    # FULL_AUTO skips the human-dialogue interviewer and the LLM adequacy critic, but
-    # KEEPS the lean acceptance (oracle + gate) — the issue-grounded independent check
-    # that global_validator runs at the end. So the oracle + gate ARE entered.
-    for kept in ("acceptance_oracle", "acceptance_gate", "planner",
-                 "global_validator", "reporter"):
+    # FULL_AUTO skips the human-dialogue interviewer (and, with the acceptance
+    # oracle/gate/critic removed, there is no acceptance stage at all). The flow runs
+    # straight from understanding to planning, then the implement loop, then the
+    # finishing global_validator and reporter.
+    for kept in ("planner", "global_validator", "reporter"):
         assert kept in sink.entered, f"{kept} should run in FULL_AUTO"
-    for skipped in ("interviewer", "acceptance_critic"):
-        assert skipped not in sink.entered, f"{skipped} should be skipped in FULL_AUTO"
+    for gone in ("interviewer", "acceptance_oracle", "acceptance_gate",
+                 "acceptance_critic"):
+        assert gone not in sink.entered, f"{gone} should not run"

@@ -13,6 +13,8 @@ from typing import Any, Awaitable, Callable, Literal, Protocol, runtime_checkabl
 
 from pydantic import BaseModel
 
+from poor_code.domain.tool.read_cache import ReadCache
+
 
 @dataclass
 class ExecuteResult:
@@ -34,6 +36,8 @@ class ToolContext:
     cancel: asyncio.Event
     cwd: Path
     ask: Callable[[PermissionRequest], Awaitable[Literal["allow", "deny"]]]
+    # Session-scoped read dedup (Claude Code's readFileState). None → dedup disabled.
+    read_cache: ReadCache | None = None
 
 
 @runtime_checkable

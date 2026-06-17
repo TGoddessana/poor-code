@@ -16,7 +16,6 @@ from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
 from poor_code.domain.session.models import (
-    AcceptanceSpec,
     CodeContext,
     CodeRef,
     Dependency,
@@ -65,7 +64,7 @@ class _PlanOut(BaseModel):
 class Planner(AgentNode):
     name = "planner"
     phase = Phase.PLANNING
-    requires = (Requirement, CodeContext, AcceptanceSpec)
+    requires = (Requirement, CodeContext)
     produces = (Plan,)
 
     def __init__(self, llm: _LLMClientLike, project_map: ProjectMap) -> None:

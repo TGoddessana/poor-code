@@ -29,9 +29,14 @@ class GlobTool:
     async def execute(self, args: GlobParams, ctx: ToolContext) -> ExecuteResult:
         if ctx.cancel.is_set():
             raise asyncio.CancelledError
+        # Walking the tree is blocking I/O; run it off the event loop so a broad pattern
+        # never freezes the TUI (the harness drives nodes on Textual's loop).
+        return await asyncio.to_thread(self._find, args, ctx.cwd)
+
+    def _find(self, args: GlobParams, cwd) -> ExecuteResult:
         reject_escaping_glob(args.pattern)
 
-        root = ctx.cwd.resolve()
+        root = cwd.resolve()
         files = [p for p in root.glob(args.pattern) if p.is_file()]
         # Defensive: drop anything that resolved outside root (symlinks, etc.).
         files = [p for p in files if root == p.resolve() or root in p.resolve().parents]

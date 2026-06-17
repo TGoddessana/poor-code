@@ -13,7 +13,8 @@ from pydantic import BaseModel
 
 from poor_code.domain.harness.env_probe import probe_environment
 from poor_code.domain.harness.node import (
-    AgentNode, NodeContext, NodeResult, _DefaultHooks, _LLMClientLike, validate_output,
+    AgentNode, NodeContext, NodeResult, _DefaultHooks, _LLMClientLike, _read_cache_of,
+    validate_output,
 )
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.llm_schema import inline_refs
@@ -76,7 +77,7 @@ _EXTRACT_SYSTEM = (
     "next). Also write `summary`: ONE paragraph of ONLY what you OBSERVED — what "
     "relevant code exists and what is missing. Do NOT state what the request requires, "
     "do NOT invent data facts (sizes/formats), and do NOT propose how to validate the "
-    "result — later nodes (interviewer, acceptance_oracle, planner) own those. "
+    "result — later nodes (interviewer, planner) own those. "
     "Do NOT retype file bodies; the harness "
     "attaches what you read. Call emit_code_context once."
 )
@@ -140,7 +141,8 @@ class ExploringNode(AgentNode):
             ctx, seed_messages=seed, tools=self._tools, cwd=Path.cwd(),
             max_iterations=MAX_ITERATIONS, leak_text=False, hooks=_ExcerptHook())
         tool_ctx = ToolContext(turn_id="explore", cancel=ctx.cancel,
-                               cwd=Path.cwd(), ask=allow_all)
+                               cwd=Path.cwd(), ask=allow_all,
+                               read_cache=_read_cache_of(ctx))
         await self._pull_receivers(excerpts, tool_ctx, ctx)
         return history, tuple(excerpts.values())
 
@@ -224,6 +226,18 @@ class ExploringNode(AgentNode):
         out = validate_output(_CodeContextOut, args_json, node=self.name)
         to_ref = lambda r: CodeRef(file=r.file, symbol=r.symbol, lineno=r.lineno)
         grounding = GroundingStatus(out.grounding)
+        def _dedup(refs: list[_CodeRefOut]) -> tuple[CodeRef, ...]:
+            # Weak models re-emit the same (file, symbol) candidate several times; collapse
+            # them so a single file does not flood candidates with identical refs.
+            seen: set[tuple[str, str | None, int | None]] = set()
+            out_refs: list[CodeRef] = []
+            for r in refs:
+                k = (r.file, r.symbol, r.lineno)
+                if k in seen:
+                    continue
+                seen.add(k)
+                out_refs.append(to_ref(r))
+            return tuple(out_refs)
         # Deterministic safety net: an empty working tree (no files in the project
         # map) with no candidates is unambiguously greenfield, whatever the model
         # guessed. The model kept labelling an empty repo 'not_found', which made
@@ -232,9 +246,9 @@ class ExploringNode(AgentNode):
                 and grounding is GroundingStatus.NOT_FOUND):
             grounding = GroundingStatus.GREENFIELD
         return CodeContext(
-            candidates=tuple(to_ref(r) for r in out.candidates),
-            confusers=tuple(to_ref(r) for r in out.confusers),
-            related_tests=tuple(to_ref(r) for r in out.related_tests),
+            candidates=_dedup(out.candidates),
+            confusers=_dedup(out.confusers),
+            related_tests=_dedup(out.related_tests),
             search_notes=out.search_notes,
             grounding=grounding,
             summary=out.summary,
