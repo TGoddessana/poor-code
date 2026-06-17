@@ -287,3 +287,57 @@ async def test_oracle_authored_test_is_surfaced_as_evidence():
     # the oracle's authored test appears as runnable evidence (not as a binding floor)
     assert "11.429" in prompt
     assert "evidence" in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_observe_runs_tools_in_node_cwd_and_no_leak(tmp_path):
+    from pydantic import BaseModel
+    from poor_code.domain.harness.node import NodeContext
+    from poor_code.domain.session.models import SessionState
+    from poor_code.domain.tool.registry import ToolRegistry
+    from poor_code.provider.events import (
+        TextDelta, ToolCallStarted, ToolCallInputDelta, ToolCallEnded, FinishedReason)
+
+    seen = {}
+
+    class _BashArgs(BaseModel):
+        command: str = ""
+
+    class _BashStub:
+        id = "bash"; description = "x"; params = _BashArgs
+        async def execute(self, args, ctx):
+            seen["cwd"] = ctx.cwd
+            class R: output = "ran"
+            return R()
+
+    class _LLM:
+        def __init__(self): self.round = 0
+        async def stream(self, messages, tools, response_format=None):
+            self.round += 1
+            if self.round == 1:
+                yield TextDelta(text="secret reasoning")
+                yield ToolCallStarted(call_id="b1", name="bash")
+                yield ToolCallInputDelta(call_id="b1", json_delta='{"command":"ls"}')
+                yield ToolCallEnded(call_id="b1")
+                yield FinishedReason(reason="tool_calls")
+            else:
+                yield FinishedReason(reason="stop")
+
+    class _Sink:
+        def __init__(self): self.text = []
+        def node_thinking_delta(self, name, t): self.text.append(t)
+        def tool_started(self, *a, **k): ...
+        def tool_finished(self, *a, **k): ...
+        def tool_failed(self, *a, **k): ...
+        def node_context(self, *a, **k): ...
+
+    node = VerifierNode(_LLM(), cwd=tmp_path, tools=ToolRegistry([_BashStub()]))
+    sink = _Sink()
+    state = _state()
+    ctx = NodeContext(state=state, cancel=asyncio.Event(), sink=sink)
+
+    task = state.plan.tasks[0]
+    history = await node._observe(ctx, task)
+    assert seen["cwd"] == tmp_path
+    assert sink.text == []
+    assert any(m["role"] == "tool" for m in history)
