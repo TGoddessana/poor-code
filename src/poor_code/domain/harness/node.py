@@ -380,17 +380,6 @@ class AgentNode:
         args_json = await self._dispatch(ctx)
         return NodeResult(output=self.parse(args_json))
 
-    def _response_format(self) -> dict[str, Any]:
-        """Force schema-valid JSON output via response_format. The provider only
-        attaches it when the route declares the capability (e.g. ollama_cloud);
-        otherwise it is dropped and tool-calling remains the channel. The schema
-        is the output tool's already-inlined parameters, so a model that would
-        otherwise reply with prose is constrained to emit the structured object —
-        which then arrives as message content rather than a tool call."""
-        fn = self.output_tool()["function"]
-        return {"type": "json_schema",
-                "json_schema": {"name": fn["name"], "schema": fn.get("parameters", {})}}
-
     async def _roll_structured(
         self, ctx: NodeContext, *, tool: dict[str, Any],
         model_cls: "type[BaseModel] | None", extra_messages: list[dict] | None = None,
