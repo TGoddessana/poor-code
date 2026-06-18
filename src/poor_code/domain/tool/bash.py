@@ -66,11 +66,18 @@ class BashTool:
             cwd=str(ctx.cwd),
             start_new_session=True,
         )
+        # Capture the process-GROUP id NOW, while the shell leader is alive. With
+        # start_new_session the leader's pid IS the pgid. We must NOT look it up later via
+        # getpgid(proc.pid): the `server & curl` pattern backgrounds the server and lets the
+        # shell EXIT immediately, so by timeout-time the leader is gone and getpgid fails —
+        # leaving the orphaned server holding the pipe and re-blocking the read forever. The
+        # group id stays valid (and killpg reaches the live orphan) as long as any member lives.
+        pgid = proc.pid
 
         # Read the combined output in its own task. We wait on (read OR cancel) with a
         # timeout; we never rely on CANCELLING the read (that is what hung). On timeout/cancel
         # we kill the group FIRST, which closes the pipe, so the read then completes promptly
-        # with whatever was buffered.
+        # with whatever was buffered (bounded by a short grace drain as a backstop).
         read_task = asyncio.create_task(proc.stdout.read())
         cancel_task = asyncio.create_task(ctx.cancel.wait())
         timed_out = False
@@ -79,23 +86,25 @@ class BashTool:
                 {read_task, cancel_task}, timeout=args.timeout,
                 return_when=asyncio.FIRST_COMPLETED)
             if cancel_task in done:
-                self._killpg(proc)
-                with suppress(BaseException):
-                    await read_task
+                self._killpg(pgid)
+                await self._drain(read_task)
                 with suppress(Exception):
                     await proc.wait()
                 raise asyncio.CancelledError
             if read_task not in done:          # neither finished in time → timeout
                 timed_out = True
-                self._killpg(proc)             # closes the pipe so the read can finish
-            stdout_bytes = await read_task
+                self._killpg(pgid)             # closes the pipe so the read can finish
+                stdout_bytes = await self._drain(read_task)
+            else:
+                stdout_bytes = read_task.result()
         finally:
             cancel_task.cancel()
             with suppress(asyncio.CancelledError):
                 await cancel_task
 
-        await proc.wait()
-        exit_code = 124 if timed_out else proc.returncode
+        with suppress(Exception):
+            await asyncio.wait_for(proc.wait(), timeout=2)
+        exit_code = 124 if timed_out else (proc.returncode if proc.returncode is not None else 124)
 
         output = stdout_bytes.decode("utf-8", errors="replace")
         truncated = len(output) > _OUTPUT_LIMIT
@@ -120,15 +129,24 @@ class BashTool:
         )
 
     @staticmethod
-    def _killpg(proc: asyncio.subprocess.Process) -> None:
-        """SIGKILL the command's whole process group (it was started with its own session),
-        so a server plus any workers/grandchildren that inherited the pipe all die. Falls
-        back to killing just the child if the group is already gone."""
+    def _killpg(pgid: int) -> None:
+        """SIGKILL the command's whole process group (started in its own session, so pgid is
+        the leader pid captured at spawn). Reaches a backgrounded/orphaned server plus any
+        workers that inherited the pipe — even after the shell leader itself has exited."""
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(pgid, signal.SIGKILL)
+
+    @staticmethod
+    async def _drain(read_task: "asyncio.Task[bytes]", grace: float = 2.0) -> bytes:
+        """Await the (post-kill) read for whatever is buffered, bounded by a short grace so a
+        stray surviving writer can never re-block us. Returns b'' if even that times out."""
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            with suppress(ProcessLookupError):
-                proc.kill()
+            return await asyncio.wait_for(asyncio.shield(read_task), timeout=grace)
+        except asyncio.TimeoutError:
+            read_task.cancel()
+            with suppress(BaseException):
+                await read_task
+            return b""
 
     async def _run_background(self, args: BashParams, ctx: ToolContext) -> ExecuteResult:
         """Launch detached (its own session) and return immediately with pid + early

@@ -81,6 +81,22 @@ async def test_bash_timeout_kills_child_holding_pipe(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_bash_timeout_kills_orphan_after_shell_exit(tmp_path):
+    # The 'server & curl' pattern: the shell BACKGROUNDS a server with '&' and then the
+    # foreground part finishes, so the shell EXITS immediately while the orphaned server
+    # keeps the stdout pipe open. The group must still be killed by the pgid captured at
+    # spawn (not via getpgid on the now-dead shell leader), else the read re-blocks forever.
+    tool = BashTool()
+    loop = asyncio.get_event_loop()
+    t0 = loop.time()
+    result = await asyncio.wait_for(
+        tool.execute(BashParams(command="sleep 30 & echo started", timeout=1), _ctx(tmp_path)),
+        timeout=10)
+    assert loop.time() - t0 < 6
+    assert result.metadata["exit_code"] == 124
+
+
+@pytest.mark.asyncio
 async def test_bash_timeout_preserves_partial_output(tmp_path):
     # Output printed before the timeout must survive (the agent needs the startup logs to
     # see WHY it hung), alongside the 124 timeout marker.
