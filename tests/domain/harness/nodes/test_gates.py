@@ -29,11 +29,24 @@ async def test_advances_when_greenfield_even_without_candidates():
 
 
 @pytest.mark.asyncio
-async def test_repairs_when_not_found_without_candidates():
+async def test_repairs_when_not_found_without_candidates_or_notes():
+    # Degenerate: not_found, no candidates, AND no diagnosis written → the exploration
+    # produced nothing to act on, so re-search once.
     cc = CodeContext(candidates=(), grounding=GroundingStatus.NOT_FOUND)
     res = await UnderstandingGate().run(_ctx(SessionState(understanding=cc)))
     assert res.verdict.kind is VerdictKind.REPAIR
     assert res.verdict.layer is Layer.UNDERSTANDING
+
+
+@pytest.mark.asyncio
+async def test_trust_mode_advances_on_not_found_with_search_notes():
+    # Trust mode: the Explorer searched, found no candidates, but wrote a diagnosis —
+    # that IS a terminal judgment ("I looked enough; here's what I saw"). Advance instead
+    # of second-guessing; downstream nodes (the implementer) already consume search_notes.
+    cc = CodeContext(candidates=(), grounding=GroundingStatus.NOT_FOUND,
+                     search_notes="searched stream/close handlers; none matched reconnect")
+    res = await UnderstandingGate().run(_ctx(SessionState(understanding=cc)))
+    assert res.verdict.kind is VerdictKind.ADVANCE
 
 
 @pytest.mark.asyncio
@@ -164,16 +177,6 @@ async def test_plan_gate_allows_two_repairs_before_escalating():
     # 2 prior bounces → ESCALATE
     res2 = await PlanGate().run(_ctx(SessionState(plan=Plan(), history=(one, one))))
     assert res2.verdict.kind is VerdictKind.ESCALATE
-
-
-@pytest.mark.asyncio
-async def test_understanding_gate_repair_hint_uses_search_notes():
-    state = SessionState(understanding=CodeContext(
-        candidates=(), search_notes="grep reconnect 0건; try stream/close"))
-    res = await UnderstandingGate().run(_ctx(state))
-    assert res.verdict.kind is VerdictKind.REPAIR
-    assert res.verdict.layer is Layer.UNDERSTANDING
-    assert "stream/close" in res.verdict.hint
 
 
 @pytest.mark.asyncio

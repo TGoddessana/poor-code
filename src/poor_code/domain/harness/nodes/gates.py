@@ -12,9 +12,13 @@ from poor_code.domain.session.models import (
 
 
 class UnderstandingGate(GateNode):
-    """Guards the understanding layer: a CodeContext with no candidates means the
-    Locator found nothing groundable. Bounce back to it once (repair); if a prior
-    gate bounce already happened and we still have nothing, escalate to the user."""
+    """Guards the understanding layer in TRUST MODE: the Explorer decides when it has
+    searched enough, and any terminal judgment it returns is honoured — candidates found,
+    a greenfield call, OR a written search_notes diagnosis ("I looked; here's what I saw")
+    all advance. Only a content-free result (no candidates, not greenfield, no notes) is
+    treated as a degenerate/failed exploration worth ONE re-search; a second empty pass
+    escalates. search_notes is NOT discarded on advance — the implementer consumes it as
+    an UNVERIFIED note, so a not_found-with-diagnosis flows forward instead of bouncing."""
 
     name = "understanding_gate"
     layer = Layer.UNDERSTANDING
@@ -25,9 +29,10 @@ class UnderstandingGate(GateNode):
 
     def check(self, state) -> str | None:
         cc = state.understanding or CodeContext()
-        if cc.candidates or cc.grounding is GroundingStatus.GREENFIELD:
+        if (cc.candidates or cc.grounding is GroundingStatus.GREENFIELD
+                or cc.search_notes.strip()):
             return None
-        return cc.search_notes.strip() or "Explorer found no candidates; widen the search."
+        return "Explorer produced no candidates and no diagnosis; widen the search."
 
     def escalate_query(self, hint: str) -> str:
         return "No code candidates found even after re-exploring."
