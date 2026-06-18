@@ -44,6 +44,12 @@ class E2ELLM:
                       "checks": [{"criterion": "out.txt exists",
                                   "observed": "ran `test -f out.txt`, exit 0",
                                   "satisfied": True}]},
+            # global_validator v2: the whole-build 'assess_build' verdict. Default-advance
+            # when no cross-task regression is observed.
+            "assess_build": {"verdict": "advance", "hint": "", "culprit_task_id": "",
+                             "checks": [{"criterion": "out.txt exists",
+                                         "observed": "ran `test -f out.txt`, exit 0",
+                                         "satisfied": True}]},
             "decide": {"verdict": "done", "reason": "out.txt exists"},
         }
         if name == "write":  # implementer tool loop

@@ -69,12 +69,16 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
     reg.register(Provisioner(
         llm, cwd=project_map.cwd,
         tools=ToolRegistry([BashTool(), ReadTool(), ListTool(), GlobTool(), GrepTool()])))
-    # The whole task-execution loop (task_selector→composer→implementer→eng_gate→
-    # validator→validation_runner→{completion_gate|failure_analyst}→…) is folded into
-    # ONE subgraph node. Its 8 inner nodes are registered inside the subgraph, not here.
+    # The whole task-execution loop (task_selector→composer→implementer→verifier) is
+    # folded into ONE subgraph node. Its inner nodes are registered inside the subgraph,
+    # not here. (eng_gate was removed: its git-diff "no patch" floor false-abandoned
+    # git-invisible work; the observing Verifier owns done-ness now.)
     from poor_code.domain.harness.subgraphs.implement_loop import build_implement_loop
     reg.register(build_implement_loop(llm=llm, cwd=project_map.cwd))
-    reg.register(GlobalValidator(llm, cwd=project_map.cwd))
+    # global_validator v2: a whole-build observation-grounded finishing validator (drives
+    # the integrated system, hunts cross-task regressions) — gets observe-only tools.
+    from poor_code.domain.harness.nodes.global_validator import observe_tools
+    reg.register(GlobalValidator(llm, cwd=project_map.cwd, tools=observe_tools()))
     reg.register(Reporter())
     if agent is not None:
         reg.register(FastPathNode(agent))
