@@ -4,7 +4,9 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import signal
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -50,35 +52,50 @@ class BashTool:
         if args.background:
             return await self._run_background(args, ctx)
 
+        # start_new_session=True puts the command in its OWN process group, so on timeout
+        # or cancel we can SIGKILL the whole group (os.killpg) — not just the direct child.
+        # That is the crux: a server (python3 app.py / nginx) keeps the stdout pipe open and
+        # forks workers that inherit it; killing only the shell leaves the pipe open, so a
+        # read/communicate never reaches EOF and the timeout effectively never fires (the old
+        # wait_for(communicate()) only returned when the process exited on its own — never,
+        # for a server — freezing the agent until the outer harness timeout).
         proc = await asyncio.create_subprocess_shell(
             args.command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=str(ctx.cwd),
+            start_new_session=True,
         )
 
-        async def _wait_cancel() -> None:
-            await ctx.cancel.wait()
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-
-        cancel_task = asyncio.create_task(_wait_cancel())
+        # Read the combined output in its own task. We wait on (read OR cancel) with a
+        # timeout; we never rely on CANCELLING the read (that is what hung). On timeout/cancel
+        # we kill the group FIRST, which closes the pipe, so the read then completes promptly
+        # with whatever was buffered.
+        read_task = asyncio.create_task(proc.stdout.read())
+        cancel_task = asyncio.create_task(ctx.cancel.wait())
+        timed_out = False
         try:
-            try:
-                stdout_bytes, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=args.timeout
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                raise TimeoutError(f"command timed out after {args.timeout}s")
+            done, _ = await asyncio.wait(
+                {read_task, cancel_task}, timeout=args.timeout,
+                return_when=asyncio.FIRST_COMPLETED)
+            if cancel_task in done:
+                self._killpg(proc)
+                with suppress(BaseException):
+                    await read_task
+                with suppress(Exception):
+                    await proc.wait()
+                raise asyncio.CancelledError
+            if read_task not in done:          # neither finished in time → timeout
+                timed_out = True
+                self._killpg(proc)             # closes the pipe so the read can finish
+            stdout_bytes = await read_task
         finally:
             cancel_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cancel_task
 
-        if ctx.cancel.is_set():
-            raise asyncio.CancelledError
+        await proc.wait()
+        exit_code = 124 if timed_out else proc.returncode
 
         output = stdout_bytes.decode("utf-8", errors="replace")
         truncated = len(output) > _OUTPUT_LIMIT
@@ -88,15 +105,30 @@ class BashTool:
         suffix_parts = []
         if truncated:
             suffix_parts.append(f"[output truncated to {_OUTPUT_LIMIT} chars]")
-        suffix_parts.append(f"[exit {proc.returncode}]")
+        if timed_out:
+            suffix_parts.append(
+                f"[command timed out after {args.timeout}s — killed. If this is a server or "
+                f"other long-lived process, relaunch it with background=true.]")
+        suffix_parts.append(f"[exit {exit_code}]")
         suffix = "\n\n" + "\n".join(suffix_parts)
 
         title = args.command if len(args.command) <= 80 else args.command[:77] + "..."
         return ExecuteResult(
             title=title,
             output=output + suffix,
-            metadata={"exit_code": proc.returncode},
+            metadata={"exit_code": exit_code},
         )
+
+    @staticmethod
+    def _killpg(proc: asyncio.subprocess.Process) -> None:
+        """SIGKILL the command's whole process group (it was started with its own session),
+        so a server plus any workers/grandchildren that inherited the pipe all die. Falls
+        back to killing just the child if the group is already gone."""
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            with suppress(ProcessLookupError):
+                proc.kill()
 
     async def _run_background(self, args: BashParams, ctx: ToolContext) -> ExecuteResult:
         """Launch detached (its own session) and return immediately with pid + early
