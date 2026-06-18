@@ -402,9 +402,12 @@ def test_build_registry_has_code_nodes():
     loop = reg.get("implement_loop")
     assert loop is not None
     inner = loop._graph.nodes
-    for n in ("task_selector", "eng_gate", "verifier"):
+    for n in ("task_selector", "verifier"):
         assert inner.get(n) is not None
         assert inner.get(n).name == n
+    # eng_gate removed from the live loop (its git-diff "no patch" floor false-abandoned
+    # git-invisible work); the implementer now flows straight to the observing Verifier.
+    assert inner.get("eng_gate") is None
 
 
 @pytest.mark.asyncio

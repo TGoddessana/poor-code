@@ -10,7 +10,7 @@ from pathlib import Path
 from poor_code.domain.harness.graph import CompiledGraph, EdgeTable, Graph
 from poor_code.domain.harness.registry import NodeRegistry
 from poor_code.domain.harness.nodes.composer import Composer
-from poor_code.domain.harness.nodes.execution import TaskSelector, EngGate
+from poor_code.domain.harness.nodes.execution import TaskSelector
 from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.harness.nodes.verifier import VerifierNode
 from poor_code.domain.session.models import (
@@ -30,13 +30,20 @@ from poor_code.domain.tool.registry import ToolRegistry
 # observation-grounded adversarial Verifier (nodes/verifier.py). It drives+observes the
 # work and emits the completion verdict directly — there is no model-authored bash
 # acceptance command run as an absolute floor anymore.
+# eng_gate REMOVED from the live loop: its only firing check was a git-diff "Attempt has
+# no patch" floor, which false-abandoned work git cannot represent (a permission-only
+# chmod, an out-of-work-tree write, a non-file side effect — git's tree records only the
+# exec bit). Its other check (forbidden-path) was dead — the planner never populates
+# edit_scope.forbidden. So gating on the reconstructed patch only ever rejected correct
+# work; the Verifier judges from REAL disk behaviour instead, which git-invisibility
+# cannot fool. (The EngGate class is kept for skeleton tests, like ValidationRunner /
+# CompletionGate — it is simply no longer wired here.)
 # DRIFT WARNING: these rows are internal to this subgraph; route.FORWARD does not carry
 # them. Change an execution-layer edge HERE.
 _INNER_FORWARD = {
     ("task_selector", "task"): "composer",
     ("composer", None): "implementer",
-    ("implementer", None): "eng_gate",
-    ("eng_gate", None): "verifier",
+    ("implementer", None): "verifier",
     ("verifier", "done"): "task_selector",
 }
 
@@ -66,7 +73,6 @@ def build_implement_loop(*, llm, cwd) -> CompiledGraph:
     reg.register(TaskSelector())
     reg.register(Composer())
     reg.register(Implementer(llm, cwd=cwd, tools=_implementer_tools()))
-    reg.register(EngGate())
     # Verification v2: one observation-grounded adversarial verifier replaces the whole
     # validator→validation_runner→failure_analyst→completion_judge bash-check chain.
     reg.register(VerifierNode(llm, cwd=cwd, tools=_verifier_tools()))

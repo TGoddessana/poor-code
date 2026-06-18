@@ -10,10 +10,15 @@ def test_implement_loop_inner_topology():
     assert fwd[("task_selector", "task")] == "composer"
     assert ("task_selector", "done") not in fwd       # done exits the subgraph (forward miss)
     assert fwd[("composer", None)] == "implementer"
-    assert fwd[("implementer", None)] == "eng_gate"
-    # Verification v2: the bash-check chain is replaced by a single observe-judge Verifier.
-    assert fwd[("eng_gate", None)] == "verifier"
+    # eng_gate removed: its only live effect was a git-diff "Attempt has no patch" floor
+    # that false-abandoned git-invisible work (chmod/out-of-tree). The implementer now
+    # flows straight to the observation-grounded Verifier, which judges from real disk
+    # behaviour rather than the reconstructed patch.
+    assert fwd[("implementer", None)] == "verifier"
     assert fwd[("verifier", "done")] == "task_selector"
+    # eng_gate is no longer wired in the live loop
+    assert ("eng_gate", None) not in fwd
+    assert ("implementer", None) != "eng_gate"
     # the old chain nodes are no longer wired in the loop
     assert ("validator", None) not in fwd
     assert ("validation_runner", "pass") not in fwd
@@ -27,8 +32,10 @@ def test_implement_loop_inner_topology():
 
 def test_implement_loop_registers_all_inner_nodes():
     cg = build_implement_loop(llm=None, cwd=".")
-    for n in ("task_selector", "composer", "implementer", "eng_gate", "verifier"):
+    for n in ("task_selector", "composer", "implementer", "verifier"):
         assert cg._graph.nodes.get(n) is not None
+    # eng_gate is removed from the live loop (no longer registered)
+    assert cg._graph.nodes.get("eng_gate") is None
 
 
 def test_implementer_has_read_and_search_tools():
