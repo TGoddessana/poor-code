@@ -20,11 +20,14 @@ from poor_code.domain.session.models import (
     CodeRef,
     Dependency,
     EditScope,
+    FileSlot,
     GroundingStatus,
     Phase,
     Plan,
     Requirement,
     SessionState,
+    Step,
+    StepKind,
     Task,
     effective_requirement,
 )
@@ -48,17 +51,46 @@ _SYSTEM = (
 )
 
 
+class _StepOut(BaseModel):
+    kind: str = "impl"          # "test" | "impl" | "run"
+    file: str = ""
+    anchor: str = ""
+    body: str = ""
+    run: str = ""
+    expected: str = ""
+
+
+class _FileSlotOut(BaseModel):
+    path: str
+    responsibility: str = ""
+
+
 class _SkeletonTaskOut(BaseModel):
     id: str
     title: str = ""
     purpose: str = ""
     editable: list[str] = []
     depends_on: list[str] = []
+    how_to_validate: str = ""
+    steps: list[_StepOut] = []
 
 
 class _PlanOut(BaseModel):
     plan_md: str = ""
+    file_plan: list[_FileSlotOut] = []
     tasks: list[_SkeletonTaskOut] = []
+
+
+_STEP_KINDS = {"test": StepKind.TEST, "impl": StepKind.IMPL, "run": StepKind.RUN}
+
+
+def _coerce_steps(raw_steps: list[_StepOut], task_id: str) -> tuple[Step, ...]:
+    out: list[Step] = []
+    for i, s in enumerate(raw_steps, start=1):
+        kind = _STEP_KINDS.get((s.kind or "impl").strip().lower(), StepKind.IMPL)
+        out.append(Step(id=f"{task_id}-s{i}", kind=kind, file=s.file, anchor=s.anchor,
+                        body=s.body, run=s.run, expected=s.expected))
+    return tuple(out)
 
 
 class Planner(AgentNode):
@@ -134,6 +166,8 @@ class Planner(AgentNode):
                 title=t.title or rid,
                 purpose=t.purpose or "",
                 edit_scope=EditScope(editable=tuple(dict.fromkeys(p for p in t.editable if p))),
+                how_to_validate=t.how_to_validate or "",
+                steps=_coerce_steps(t.steps, rid),
             )
             for t, rid in resolved
         )
@@ -146,7 +180,11 @@ class Planner(AgentNode):
             for dep in t.depends_on
             if dep
         )
-        return Plan(tasks=tasks, deps=deps, file_plan=(), plan_md=out.plan_md)
+        file_plan = tuple(
+            FileSlot(path=f.path, responsibility=f.responsibility)
+            for f in out.file_plan if f.path
+        )
+        return Plan(tasks=tasks, deps=deps, file_plan=file_plan, plan_md=out.plan_md)
 
     @staticmethod
     def _bullets(items: tuple[str, ...]) -> str:

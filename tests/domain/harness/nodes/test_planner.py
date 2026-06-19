@@ -204,8 +204,8 @@ async def test_planner_falls_back_to_request_when_requirement_absent():
 
 
 @pytest.mark.asyncio
-async def test_planner_file_plan_always_empty_in_new_schema():
-    # file_plan is no longer emitted by the model; the planner always returns file_plan=().
+async def test_planner_file_plan_empty_when_omitted():
+    # When file_plan is omitted from the payload, the planner returns file_plan=().
     llm = FakeLLM({
         "tasks": [{"id": "t1", "title": "server", "editable": ["server.py"], "depends_on": []}],
     })
@@ -262,3 +262,40 @@ async def test_planner_purpose_defaults_empty_when_omitted():
 def test_planner_system_prompt_requests_purpose():
     from poor_code.domain.harness.nodes.planner import _SYSTEM
     assert "purpose" in _SYSTEM.lower()
+
+
+@pytest.mark.asyncio
+async def test_planner_parses_thick_steps_and_file_plan():
+    payload = {
+        "plan_md": "## t1: server.py — build the fib endpoint",
+        "file_plan": [{"path": "server.py", "responsibility": "fib HTTP endpoint"}],
+        "tasks": [{
+            "id": "t1", "title": "fib endpoint",
+            "purpose": "GET /fib/10 returns 55",
+            "editable": ["server.py"], "depends_on": [],
+            "how_to_validate": "curl localhost:8000/fib/10",
+            "steps": [
+                {"kind": "test", "file": "tests/test_fib.py",
+                 "body": "def test_fib():\n    assert fib(10) == 55", "run": "", "expected": ""},
+                {"kind": "run", "file": "", "body": "",
+                 "run": "pytest tests/test_fib.py", "expected": "FAIL name 'fib'"},
+                {"kind": "impl", "file": "server.py",
+                 "body": "def fib(n):\n    a,b=0,1\n    for _ in range(n): a,b=b,a+b\n    return a",
+                 "run": "", "expected": ""},
+                {"kind": "run", "file": "", "body": "",
+                 "run": "pytest tests/test_fib.py", "expected": "1 passed"},
+            ],
+        }],
+    }
+    res = await Planner(FakeLLM(payload), project_map=_map()).run(
+        NodeContext(_state(), cancel=asyncio.Event()))
+    plan = res.output
+    from poor_code.domain.session.models import StepKind
+    t = plan.tasks[0]
+    assert t.how_to_validate == "curl localhost:8000/fib/10"
+    assert plan.file_plan[0].path == "server.py"
+    assert plan.file_plan[0].responsibility == "fib HTTP endpoint"
+    assert len(t.steps) == 4
+    assert t.steps[0].kind is StepKind.TEST and "test_fib" in t.steps[0].body
+    assert t.steps[1].kind is StepKind.RUN and t.steps[1].run == "pytest tests/test_fib.py"
+    assert t.steps[2].kind is StepKind.IMPL and "def fib" in t.steps[2].body
