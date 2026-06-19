@@ -49,7 +49,12 @@ _SYSTEM = (
     "intentionally writes NO per-task validation commands. "
     "Do NOT reject a task for an empty/absent validate field.\n"
     "If NONE hold, set ok=true. Be decisive: a single deliverable should be ONE "
-    "task with one sane probe. Call emit_plan_review once."
+    "task with one sane probe. Call emit_plan_review once.\n"
+    "Check COVERAGE: every binding acceptance criterion must map to at least one task — "
+    "flag any criterion with no owning task. "
+    "Check INTERFACE CONSISTENCY: a name a task says it CONSUMES from a sibling must be "
+    "PRODUCED (same spelling/signature) by some task in plan_md — flag mismatches like "
+    "get_user vs fetch_user. "
 )
 
 

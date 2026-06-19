@@ -169,3 +169,12 @@ def test_reviewer_prompt_drops_dead_file_plan_block():
     llm = FakeLLM({"ok": True})
     msgs = PlanReviewer(llm).build_messages(_state(_plan()))
     assert "FILE PLAN" not in msgs[-1]["content"]
+
+
+def test_reviewer_prompt_covers_acceptance_and_interfaces():
+    from poor_code.domain.harness.nodes import plan_reviewer
+    sys = (getattr(plan_reviewer, "_SYSTEM", "")
+           or getattr(plan_reviewer, "_REVIEW_SYSTEM", "")).lower()
+    assert sys, "could not find the reviewer system prompt constant"
+    assert "acceptance" in sys and ("covers" in sys or "coverage" in sys or "maps" in sys)
+    assert "consume" in sys or "produce" in sys   # interface-name consistency
