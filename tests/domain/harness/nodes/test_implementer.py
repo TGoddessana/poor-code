@@ -455,6 +455,14 @@ async def test_latest_round_keeps_big_budget_prior_demoted(tmp_path, monkeypatch
     assert last[0] == standard_len and last[1] == big_len
 
 
+def test_implementer_rule_4b_requires_failing_test_first():
+    from poor_code.domain.harness.nodes.implementer import _SYSTEM
+    low = _SYSTEM.lower()
+    assert "fail" in low and "test" in low
+    # a TEST step is written and confirmed to FAIL before the IMPL step
+    assert "before" in low
+
+
 @pytest.mark.asyncio
 async def test_noop_write_triggers_nudge_once(tmp_path):
     """A write that changes no file (tree hash unchanged) appends _NUDGE exactly once
