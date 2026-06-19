@@ -299,3 +299,14 @@ async def test_planner_parses_thick_steps_and_file_plan():
     assert t.steps[0].kind is StepKind.TEST and "test_fib" in t.steps[0].body
     assert t.steps[1].kind is StepKind.RUN and t.steps[1].run == "pytest tests/test_fib.py"
     assert t.steps[2].kind is StepKind.IMPL and "def fib" in t.steps[2].body
+
+
+def test_system_prompt_demands_thick_tdd_grounded_plan():
+    from poor_code.domain.harness.nodes.planner import _SYSTEM
+    low = _SYSTEM.lower()
+    assert "complete code" in low          # code-complete steps
+    assert "failing test" in low           # TDD: test first
+    assert "expected" in low               # run + expected per step
+    assert "file_plan" in low              # file map first
+    assert "do not" in low and ("todo" in low or "placeholder" in low)  # no placeholders
+    assert "read" in low                   # ground against files you READ
