@@ -310,3 +310,46 @@ def test_system_prompt_demands_thick_tdd_grounded_plan():
     assert "file_plan" in low              # file map first
     assert "do not" in low and ("todo" in low or "placeholder" in low)  # no placeholders
     assert "read" in low                   # ground against files you READ
+
+
+class ScriptedLLM:
+    """First stream() = grounding round (text only, no tool call → loop ends);
+    second stream() = the forced emit_plan payload."""
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = 0
+        self.seen_messages = None
+
+    async def stream(self, messages, tools, response_format=None):
+        self.seen_messages = messages
+        self.calls += 1
+        if self.calls == 1:
+            from poor_code.provider.events import TextDelta
+            yield TextDelta(text="grounded; nothing to read")
+            yield FinishedReason(reason="stop")
+            return
+        yield ToolCallStarted(call_id="c1", name=tools[0]["function"]["name"])
+        yield ToolCallInputDelta(call_id="c1", json_delta=json.dumps(self.payload))
+        yield ToolCallEnded(call_id="c1")
+        yield FinishedReason(reason="tool_calls")
+
+
+@pytest.mark.asyncio
+async def test_planner_runs_grounding_stage_then_emits():
+    from poor_code.domain.harness.nodes.planner import planner_tools
+    payload = {"plan_md": "## t1: x.py — do x",
+               "tasks": [{"id": "t1", "title": "x", "editable": ["x.py"], "depends_on": []}]}
+    llm = ScriptedLLM(payload)
+    res = await Planner(llm, project_map=_map(), tools=planner_tools()).run(
+        NodeContext(_state(), cancel=asyncio.Event()))
+    assert llm.calls == 2                      # grounding round + emit round
+    assert res.output.tasks[0].id == "t1"
+
+
+def test_planner_tools_are_read_only():
+    from poor_code.domain.harness.nodes.planner import planner_tools
+    # ToolRegistry stores tools in a dict keyed by id; iterating the dict yields keys (strings)
+    assert set(planner_tools()._tools) == {"read", "grep", "glob", "list"}
+    assert planner_tools().get("bash") is None
+    assert planner_tools().get("write") is None
+    assert planner_tools().get("edit") is None

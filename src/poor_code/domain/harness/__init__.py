@@ -19,7 +19,7 @@ from poor_code.domain.harness.nodes.gates import PlanGate, UnderstandingGate
 from poor_code.domain.harness.nodes.global_validator import GlobalValidator
 from poor_code.domain.harness.nodes.interviewer import Interviewer
 from poor_code.domain.harness.nodes.plan_reviewer import PlanReviewer
-from poor_code.domain.harness.nodes.planner import Planner
+from poor_code.domain.harness.nodes.planner import Planner, planner_tools
 from poor_code.domain.harness.nodes.provisioner import Provisioner
 from poor_code.domain.harness.nodes.reporter import Reporter
 from poor_code.domain.harness.nodes.router import Router
@@ -62,7 +62,7 @@ def build_default_registry(*, llm, project_map: ProjectMap, agent=None) -> NodeR
         llm, project_map=project_map,
         tools=ToolRegistry([ReadTool(), GrepTool(), GlobTool(), ListTool()])))
     reg.register(SpecConfirmGate())
-    reg.register(Planner(llm, project_map=project_map))
+    reg.register(Planner(llm, project_map=project_map, tools=planner_tools()))
     reg.register(PlanGate())
     reg.register(PlanReviewer(llm))
     reg.register(PlanConfirmGate())

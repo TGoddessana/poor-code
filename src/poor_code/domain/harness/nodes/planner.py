@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from poor_code.domain.harness.node import AgentNode, _LLMClientLike, validate_output
+from poor_code.domain.harness.node import AgentNode, NodeContext, NodeResult, _LLMClientLike, validate_output
 from poor_code.domain.harness.orientation import render_position
 from poor_code.domain.llm_schema import inline_refs
 from poor_code.domain.project_map.models import ProjectMap
@@ -31,8 +31,27 @@ from poor_code.domain.session.models import (
     Task,
     effective_requirement,
 )
+from poor_code.domain.tool.glob import GlobTool
+from poor_code.domain.tool.grep import GrepTool
+from poor_code.domain.tool.list import ListTool
+from poor_code.domain.tool.read import ReadTool
+from poor_code.domain.tool.registry import ToolRegistry
+
+
+def planner_tools() -> ToolRegistry:
+    """Read-only grounding toolset: the planner READS real files to ground its code,
+    but never mutates or executes (no write/edit/bash at plan time)."""
+    return ToolRegistry([ReadTool(), GrepTool(), GlobTool(), ListTool()])
+
 
 _TOOL_NAME = "emit_plan"
+
+_GROUND_SYSTEM = (
+    "You are the Planner, grounding a plan. Use read/grep/glob/list to READ the real "
+    "files you intend to touch — confirm their exact paths, signatures, and existing "
+    "patterns. Do not write or run anything. When you have read enough to write "
+    "code-complete steps grounded in what you saw, stop calling tools."
+)
 
 
 _SYSTEM = (
@@ -112,9 +131,38 @@ class Planner(AgentNode):
     requires = (Requirement, CodeContext)
     produces = (Plan,)
 
-    def __init__(self, llm: _LLMClientLike, project_map: ProjectMap) -> None:
+    def __init__(self, llm: _LLMClientLike, project_map: ProjectMap,
+                 tools: "ToolRegistry | None" = None) -> None:
         super().__init__(llm)
         self._map = project_map
+        self._tools = tools
+        self._cwd = project_map.cwd
+
+    async def _ground(self, ctx: NodeContext) -> list[dict[str, Any]]:
+        """Stage ①: read-only tool loop to ground the plan in real files. Returns the
+        observation history, which seeds the structured emit (stage ②). No tools → skip."""
+        if self._tools is None:
+            return []
+        req = effective_requirement(ctx.state)
+        seed = [
+            {"role": "system", "content": _GROUND_SYSTEM},
+            {"role": "user", "content": (
+                f"{render_position(self.name, ctx.state)}\n\n"
+                f"REQUIREMENT:\nsummary: {req.summary}\n"
+                f"acceptance:\n{self._bullets(req.acceptance)}\n\n"
+                f"CODE CONTEXT:\n{self._context_digest(ctx.state)}")},
+        ]
+        if ctx.sink is not None and hasattr(ctx.sink, "node_context"):
+            phase = ctx.state.cursor.phase.value if ctx.state.cursor else ""
+            ctx.sink.node_context(self.name, phase, seed)
+        return await self._tool_loop(
+            ctx, seed_messages=seed, tools=self._tools, cwd=self._cwd,
+            max_iterations=20, leak_text=False)
+
+    async def run(self, ctx: NodeContext) -> NodeResult:
+        history = await self._ground(ctx)
+        args_json = await self._dispatch(ctx, extra_messages=history)
+        return NodeResult(output=self.parse(args_json))
 
     def build_messages(self, state: SessionState) -> list[dict[str, Any]]:
         req = effective_requirement(state)
