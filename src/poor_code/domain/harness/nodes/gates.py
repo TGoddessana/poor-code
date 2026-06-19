@@ -4,6 +4,8 @@ The Verdict is what makes the graph *cycle*: route() turns repair(layer) into a
 back-edge to that layer's shallowest producer (design.md §6/§16/§18)."""
 from __future__ import annotations
 
+import re
+
 from poor_code.domain.harness.ledger import has_section
 from poor_code.domain.harness.node import GateNode
 from poor_code.domain.session.models import (
@@ -75,6 +77,9 @@ class PlanGate(GateNode):
         if not md.strip():
             return ("Plan has no plan_md narrative; every task needs a "
                     "'## <task id>:' section describing what to build.")
+        _PHRASE_PLACEHOLDERS = ("implement later", "fill in")
+        _COMMENT_RE = re.compile(r"#\s*(todo|tbd|fixme)\b")
+        file_paths = {f.path for f in plan.file_plan}
         for task in plan.tasks:
             if not task.edit_scope.editable:
                 return f"Task {task.id} has no editable paths."
@@ -84,19 +89,18 @@ class PlanGate(GateNode):
             if not has_section(md, task.id):  # md is non-empty (guarded above)
                 return (f"Task {task.id} is in the skeleton but not described in plan_md; "
                         f"every skeleton task must have a '## {task.id}:' section.")
-            file_paths = {f.path for f in plan.file_plan}
             if plan.file_plan:
                 for p in task.edit_scope.editable:
                     if p not in file_paths:
                         return (f"Task {task.id} edits {p!r} but it is not in file_plan; "
                                 "every editable path must have a file_plan entry.")
-            placeholders = ("todo", "tbd", "fixme", "implement later", "fill in")
             for s in task.steps:
                 if s.kind in (StepKind.TEST, StepKind.IMPL):
                     if not s.body.strip():
                         return f"Step {s.id} ({s.kind.value}) has an empty body; write the code."
                     low = s.body.lower()
-                    if any(ph in low for ph in placeholders):
+                    if (_COMMENT_RE.search(low)
+                            or any(ph in low for ph in _PHRASE_PLACEHOLDERS)):
                         return (f"Step {s.id} body contains a placeholder "
                                 "(TODO/TBD/FIXME/'implement later'); write the real code.")
                     if not s.file.strip():

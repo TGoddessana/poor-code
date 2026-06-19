@@ -1,9 +1,11 @@
 # src/poor_code/domain/harness/nodes/planner.py
 """Planner — converts a binding Requirement into bounded implementation tasks.
 
-A thin AgentNode: it does not inspect file bodies or execute tools.
-It receives Requirement as binding input and CodeContext as reference material,
-then emits a Plan through one structured-output tool call.
+Two-stage grounded design:
+  ① A read-only grounding loop (read/grep/glob/list tools) inspects real files —
+    confirms exact paths, signatures, and patterns before any code is written.
+  ② One forced structured emit (emit_plan) produces a thick, TDD-ordered Plan:
+    file_plan + per-task steps with complete code bodies + how_to_validate.
 """
 from __future__ import annotations
 

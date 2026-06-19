@@ -53,3 +53,18 @@ def test_accepts_clean_thick_plan():
 def test_no_steps_still_accepted():
     # Advisory backstop: a thin plan (no steps) must still flow (weak-model fallback).
     assert PlanGate._invalid_hint(_plan(_task(steps=()))) is None
+
+
+def test_legit_code_with_todo_identifier_not_rejected():
+    # A function named parse_todo is NOT a placeholder — it's real code.
+    task = _task(steps=(Step(id="t1-s1", kind=StepKind.IMPL, file="x.py",
+                             body="def parse_todo(line):\n    return line.startswith('TODO')"),))
+    assert PlanGate._invalid_hint(_plan(task)) is None
+
+
+def test_comment_todo_marker_is_rejected():
+    # A # TODO: comment inside a body IS a placeholder and must be rejected.
+    task = _task(steps=(Step(id="t1-s1", kind=StepKind.IMPL, file="x.py",
+                             body="def f():\n    pass  # TODO: implement"),))
+    hint = PlanGate._invalid_hint(_plan(task))
+    assert hint is not None and "t1-s1" in hint
