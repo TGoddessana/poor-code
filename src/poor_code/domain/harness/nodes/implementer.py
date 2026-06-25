@@ -19,8 +19,11 @@ from poor_code.domain.session.models import (
     Attempt, ChangeRecord, CodeContext, GroundingStatus, Phase, Plan, Requirement,
     SessionState)
 from poor_code.domain.tool.registry import ToolRegistry
+from poor_code.domain.tool.bash import BashTool, BashParams
+from poor_code.domain.tool.base import ToolContext, allow_all
 
 MAX_ITERATIONS = 50
+GATE_TIMEOUT = 120          # seconds for a deterministic RED/GREEN gate command
 # The most recent tool round is the basis for the model's NEXT decision, so it gets a
 # bigger budget; older rounds are demoted to the standard clamp to keep re-sends bounded.
 _LATEST_HEAD = 4000
@@ -268,3 +271,21 @@ class Implementer(AgentNode):
             if s.run:
                 lines.append(f"    run: {s.run}    expected: {s.expected}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _gate_command(step, task) -> str:
+        """The command whose exit code decides RED/GREEN for this step: the step's own
+        `run` if it set one, else the task's outer `how_to_validate`."""
+        return step.run.strip() or task.how_to_validate.strip()
+
+    async def _run_gate(self, command: str, ctx: NodeContext) -> int:
+        """Run a gate command in the work tree and return its exit code. Empty command →
+        0 (non-blocking pass: nothing to gate on). Reuses BashTool for the project's
+        process-group timeout/kill handling."""
+        if not command.strip():
+            return 0
+        tctx = ToolContext(turn_id=self.name, cancel=ctx.cancel,
+                           cwd=self._cwd, ask=allow_all)
+        res = await BashTool().execute(
+            BashParams(command=command, timeout=GATE_TIMEOUT), tctx)
+        return int(res.metadata.get("exit_code", 1))
