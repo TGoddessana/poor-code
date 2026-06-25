@@ -188,3 +188,76 @@ async def test_impl_step_escalates_when_no_attempt(tmp_path):
     out = await impl._drive_impl_step(state, task, step,
                                       NodeContext(state=state, cancel=asyncio.Event()))
     assert out == "escalate"
+
+
+from poor_code.domain.session.models import Verdict, VerdictKind, Layer
+
+
+class _WriteNamedThenStopLLM:
+    """Round 1: write `path` with `content`. Round 2: stop. Lets a TEST step and an IMPL
+    step in the same run create DIFFERENT files so a `test -f impl.py` gate flips."""
+    def __init__(self, path, content="x"):
+        self.calls = 0
+        self._path, self._content = path, content
+    async def stream(self, messages, tools, response_format=None):
+        from poor_code.provider.events import (
+            TextDelta, ToolCallStarted, ToolCallInputDelta, ToolCallEnded, FinishedReason)
+        self.calls += 1
+        if self.calls == 1:
+            yield ToolCallStarted(call_id="w", name="write")
+            yield ToolCallInputDelta(call_id="w",
+                json_delta='{"path":"%s","content":"%s"}' % (self._path, self._content))
+            yield ToolCallEnded(call_id="w")
+            yield FinishedReason(reason="tool_calls")
+        else:
+            yield TextDelta(text="done"); yield FinishedReason(reason="stop")
+
+
+@pytest.mark.asyncio
+async def test_run_drives_test_then_impl_and_emits_attempt(tmp_path):
+    # TEST step writes test_x.py; gate `test -f impl.py` is RED (impl absent). IMPL step
+    # writes impl.py; same gate is now GREEN. Result is a normal attempt, no verdict.
+    steps = [Step(id="s1", kind=StepKind.TEST, file="test_x.py", run="test -f impl.py"),
+             Step(id="s2", kind=StepKind.IMPL, file="impl.py", run="test -f impl.py")]
+    state = _state_with_steps(steps)
+    # one LLM that writes test_x.py on the TEST sub-loop and impl.py on the IMPL sub-loop:
+    class _SeqLLM:
+        def __init__(self): self.n = 0
+        async def stream(self, messages, tools, response_format=None):
+            from poor_code.provider.events import (
+                TextDelta, ToolCallStarted, ToolCallInputDelta, ToolCallEnded, FinishedReason)
+            blob = " ".join(m["content"] for m in messages)
+            self.n += 1
+            target = "test_x.py" if "kind=test" in blob else "impl.py"
+            if "STEP [" in blob and self.n % 2 == 1:
+                yield ToolCallStarted(call_id="w", name="write")
+                yield ToolCallInputDelta(call_id="w",
+                    json_delta='{"path":"%s","content":"y"}' % target)
+                yield ToolCallEnded(call_id="w")
+                yield FinishedReason(reason="tool_calls")
+            else:
+                yield TextDelta(text="done"); yield FinishedReason(reason="stop")
+    impl = _impl(tmp_path, llm=_SeqLLM())
+    res = await impl.run(NodeContext(state=state, cancel=asyncio.Event()))
+    assert (tmp_path / "test_x.py").exists() and (tmp_path / "impl.py").exists()
+    assert res.verdict is None
+    assert res.output is not None and "impl.py" in res.output.patch.files
+
+
+@pytest.mark.asyncio
+async def test_run_emits_repair_plan_when_impl_cannot_go_green(tmp_path):
+    steps = [Step(id="s1", kind=StepKind.IMPL, file="impl.py", run="false")]
+    state = _state_with_steps(steps)
+    impl = _impl(tmp_path, llm=_WriteNamedThenStopLLM("impl.py"))
+    res = await impl.run(NodeContext(state=state, cancel=asyncio.Event()))
+    assert res.verdict is not None
+    assert res.verdict.kind is VerdictKind.REPAIR and res.verdict.layer is Layer.PLAN
+
+
+@pytest.mark.asyncio
+async def test_run_falls_back_to_free_loop_when_no_steps(tmp_path):
+    from tests.domain.harness.nodes.test_implementer import _state, _WriteThenStopLLM
+    impl = _impl(tmp_path, llm=_WriteThenStopLLM())
+    res = await impl.run(NodeContext(state=_state(), cancel=asyncio.Event()))
+    assert (tmp_path / "out.txt").read_text() == "hi"   # existing free-loop behavior intact
+    assert res.verdict is None and res.output is not None

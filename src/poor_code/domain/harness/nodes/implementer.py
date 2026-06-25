@@ -17,8 +17,8 @@ from poor_code.domain.harness.snapshot import GitSnapshot, default_git_dir
 from poor_code.domain.harness.steering import driver_feedback_block, steering_block
 from poor_code.domain.harness.tool_output import clamp_tool_output
 from poor_code.domain.session.models import (
-    Attempt, ChangeRecord, CodeContext, GroundingStatus, Phase, Plan, Requirement,
-    SessionState)
+    Attempt, ChangeRecord, CodeContext, GroundingStatus, Layer, Phase, Plan,
+    Requirement, SessionState, Verdict, VerdictKind)
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.domain.tool.bash import BashTool, BashParams
 from poor_code.domain.tool.base import ToolContext, allow_all
@@ -152,10 +152,21 @@ class Implementer(AgentNode):
         if task.id not in self._baselines:
             self._baselines[task.id] = await self._snapshot.baseline()
 
-        await self._loop(state, task, ctx)
+        if task.steps:
+            escalate = await self._drive_steps(state, task, ctx)
+        else:
+            await self._loop(state, task, ctx)
+            escalate = False
 
         completion = SideEffectCompletion(extract=self._extract_attempt(task))
-        return await completion.extract_async(ctx)
+        result = await completion.extract_async(ctx)
+        if escalate:
+            return NodeResult(
+                output=result.output,
+                verdict=Verdict(kind=VerdictKind.REPAIR, layer=Layer.PLAN,
+                                hint="An IMPL step could not be made to pass its gate; "
+                                     "the plan/decomposition is suspect — re-plan."))
+        return result
 
     def _extract_attempt(self, task):
         async def _extract(ctx):
@@ -326,6 +337,24 @@ class Implementer(AgentNode):
             ctx, seed_messages=seed, tools=self._tools, cwd=self._cwd,
             max_iterations=STEP_MAX_ITERATIONS, leak_text=False,
             hooks=_ImplementerHooks(self._snapshot))
+
+    async def _drive_steps(self, state, task, ctx: NodeContext) -> bool:
+        """Run each plan step in order with its deterministic gate. TEST → RED gate
+        (retry-then-skip); IMPL → GREEN gate (retry-then-escalate/best-effort); RUN →
+        execute only. Returns True if any IMPL step asked to escalate to repair_plan."""
+        escalate = False
+        for step in task.steps:
+            kind = step.kind.value
+            if kind == "test":
+                await self._drive_test_step(state, task, step, ctx)
+            elif kind == "impl":
+                outcome = await self._drive_impl_step(state, task, step, ctx)
+                if outcome == "escalate":
+                    escalate = True
+                    break          # plan is suspect; stop driving and bounce upstream
+            else:                  # run
+                await self._run_gate(self._gate_command(step, task), ctx)
+        return escalate
 
     async def _drive_test_step(self, state, task, step, ctx: NodeContext) -> str:
         """Author the test, then require the gate to FAIL (RED). A passing gate means the
