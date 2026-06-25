@@ -105,7 +105,9 @@ async def test_test_step_skipped_when_test_is_vacuous(tmp_path):
     # gate `true` always passes → the test is vacuous (green before impl). After the cap of
     # re-authoring attempts the driver gives up on this test and skips it.
     from tests.domain.harness.nodes.test_implementer import _WriteThenStopLLM
-    impl = _impl(tmp_path, llm=_WriteThenStopLLM())
+    from poor_code.domain.harness.nodes.implementer import STEP_REPAIR_CAP
+    llm = _WriteThenStopLLM()
+    impl = _impl(tmp_path, llm=llm)
     await impl._snapshot.init()
     state = _state_with_steps([])
     task = state.plan.tasks[0]
@@ -113,3 +115,7 @@ async def test_test_step_skipped_when_test_is_vacuous(tmp_path):
     out = await impl._drive_test_step(state, task, step,
                                       NodeContext(state=state, cancel=asyncio.Event()))
     assert out == "skipped"
+    # Assert the retry loop actually ran STEP_REPAIR_CAP times: each _author_step invocation
+    # drives the sub-loop for stream calls (round 1 writes, round 2+ stops). The loop runs
+    # the full cap, so calls should be >= STEP_REPAIR_CAP (at minimum 1 call per iteration).
+    assert llm.calls >= STEP_REPAIR_CAP
