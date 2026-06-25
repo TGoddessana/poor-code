@@ -325,3 +325,18 @@ class Implementer(AgentNode):
             ctx, seed_messages=seed, tools=self._tools, cwd=self._cwd,
             max_iterations=STEP_MAX_ITERATIONS, leak_text=False,
             hooks=_ImplementerHooks(self._snapshot))
+
+    async def _drive_test_step(self, state, task, step, ctx: NodeContext) -> str:
+        """Author the test, then require the gate to FAIL (RED). A passing gate means the
+        test asserts nothing new (vacuous) — re-author with that feedback up to the cap,
+        then SKIP the test rather than abandon otherwise-correct work."""
+        cmd = self._gate_command(step, task)
+        feedback = ""
+        for _ in range(STEP_REPAIR_CAP):
+            await self._author_step(state, task, step, ctx, feedback)
+            if await self._run_gate(cmd, ctx) != 0:
+                return "red"
+            feedback = ("Your test PASSED before any implementation exists, so it asserts "
+                        "nothing new. Rewrite it to assert the behavior that does not exist "
+                        "yet, so it FAILS now.")
+        return "skipped"

@@ -83,3 +83,33 @@ async def test_author_step_writes_file_to_tree(tmp_path):
     await impl._author_step(SessionState(), task, step, NodeContext(
         state=SessionState(), cancel=asyncio.Event()))
     assert (tmp_path / "out.txt").read_text() == "data"
+
+
+@pytest.mark.asyncio
+async def test_test_step_red_when_gate_fails(tmp_path):
+    # gate `test -f impl.py` fails (RED) because impl.py is absent — the correct TDD state
+    # after writing only a test.
+    from tests.domain.harness.nodes.test_implementer import _WriteThenStopLLM
+    impl = _impl(tmp_path, llm=_WriteThenStopLLM())
+    await impl._snapshot.init()
+    state = _state_with_steps([])
+    task = state.plan.tasks[0]
+    step = Step(id="s1", kind=StepKind.TEST, file="test_x.py", run="test -f impl.py")
+    out = await impl._drive_test_step(state, task, step,
+                                      NodeContext(state=state, cancel=asyncio.Event()))
+    assert out == "red"
+
+
+@pytest.mark.asyncio
+async def test_test_step_skipped_when_test_is_vacuous(tmp_path):
+    # gate `true` always passes → the test is vacuous (green before impl). After the cap of
+    # re-authoring attempts the driver gives up on this test and skips it.
+    from tests.domain.harness.nodes.test_implementer import _WriteThenStopLLM
+    impl = _impl(tmp_path, llm=_WriteThenStopLLM())
+    await impl._snapshot.init()
+    state = _state_with_steps([])
+    task = state.plan.tasks[0]
+    step = Step(id="s1", kind=StepKind.TEST, file="test_x.py", run="true")
+    out = await impl._drive_test_step(state, task, step,
+                                      NodeContext(state=state, cancel=asyncio.Event()))
+    assert out == "skipped"
