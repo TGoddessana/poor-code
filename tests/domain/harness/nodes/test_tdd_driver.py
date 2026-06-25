@@ -140,6 +140,7 @@ async def test_impl_step_green_when_gate_passes(tmp_path):
     await impl._snapshot.init()
     state = _state_with_steps([])
     task = state.plan.tasks[0]
+    # _WriteThenStopLLM always writes out.txt on its first call; step.file matches intentionally so the gate goes GREEN.
     step = Step(id="s1", kind=StepKind.IMPL, file="out.txt", run="test -f out.txt")
     out = await impl._drive_impl_step(state, task, step,
                                       NodeContext(state=state, cancel=asyncio.Event()))
@@ -172,3 +173,18 @@ async def test_impl_step_best_effort_at_outer_cap(tmp_path):
     out = await impl._drive_impl_step(state, task, step,
                                       NodeContext(state=state, cancel=asyncio.Event()))
     assert out == "best_effort"
+
+
+@pytest.mark.asyncio
+async def test_impl_step_escalates_when_no_attempt(tmp_path):
+    # No prior attempt → _active returns attempt=None; the guard must not crash and the
+    # under-cap branch returns "escalate".
+    from tests.domain.harness.nodes.test_implementer import _WriteThenStopLLM
+    impl = _impl(tmp_path, llm=_WriteThenStopLLM())
+    await impl._snapshot.init()
+    state = _state_with_steps([])          # task with no attempts
+    task = state.plan.tasks[0]
+    step = Step(id="s1", kind=StepKind.IMPL, file="impl.py", run="false")
+    out = await impl._drive_impl_step(state, task, step,
+                                      NodeContext(state=state, cancel=asyncio.Event()))
+    assert out == "escalate"
