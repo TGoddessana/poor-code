@@ -24,6 +24,8 @@ from poor_code.domain.tool.base import ToolContext, allow_all
 
 MAX_ITERATIONS = 50
 GATE_TIMEOUT = 120          # seconds for a deterministic RED/GREEN gate command
+STEP_MAX_ITERATIONS = 15    # bounded sub-loop budget while authoring ONE step
+STEP_REPAIR_CAP = 3         # re-author attempts per step before skip/escalate
 # The most recent tool round is the basis for the model's NEXT decision, so it gets a
 # bigger budget; older rounds are demoted to the standard clamp to keep re-sends bounded.
 _LATEST_HEAD = 4000
@@ -62,6 +64,14 @@ _SYSTEM = (
     "validation probe checks the LIVE instance, so launch before the probe runs. If a "
     "launch fails (e.g. the port is already bound), READ the error and adapt — free the "
     "port, or use another port if the task allows — do not retry the identical launch."
+)
+
+_STEP_SYSTEM = (
+    "You are the Implementer, working ONE step of a test-driven plan. Write ONLY the "
+    "code for THIS step using write/edit; read/grep to look first. Stay strictly inside "
+    "EDITABLE PATHS. The planner's DRAFT for this step is a guide — adapt it to the REAL "
+    "current file contents; do not retype blindly. When the step's code is written, stop "
+    "calling tools."
 )
 
 
@@ -289,3 +299,29 @@ class Implementer(AgentNode):
         res = await BashTool().execute(
             BashParams(command=command, timeout=GATE_TIMEOUT), tctx)
         return int(res.metadata.get("exit_code", 1))
+
+    def _step_seed(self, state, task, step, feedback: str) -> list[dict]:
+        scope = ", ".join(task.edit_scope.editable) or "(none)"
+        if step.kind.value == "test":
+            role = ("Write the TEST for this step. It must assert the behavior that does "
+                    "NOT exist yet, so it FAILS now. DO NOT write the implementation.")
+        else:
+            role = ("Write the IMPLEMENTATION for this step to MAKE THE TEST PASS.")
+        draft = f"\nPLANNER DRAFT (adapt to real files):\n{step.body}" if step.body else ""
+        fb = f"\nPREVIOUS GATE RESULT (fix this):\n{feedback}" if feedback else ""
+        user = (f"OVERALL TASK: {task.title} — {task.purpose}\n"
+                f"STEP [{step.id}] kind={step.kind.value} file={step.file}\n"
+                f"{role}\nEDITABLE PATHS: {scope}{draft}{fb}")
+        return [{"role": "system", "content": _STEP_SYSTEM},
+                {"role": "user", "content": user}]
+
+    async def _author_step(self, state, task, step, ctx: NodeContext,
+                           feedback: str = "") -> None:
+        seed = self._step_seed(state, task, step, feedback)
+        if ctx.sink is not None and hasattr(ctx.sink, "node_context"):
+            phase = state.cursor.phase.value if state.cursor else ""
+            ctx.sink.node_context(self.name, phase, seed)
+        await self._tool_loop(
+            ctx, seed_messages=seed, tools=self._tools, cwd=self._cwd,
+            max_iterations=STEP_MAX_ITERATIONS, leak_text=False,
+            hooks=_ImplementerHooks(self._snapshot))
