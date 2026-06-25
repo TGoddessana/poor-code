@@ -4,7 +4,8 @@ import pytest
 from poor_code.domain.harness.node import NodeContext
 from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.session.models import (
-    Attempt, ChangeRecord, Step, StepKind, Task, EditScope, SessionState, Plan, Cursor, Phase, TaskStatus)
+    Attempt, ChangeRecord, Step, StepKind, Task, EditScope, SessionState, Plan, Cursor, Phase, TaskStatus,
+    Verdict, VerdictKind, Layer)
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.domain.tool.bash import BashTool
 from poor_code.domain.tool.write import WriteTool
@@ -190,9 +191,6 @@ async def test_impl_step_escalates_when_no_attempt(tmp_path):
     assert out == "escalate"
 
 
-from poor_code.domain.session.models import Verdict, VerdictKind, Layer
-
-
 class _WriteNamedThenStopLLM:
     """Round 1: write `path` with `content`. Round 2: stop. Lets a TEST step and an IMPL
     step in the same run create DIFFERENT files so a `test -f impl.py` gate flips."""
@@ -252,6 +250,7 @@ async def test_run_emits_repair_plan_when_impl_cannot_go_green(tmp_path):
     res = await impl.run(NodeContext(state=state, cancel=asyncio.Event()))
     assert res.verdict is not None
     assert res.verdict.kind is VerdictKind.REPAIR and res.verdict.layer is Layer.PLAN
+    assert res.output is not None
 
 
 @pytest.mark.asyncio
