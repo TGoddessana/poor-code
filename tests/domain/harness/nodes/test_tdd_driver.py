@@ -4,7 +4,7 @@ import pytest
 from poor_code.domain.harness.node import NodeContext
 from poor_code.domain.harness.nodes.implementer import Implementer
 from poor_code.domain.session.models import (
-    Step, StepKind, Task, EditScope, SessionState, Plan, Cursor, Phase, TaskStatus)
+    Attempt, ChangeRecord, Step, StepKind, Task, EditScope, SessionState, Plan, Cursor, Phase, TaskStatus)
 from poor_code.domain.tool.registry import ToolRegistry
 from poor_code.domain.tool.bash import BashTool
 from poor_code.domain.tool.write import WriteTool
@@ -24,6 +24,17 @@ def _state_with_steps(steps):
     task = Task(id="t1", title="add f", purpose="p",
                 edit_scope=EditScope(editable=("impl.py", "test_x.py")),
                 how_to_validate="true", status=TaskStatus.ACTIVE, steps=tuple(steps))
+    return SessionState(
+        plan=Plan(tasks=(task,)),
+        cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="implementer", task_id="t1"))
+
+
+def _state_with_attempt(adversarial_rounds):
+    att = Attempt(id="t1-a1", patch=ChangeRecord(files=(), diff=""),
+                  adversarial_rounds=adversarial_rounds, run_result=None)
+    task = Task(id="t1", title="x", purpose="p",
+                edit_scope=EditScope(editable=("impl.py",)),
+                how_to_validate="true", status=TaskStatus.ACTIVE, attempts=(att,))
     return SessionState(
         plan=Plan(tasks=(task,)),
         cursor=Cursor(phase=Phase.IMPLEMENTING, current_node="implementer", task_id="t1"))
@@ -119,3 +130,45 @@ async def test_test_step_skipped_when_test_is_vacuous(tmp_path):
     # drives the sub-loop for stream calls (round 1 writes, round 2+ stops). The loop runs
     # the full cap, so calls should be >= STEP_REPAIR_CAP (at minimum 1 call per iteration).
     assert llm.calls >= STEP_REPAIR_CAP
+
+
+@pytest.mark.asyncio
+async def test_impl_step_green_when_gate_passes(tmp_path):
+    # _WriteThenStopLLM writes out.txt; gate `test -f out.txt` passes → GREEN.
+    from tests.domain.harness.nodes.test_implementer import _WriteThenStopLLM
+    impl = _impl(tmp_path, llm=_WriteThenStopLLM())
+    await impl._snapshot.init()
+    state = _state_with_steps([])
+    task = state.plan.tasks[0]
+    step = Step(id="s1", kind=StepKind.IMPL, file="out.txt", run="test -f out.txt")
+    out = await impl._drive_impl_step(state, task, step,
+                                      NodeContext(state=state, cancel=asyncio.Event()))
+    assert out == "green"
+
+
+@pytest.mark.asyncio
+async def test_impl_step_escalates_when_under_cap(tmp_path):
+    # gate `false` never passes; attempt is fresh (0 rounds < MAX_ATTEMPTS) → escalate.
+    from tests.domain.harness.nodes.test_implementer import _WriteThenStopLLM
+    impl = _impl(tmp_path, llm=_WriteThenStopLLM())
+    await impl._snapshot.init()
+    state = _state_with_attempt(adversarial_rounds=0)
+    task = state.plan.tasks[0]
+    step = Step(id="s1", kind=StepKind.IMPL, file="impl.py", run="false")
+    out = await impl._drive_impl_step(state, task, step,
+                                      NodeContext(state=state, cancel=asyncio.Event()))
+    assert out == "escalate"
+
+
+@pytest.mark.asyncio
+async def test_impl_step_best_effort_at_outer_cap(tmp_path):
+    from poor_code.domain.harness.nodes.execution import MAX_ATTEMPTS
+    from tests.domain.harness.nodes.test_implementer import _WriteThenStopLLM
+    impl = _impl(tmp_path, llm=_WriteThenStopLLM())
+    await impl._snapshot.init()
+    state = _state_with_attempt(adversarial_rounds=MAX_ATTEMPTS)
+    task = state.plan.tasks[0]
+    step = Step(id="s1", kind=StepKind.IMPL, file="impl.py", run="false")
+    out = await impl._drive_impl_step(state, task, step,
+                                      NodeContext(state=state, cancel=asyncio.Event()))
+    assert out == "best_effort"

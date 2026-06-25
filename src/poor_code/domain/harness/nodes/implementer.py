@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from poor_code.domain.harness.api_probe import focus_terms, probe_apis
+from poor_code.domain.harness.nodes.execution import MAX_ATTEMPTS, _active
 from poor_code.domain.harness.ledger import render_build_ledger, task_section, render_acceptance
 from poor_code.domain.harness.node import (
     AgentNode, NodeContext, NodeResult, SideEffectCompletion, _DefaultHooks, _LoopRound, _LLMClientLike)
@@ -340,3 +341,21 @@ class Implementer(AgentNode):
                         "nothing new. Rewrite it to assert the behavior that does not exist "
                         "yet, so it FAILS now.")
         return "skipped"
+
+    async def _drive_impl_step(self, state, task, step, ctx: NodeContext) -> str:
+        """Author the implementation, then require the gate to PASS (GREEN). On repeated
+        failure: escalate to repair_plan (the plan/scope is suspect) UNLESS the outer
+        repair cap is reached, in which case proceed best-effort so we never loop the
+        planner forever or false-abandon correct-but-unverified work (spec §6)."""
+        cmd = self._gate_command(step, task)
+        feedback = ""
+        for _ in range(STEP_REPAIR_CAP):
+            await self._author_step(state, task, step, ctx, feedback)
+            if await self._run_gate(cmd, ctx) == 0:
+                return "green"
+            feedback = (f"The implementation did NOT make the gate pass.\n"
+                        f"Gate command: {cmd}\nFix the implementation so it passes.")
+        _, attempt = _active(state)
+        if attempt is not None and attempt.adversarial_rounds >= MAX_ATTEMPTS:
+            return "best_effort"
+        return "escalate"
